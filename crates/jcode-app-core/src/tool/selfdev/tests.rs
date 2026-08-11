@@ -1,6 +1,7 @@
 use super::*;
 use crate::bus::BackgroundTaskStatus;
 use std::ffi::OsStr;
+use std::process::Command;
 
 pub(super) fn lock_env() -> crate::storage::TestEnvLease {
     crate::storage::lock_test_env()
@@ -51,12 +52,37 @@ pub(super) fn create_test_context(
 
 pub(super) fn create_repo_fixture() -> tempfile::TempDir {
     let temp = tempfile::TempDir::new().expect("temp repo");
-    std::fs::create_dir_all(temp.path().join(".git")).expect("git dir");
+    std::fs::write(temp.path().join(".gitignore"), "target/\n").expect("gitignore");
     std::fs::write(
         temp.path().join("Cargo.toml"),
         "[package]\nname = \"jcode\"\nversion = \"0.1.0\"\n",
     )
     .expect("cargo toml");
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git init");
+    Command::new("git")
+        .args(["config", "user.email", "jcode@example.com"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git config user.email");
+    Command::new("git")
+        .args(["config", "user.name", "Jcode Tests"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git config user.name");
+    Command::new("git")
+        .args(["add", ".gitignore", "Cargo.toml"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git add");
+    Command::new("git")
+        .args(["commit", "-q", "-m", "fixture"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git commit");
     temp
 }
 
@@ -77,8 +103,15 @@ pub(super) fn test_source_state(repo_dir: &std::path::Path) -> build::SourceStat
 #[test]
 fn build_lock_is_removed_on_drop_and_can_be_reacquired() {
     let _env_lock = lock_env();
-    let temp = tempfile::tempdir().expect("temp jcode home");
+    let temp = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    assert_eq!(
+        crate::storage::RuntimePaths::current()
+            .jcode_dir()
+            .as_deref(),
+        Some(temp.path()),
+        "build lock tests must resolve home through RuntimePaths"
+    );
     let scope = format!("lock-drop-{}", std::process::id());
     let path = SelfDevTool::build_lock_path(&scope).expect("lock path");
 
@@ -150,7 +183,7 @@ fn test_reload_context_path() {
 #[test]
 fn test_reload_context_save_and_load_for_session_uses_session_scoped_file() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
     let ctx = ReloadContext {
@@ -359,7 +392,7 @@ fn non_selfdev_schema_only_exposes_onramp_actions() {
 #[tokio::test]
 async fn test_action_queues_command_in_test_mode() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -423,7 +456,7 @@ async fn do_reload_returns_after_ack_in_direct_mode() {
 }
 
 #[test]
-fn reload_repo_resolver_uses_working_dir_when_primary_detection_fails() {
+fn reload_environment_uses_working_dir_when_primary_detection_fails() {
     let repo = create_repo_fixture();
     let nested = repo.path().join("crates").join("jcode-build-support");
     std::fs::create_dir_all(&nested).expect("nested dir");
@@ -432,30 +465,57 @@ fn reload_repo_resolver_uses_working_dir_when_primary_detection_fails() {
     assert_eq!(resolved.as_deref(), Some(repo.path()));
 }
 
-#[test]
-fn reload_repo_fallback_synthesizes_dir_only_for_test_sessions() {
-    // Test sessions fake all repo-derived state downstream, so a missing repo
-    // (e.g. remote builders syncing sources without `.git`) must not fail.
-    let fallback = reload::reload_repo_dir_or_test_fallback(None, true)
-        .expect("test session must not require a discoverable repo");
-    assert!(fallback.starts_with(std::env::temp_dir()));
+#[tokio::test]
+async fn reload_environment_rejects_missing_repo_for_real_sessions() {
+    let _lock = lock_env();
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
-    // Real sessions still hard-require repo discovery.
-    let err = reload::reload_repo_dir_or_test_fallback(None, false)
-        .expect_err("non-test session must require a repo");
-    assert!(err.to_string().contains("Could not find jcode repository"));
+    let mut session = session::Session::create(None, Some("Missing repo".to_string()));
+    session.set_canary("self-dev");
+    session.save().expect("save session");
 
-    // A resolved repo always wins, regardless of session type.
+    let tool = SelfDevTool::new();
+    let missing_repo = tempfile::TempDir::new().expect("missing repo dir");
+    let err = tool
+        .execute(
+            json!({"action": "reload"}),
+            create_test_context(&session.id, Some(missing_repo.path().to_path_buf())),
+        )
+        .await
+        .expect_err("reload should fail without a repo");
+    assert!(
+        err.to_string()
+            .contains("Could not find jcode repository directory")
+    );
+}
+
+#[tokio::test]
+async fn reload_environment_rejects_missing_binary_for_real_sessions() {
+    let _lock = lock_env();
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let repo = create_repo_fixture();
-    let resolved = reload::reload_repo_dir_or_test_fallback(Some(repo.path().to_path_buf()), true)
-        .expect("resolved repo should pass through");
-    assert_eq!(resolved, repo.path());
+
+    let mut session = session::Session::create(None, Some("Missing binary".to_string()));
+    session.set_canary("self-dev");
+    session.save().expect("save session");
+
+    let tool = SelfDevTool::new();
+    let err = tool
+        .execute(
+            json!({"action": "reload"}),
+            create_test_context(&session.id, Some(repo.path().to_path_buf())),
+        )
+        .await
+        .expect_err("reload should fail without a binary");
+    assert!(err.to_string().contains("No binary found at"));
 }
 
 #[tokio::test]
 async fn enter_creates_selfdev_session_in_test_mode() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -531,7 +591,7 @@ async fn enter_creates_selfdev_session_in_test_mode() {
 #[tokio::test]
 async fn enter_falls_back_to_fresh_session_when_parent_missing() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -561,10 +621,19 @@ async fn enter_falls_back_to_fresh_session_when_parent_missing() {
 #[tokio::test]
 async fn reload_in_non_selfdev_session_is_upgrade_in_place() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
-    // Test mode short-circuits the actual server reload signal.
-    let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
+    assert_eq!(
+        crate::storage::RuntimePaths::current()
+            .jcode_dir()
+            .as_deref(),
+        Some(temp_home.path()),
+        "reload tests must resolve home through RuntimePaths"
+    );
+    assert!(
+        !crate::server::server_has_newer_binary(),
+        "the empty test home should not advertise a newer server binary"
+    );
 
     let mut session = session::Session::create(None, Some("Normal Session".to_string()));
     session.save().expect("save session");
@@ -577,19 +646,25 @@ async fn reload_in_non_selfdev_session_is_upgrade_in_place() {
         .expect("reload should route to upgrade-in-place");
 
     // It must NOT be the old "only available inside a self-dev session" error;
-    // a regular session can reload into a newer installed build.
+    // a regular session can still take the strict newest-binary path.
     assert!(
         !output
             .output
             .contains("only available inside a self-dev session")
     );
-    assert!(output.output.contains("Test mode"));
+    assert!(
+        output
+            .output
+            .contains("Already running the newest installed jcode build; no reload needed."),
+        "unexpected output: {}",
+        output.output
+    );
 }
 
 #[tokio::test]
 async fn socket_actions_require_selfdev_session() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
     let mut session = session::Session::create(None, Some("Normal Session".to_string()));
@@ -615,7 +690,7 @@ async fn socket_actions_require_selfdev_session() {
 #[tokio::test]
 async fn find_config_reports_key_paths() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
     let mut session = session::Session::create(None, Some("Normal Session".to_string()));
@@ -645,7 +720,7 @@ async fn find_config_reports_key_paths() {
 #[tokio::test]
 async fn setup_reports_dependency_checks() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     // Test mode avoids attempting a real git clone when no repo is detected.
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
@@ -676,7 +751,7 @@ async fn setup_reports_dependency_checks() {
 #[tokio::test]
 async fn build_requires_reason() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -694,7 +769,7 @@ async fn build_requires_reason() {
 #[tokio::test]
 async fn build_queues_background_tasks_and_reports_queue_status() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -769,10 +844,34 @@ async fn build_queues_background_tasks_and_reports_queue_status() {
 #[tokio::test]
 async fn build_reload_waits_for_build_then_reloads() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-reload-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
+    assert_eq!(
+        crate::storage::RuntimePaths::current()
+            .jcode_dir()
+            .as_deref(),
+        Some(temp_home.path()),
+        "reload tests must resolve home through RuntimePaths"
+    );
     let repo = create_repo_fixture();
+    let source = test_source_state(repo.path());
+    let target_binary = repo.path().join("target").join("selfdev").join("jcode");
+    let reload_environment = reload::ReloadEnvironment {
+        repo_dir: repo.path().to_path_buf(),
+        target_binary: target_binary.clone(),
+        version_before: jcode_build_meta::VERSION.to_string(),
+        version_after: source.version_label.clone(),
+        source: source.clone(),
+        runtime_identity: source.runtime_identity_projection("selfdev", target_binary),
+        wait_mode: reload::ReloadWaitMode::AcknowledgeOnly {
+            message: format!(
+                "Reload acknowledged for build {}. Server is restarting now.",
+                source.version_label
+            ),
+        },
+    };
+    let _reload_env_guard = reload::override_reload_environment_for_tests(reload_environment);
 
     let mut session = session::Session::create(None, Some("Build+reload session".to_string()));
     session.is_canary = true;
@@ -828,7 +927,7 @@ async fn build_reload_waits_for_build_then_reloads() {
 #[tokio::test]
 async fn build_dedupes_identical_reason_and_version_with_attached_watcher() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -888,7 +987,7 @@ async fn build_dedupes_identical_reason_and_version_with_attached_watcher() {
 #[tokio::test]
 async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
@@ -956,7 +1055,7 @@ async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
 #[test]
 fn status_output_prunes_stale_pending_requests() {
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
     let mut session = session::Session::create(None, Some("Stale Build".to_string()));
@@ -1024,7 +1123,7 @@ fn status_output_reports_the_published_build_from_its_source_sidecar() {
     // sidecar written next to that binary at publish time (not from manifest
     // state that can go stale).
     let _lock = lock_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
     let published = build::current_fixed_binary_path().expect("fixed path");

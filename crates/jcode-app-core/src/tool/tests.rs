@@ -584,7 +584,7 @@ fn resolve_tool_name_maps_communicate_to_swarm() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "manual registry summary report | runbook: manual-analysis"]
 async fn print_tool_definition_token_report() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;

@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use jcode::message::{ContentBlock, Role, ToolCall};
-use jcode::perf::{SyntheticSystemProfile, TuiPerfPolicy, tui_policy_for};
-use jcode::prompt::ContextInfo;
-use jcode::session::{Session, StoredDisplayRole};
-use jcode::side_panel::{
+use jcode_tui::message::{ContentBlock, Role, ToolCall};
+use jcode_tui::perf::{SyntheticSystemProfile, TuiPerfPolicy, tui_policy_for};
+use jcode_tui::prompt::ContextInfo;
+use jcode_tui::session::{Session, StoredDisplayRole};
+use jcode_tui::side_panel::{
     SidePanelPage, SidePanelPageFormat, SidePanelPageSource, SidePanelSnapshot,
 };
-use jcode::tui::{DisplayMessage, ProcessingStatus, TuiState, info_widget::InfoWidgetData};
+use jcode_tui::tui::{DisplayMessage, ProcessingStatus, TuiState, info_widget::InfoWidgetData};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use serde::Serialize;
@@ -343,7 +343,7 @@ struct BenchState {
     scroll_offset: usize,
     is_processing: bool,
     status: ProcessingStatus,
-    diff_mode: jcode::config::DiffDisplayMode,
+    diff_mode: jcode_tui::config::DiffDisplayMode,
     queue_mode: bool,
     context_info: ContextInfo,
     info_widget: InfoWidgetData,
@@ -358,7 +358,7 @@ struct BenchState {
     linked_refresh_path: Option<PathBuf>,
     linked_refresh_generation: usize,
     session_source: Option<String>,
-    copy_selection_range: Option<jcode::tui::CopySelectionRange>,
+    copy_selection_range: Option<jcode_tui::tui::CopySelectionRange>,
     copy_selection_mode: bool,
 }
 
@@ -439,7 +439,7 @@ impl BenchState {
             scroll_offset: 0,
             is_processing,
             status,
-            diff_mode: jcode::config::DiffDisplayMode::Off,
+            diff_mode: jcode_tui::config::DiffDisplayMode::Off,
             queue_mode: true,
             context_info: ContextInfo::default(),
             info_widget: InfoWidgetData::default(),
@@ -474,10 +474,10 @@ impl BenchState {
         focused_page_id: Option<&str>,
         max_messages: usize,
     ) -> Result<Self> {
-        let session = jcode::replay::load_session(id_or_path)
+        let session = jcode_tui::replay::load_session(id_or_path)
             .with_context(|| format!("failed to load session '{}'", id_or_path))?;
         let mut side_panel =
-            jcode::side_panel::snapshot_for_session(&session.id).unwrap_or_default();
+            jcode_tui::side_panel::snapshot_for_session(&session.id).unwrap_or_default();
         if side_panel.pages.is_empty() {
             side_panel = reconstruct_side_panel_snapshot_from_session(&session);
         }
@@ -517,9 +517,9 @@ impl BenchState {
                 ProcessingStatus::Idle
             },
             diff_mode: if matches!(mode, BenchMode::FileDiff) {
-                jcode::config::DiffDisplayMode::File
+                jcode_tui::config::DiffDisplayMode::File
             } else {
-                jcode::config::DiffDisplayMode::Off
+                jcode_tui::config::DiffDisplayMode::Off
             },
             queue_mode: true,
             context_info: ContextInfo::default(),
@@ -565,17 +565,17 @@ impl BenchState {
                 path.display()
             )
         })?;
-        let _ = jcode::side_panel::refresh_linked_page_content(&mut self.side_panel, None);
+        let _ = jcode_tui::side_panel::refresh_linked_page_content(&mut self.side_panel, None);
         Ok(())
     }
 
     fn prewarm_side_panel(&self, width: u16, height: u16) -> bool {
-        jcode::tui::prewarm_focused_side_panel(
+        jcode_tui::tui::prewarm_focused_side_panel(
             &self.side_panel,
             width,
             height,
             40,
-            jcode::tui::mermaid::protocol_type().is_some(),
+            jcode_tui::tui::mermaid::protocol_type().is_some(),
             false,
         )
     }
@@ -625,7 +625,7 @@ fn session_to_display_messages(session: &Session, max_messages: usize) -> Vec<Di
     out
 }
 
-fn stored_message_visible_text(message: &jcode::session::StoredMessage) -> String {
+fn stored_message_visible_text(message: &jcode_tui::session::StoredMessage) -> String {
     let mut parts = Vec::new();
     for block in &message.content {
         match block {
@@ -828,7 +828,7 @@ impl TuiState for BenchState {
         })
     }
 
-    fn side_pane_images(&self) -> Vec<jcode::session::RenderedImage> {
+    fn side_pane_images(&self) -> Vec<jcode_tui::session::RenderedImage> {
         Vec::new()
     }
 
@@ -936,7 +936,7 @@ impl TuiState for BenchState {
         None
     }
 
-    fn batch_progress(&self) -> Option<jcode::bus::BatchProgress> {
+    fn batch_progress(&self) -> Option<jcode_tui::bus::BatchProgress> {
         None
     }
 
@@ -960,7 +960,7 @@ impl TuiState for BenchState {
         false
     }
 
-    fn diff_mode(&self) -> jcode::config::DiffDisplayMode {
+    fn diff_mode(&self) -> jcode_tui::config::DiffDisplayMode {
         self.diff_mode
     }
 
@@ -1026,7 +1026,7 @@ impl TuiState for BenchState {
     }
 
     fn context_limit(&self) -> Option<usize> {
-        Some(jcode::provider::DEFAULT_CONTEXT_LIMIT)
+        Some(jcode_tui::provider::DEFAULT_CONTEXT_LIMIT)
     }
 
     fn client_update_available(&self) -> bool {
@@ -1047,19 +1047,19 @@ impl TuiState for BenchState {
 
     fn render_streaming_markdown(&self, width: usize) -> Vec<ratatui::text::Line<'static>> {
         // For benchmarks, just use the standard markdown renderer
-        jcode::tui::markdown::render_markdown_with_width(&self.streaming_text, Some(width))
+        jcode_tui::tui::markdown::render_markdown_with_width(&self.streaming_text, Some(width))
     }
 
     fn centered_mode(&self) -> bool {
         false
     }
 
-    fn auth_status(&self) -> jcode::auth::AuthStatus {
-        jcode::auth::AuthStatus::default()
+    fn auth_status(&self) -> jcode_tui::auth::AuthStatus {
+        jcode_tui::auth::AuthStatus::default()
     }
 
-    fn diagram_mode(&self) -> jcode::config::DiagramDisplayMode {
-        jcode::config::DiagramDisplayMode::Pinned
+    fn diagram_mode(&self) -> jcode_tui::config::DiagramDisplayMode {
+        jcode_tui::config::DiagramDisplayMode::Pinned
     }
 
     fn diagram_focus(&self) -> bool {
@@ -1090,8 +1090,8 @@ impl TuiState for BenchState {
         true
     }
 
-    fn diagram_pane_position(&self) -> jcode::config::DiagramPanePosition {
-        jcode::config::DiagramPanePosition::default()
+    fn diagram_pane_position(&self) -> jcode_tui::config::DiagramPanePosition {
+        jcode_tui::config::DiagramPanePosition::default()
     }
 
     fn diagram_zoom(&self) -> u8 {
@@ -1109,7 +1109,7 @@ impl TuiState for BenchState {
     fn diff_pane_focus(&self) -> bool {
         self.diff_pane_focus
     }
-    fn side_panel(&self) -> &jcode::side_panel::SidePanelSnapshot {
+    fn side_panel(&self) -> &jcode_tui::side_panel::SidePanelSnapshot {
         &self.side_panel
     }
     fn pin_images(&self) -> bool {
@@ -1117,17 +1117,20 @@ impl TuiState for BenchState {
     }
 
     fn chat_native_scrollbar(&self) -> bool {
-        jcode::config::config().display.native_scrollbars.chat
+        jcode_tui::config::config().display.native_scrollbars.chat
     }
 
     fn side_panel_native_scrollbar(&self) -> bool {
-        jcode::config::config().display.native_scrollbars.side_panel
+        jcode_tui::config::config()
+            .display
+            .native_scrollbars
+            .side_panel
     }
 
     fn diff_line_wrap(&self) -> bool {
         true
     }
-    fn inline_interactive_state(&self) -> Option<&jcode::tui::InlineInteractiveState> {
+    fn inline_interactive_state(&self) -> Option<&jcode_tui::tui::InlineInteractiveState> {
         None
     }
 
@@ -1141,25 +1144,25 @@ impl TuiState for BenchState {
 
     fn session_picker_overlay(
         &self,
-    ) -> Option<&std::cell::RefCell<jcode::tui::session_picker::SessionPicker>> {
+    ) -> Option<&std::cell::RefCell<jcode_tui::tui::session_picker::SessionPicker>> {
         None
     }
 
     fn login_picker_overlay(
         &self,
-    ) -> Option<&std::cell::RefCell<jcode::tui::login_picker::LoginPicker>> {
+    ) -> Option<&std::cell::RefCell<jcode_tui::tui::login_picker::LoginPicker>> {
         None
     }
 
     fn account_picker_overlay(
         &self,
-    ) -> Option<&std::cell::RefCell<jcode::tui::account_picker::AccountPicker>> {
+    ) -> Option<&std::cell::RefCell<jcode_tui::tui::account_picker::AccountPicker>> {
         None
     }
 
     fn usage_overlay(
         &self,
-    ) -> Option<&std::cell::RefCell<jcode::tui::usage_overlay::UsageOverlay>> {
+    ) -> Option<&std::cell::RefCell<jcode_tui::tui::usage_overlay::UsageOverlay>> {
         None
     }
 
@@ -1171,19 +1174,19 @@ impl TuiState for BenchState {
         self.started_at.elapsed().as_millis() as u64
     }
 
-    fn copy_badge_ui(&self) -> jcode::tui::CopyBadgeUiState {
-        jcode::tui::CopyBadgeUiState::default()
+    fn copy_badge_ui(&self) -> jcode_tui::tui::CopyBadgeUiState {
+        jcode_tui::tui::CopyBadgeUiState::default()
     }
 
     fn copy_selection_mode(&self) -> bool {
         self.copy_selection_mode
     }
 
-    fn copy_selection_range(&self) -> Option<jcode::tui::CopySelectionRange> {
+    fn copy_selection_range(&self) -> Option<jcode_tui::tui::CopySelectionRange> {
         self.copy_selection_range
     }
 
-    fn copy_selection_status(&self) -> Option<jcode::tui::CopySelectionStatus> {
+    fn copy_selection_status(&self) -> Option<jcode_tui::tui::CopySelectionStatus> {
         None
     }
 
@@ -1191,7 +1194,7 @@ impl TuiState for BenchState {
         Vec::new()
     }
 
-    fn cache_ttl_status(&self) -> Option<jcode::tui::CacheTtlInfo> {
+    fn cache_ttl_status(&self) -> Option<jcode_tui::tui::CacheTtlInfo> {
         None
     }
 }
@@ -1209,8 +1212,8 @@ fn make_text(len: usize) -> String {
 
 fn main() -> Result<()> {
     if std::env::var("JCODE_TUI_PROFILE").is_ok() {
-        jcode::logging::init();
-        if let Some(path) = jcode::logging::log_path() {
+        jcode_tui::logging::init();
+        if let Some(path) = jcode_tui::logging::log_path() {
             println!("profile_log: {}", path.display());
         }
     }
@@ -1235,7 +1238,7 @@ fn main() -> Result<()> {
     let stream_text = make_text(args.assistant_len.max(args.stream_chunk));
 
     if matches!(args.mode, BenchMode::MermaidFlicker) {
-        let result = jcode::tui::mermaid::debug_flicker_benchmark(args.frames.max(4));
+        let result = jcode_tui::tui::mermaid::debug_flicker_benchmark(args.frames.max(4));
         println!("mode: {:?}", args.mode);
         println!("steps: {}", result.steps);
         println!("protocol_supported: {}", result.protocol_supported);
@@ -1275,7 +1278,7 @@ fn main() -> Result<()> {
     }
 
     if matches!(args.mode, BenchMode::ImageScroll) {
-        let result = jcode::tui::mermaid::debug_image_scroll_benchmark(
+        let result = jcode_tui::tui::mermaid::debug_image_scroll_benchmark(
             args.images,
             args.frames.max(4),
             args.images_visible,
@@ -1305,21 +1308,21 @@ fn main() -> Result<()> {
     }
 
     if matches!(args.mode, BenchMode::FileDiff) {
-        state.diff_mode = jcode::config::DiffDisplayMode::File;
+        state.diff_mode = jcode_tui::config::DiffDisplayMode::File;
     }
 
     let profile_mermaid_ui = matches!(args.mode, BenchMode::MermaidUi);
     let profile_side_panel = matches!(args.mode, BenchMode::SidePanel | BenchMode::MermaidUi);
     if profile_side_panel {
-        jcode::tui::mermaid::init_picker();
-        jcode::tui::mermaid::clear_active_diagrams();
-        jcode::tui::mermaid::clear_streaming_preview_diagram();
-        jcode::tui::clear_side_panel_render_caches();
-        jcode::tui::reset_side_panel_debug_stats();
-        jcode::tui::markdown::reset_debug_stats();
-        jcode::tui::mermaid::reset_debug_stats();
+        jcode_tui::tui::mermaid::init_picker();
+        jcode_tui::tui::mermaid::clear_active_diagrams();
+        jcode_tui::tui::mermaid::clear_streaming_preview_diagram();
+        jcode_tui::tui::clear_side_panel_render_caches();
+        jcode_tui::tui::reset_side_panel_debug_stats();
+        jcode_tui::tui::markdown::reset_debug_stats();
+        jcode_tui::tui::mermaid::reset_debug_stats();
         if !args.keep_mermaid_cache {
-            let _ = jcode::tui::mermaid::clear_cache();
+            let _ = jcode_tui::tui::mermaid::clear_cache();
         }
         if !args.no_side_panel_prewarm {
             let _ = state.prewarm_side_panel(args.width, args.height);
@@ -1361,24 +1364,24 @@ fn main() -> Result<()> {
             let start_line = state.scroll_offset;
             let visible_lines = args.height.saturating_sub(6).max(1) as usize;
             let end_line = start_line.saturating_add(visible_lines.saturating_sub(1));
-            state.copy_selection_range = Some(jcode::tui::CopySelectionRange {
-                start: jcode::tui::CopySelectionPoint {
-                    pane: jcode::tui::CopySelectionPane::Chat,
+            state.copy_selection_range = Some(jcode_tui::tui::CopySelectionRange {
+                start: jcode_tui::tui::CopySelectionPoint {
+                    pane: jcode_tui::tui::CopySelectionPane::Chat,
                     abs_line: start_line,
                     column: 0,
                 },
-                end: jcode::tui::CopySelectionPoint {
-                    pane: jcode::tui::CopySelectionPane::Chat,
+                end: jcode_tui::tui::CopySelectionPoint {
+                    pane: jcode_tui::tui::CopySelectionPane::Chat,
                     abs_line: end_line,
                     column: usize::MAX / 4,
                 },
             });
         }
-        let markdown_before = profile_side_panel.then(jcode::tui::markdown::debug_stats);
-        let mermaid_before = profile_side_panel.then(jcode::tui::mermaid::debug_stats);
-        let side_panel_before = profile_side_panel.then(jcode::tui::side_panel_debug_stats);
+        let markdown_before = profile_side_panel.then(jcode_tui::tui::markdown::debug_stats);
+        let mermaid_before = profile_side_panel.then(jcode_tui::tui::mermaid::debug_stats);
+        let side_panel_before = profile_side_panel.then(jcode_tui::tui::side_panel_debug_stats);
         let frame_start = Instant::now();
-        terminal.draw(|f| jcode::tui::render_frame(f, &state))?;
+        terminal.draw(|f| jcode_tui::tui::render_frame(f, &state))?;
         let frame_ms = frame_start.elapsed().as_secs_f64() * 1000.0;
         frame_times_ms.push(frame_ms);
         if matches!(args.mode, BenchMode::CopySelection)
@@ -1387,7 +1390,7 @@ fn main() -> Result<()> {
             && let Some(range) = state.copy_selection_range
         {
             let copy_start = Instant::now();
-            if let Some(text) = jcode::tui::debug_copy_selection_text_for_bench(range) {
+            if let Some(text) = jcode_tui::tui::debug_copy_selection_text_for_bench(range) {
                 copy_extract_bytes = copy_extract_bytes.saturating_add(text.len());
             }
             copy_extract_times_ms.push(copy_start.elapsed().as_secs_f64() * 1000.0);
@@ -1395,9 +1398,9 @@ fn main() -> Result<()> {
         if let (Some(markdown_before), Some(mermaid_before), Some(side_panel_before)) =
             (markdown_before, mermaid_before, side_panel_before)
         {
-            let markdown_after = jcode::tui::markdown::debug_stats();
-            let mermaid_after = jcode::tui::mermaid::debug_stats();
-            let side_panel_after = jcode::tui::side_panel_debug_stats();
+            let markdown_after = jcode_tui::tui::markdown::debug_stats();
+            let mermaid_after = jcode_tui::tui::mermaid::debug_stats();
+            let side_panel_after = jcode_tui::tui::side_panel_debug_stats();
             side_panel_profiles.push(SidePanelFrameProfile {
                 frame,
                 ms: frame_ms,
@@ -1472,24 +1475,24 @@ fn main() -> Result<()> {
     let warm_start = args.warmup_frames.min(frame_times_ms.len());
     let warm_summary = summarize_timing(&frame_times_ms[warm_start..]);
     let first_frame_ms = frame_times_ms.first().copied().unwrap_or(0.0);
-    let side_panel_final_stats = profile_side_panel.then(jcode::tui::side_panel_debug_stats);
-    let markdown_final_stats = profile_side_panel.then(jcode::tui::markdown::debug_stats);
-    let mermaid_final_stats = profile_side_panel.then(jcode::tui::mermaid::debug_stats);
+    let side_panel_final_stats = profile_side_panel.then(jcode_tui::tui::side_panel_debug_stats);
+    let markdown_final_stats = profile_side_panel.then(jcode_tui::tui::markdown::debug_stats);
+    let mermaid_final_stats = profile_side_panel.then(jcode_tui::tui::mermaid::debug_stats);
     let mermaid_ui_summary = if profile_mermaid_ui {
         Some(summarize_mermaid_ui(
             &side_panel_profiles,
-            jcode::tui::mermaid::protocol_type().is_some(),
-            jcode::tui::mermaid::protocol_type().map(|p| format!("{:?}", p)),
+            jcode_tui::tui::mermaid::protocol_type().is_some(),
+            jcode_tui::tui::mermaid::protocol_type().map(|p| format!("{:?}", p)),
         ))
     } else {
         None
     };
-    let actual_policy = summarize_policy("detected", jcode::perf::tui_policy());
+    let actual_policy = summarize_policy("detected", jcode_tui::perf::tui_policy());
     let synthetic_policy = args.synthetic_profile.map(|kind| {
-        let synthetic = jcode::perf::synthetic_profile(kind.to_system_profile());
+        let synthetic = jcode_tui::perf::synthetic_profile(kind.to_system_profile());
         summarize_policy(
             kind.to_system_profile().label(),
-            tui_policy_for(&synthetic, &jcode::config::config().display),
+            tui_policy_for(&synthetic, &jcode_tui::config::config().display),
         )
     });
     let cold_frame_count = side_panel_profiles

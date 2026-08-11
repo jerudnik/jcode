@@ -12,7 +12,7 @@
 # `scripts/check_advisory_policy.py` proves the two agree.
 #
 # Enforcement (scripts/check_advisory_policy.py, run by
-# .github/workflows/security.yml and scripts/preflight.sh):
+# .github/workflows/security.yml and scripts/security_preflight.sh):
 #   - every ID ignored in .cargo/audit.toml MUST have a record here
 #     (an undocumented ignore fails the gate);
 #   - every record here MUST still be ignored in .cargo/audit.toml

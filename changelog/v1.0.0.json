@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "date": "2026-08-09",
+  "title": "First official fork release",
+  "highlights": [
+    "Jcode's independent hard-fork release line starts at v1.0.0",
+    "Nix and the public jerudnik-jcode Cachix cache are the only binary distribution authority",
+    "GitHub Releases are metadata-only and carry release notes and source/tag metadata without executable assets"
+  ],
+  "improvements": [
+    "Release evidence now ties Cargo.toml, Cargo.lock, CHANGELOG.md, structured changelog notes, SBOM, provenance, install, and rollback checks to the same v1.0.0 release name",
+    "The release contract rejects old v0.* tags as official fork-release proof and requires a main-ancestor rollback ref before publication"
+  ],
+  "fixes": [
+    "Resolved the release gate mismatch where release_check.py expected v1.0.0 but the package version still reported 0.46.0"
+  ]
+}

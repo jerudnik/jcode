@@ -163,7 +163,7 @@ fn occasional_long_lines_do_not_move_widgets() {
 /// Demonstration / quantification harness. Run with:
 ///   cargo test -p jcode-tui info_widget_stability::tests::demo_quantify -- --ignored --nocapture
 #[test]
-#[ignore]
+#[ignore = "manual benchmark harness | runbook: manual-benchmark"]
 fn demo_quantify() {
     fn profile(name: &str, content: &[u16]) {
         let report = measure_scroll(content, 100, 24, &sample_data());
@@ -273,7 +273,7 @@ fn content_anchored_widgets_never_overlap_while_scrolling() {
 /// A/B: stick-to-the-transcript anchoring vs holding a fixed screen row. Run with:
 ///   cargo test -p jcode-tui info_widget_stability::tests::demo_content_anchor -- --ignored --nocapture
 #[test]
-#[ignore]
+#[ignore = "manual benchmark harness | runbook: manual-benchmark"]
 fn demo_content_anchor() {
     fn row(name: &str, content: &[u16]) {
         let s = measure_scroll_mode(content, 100, 24, &rich_data(), SimMode::Anchored);
@@ -322,7 +322,7 @@ fn demo_content_anchor() {
 /// Run with:
 ///   cargo test -p jcode-tui info_widget_stability::tests::demo_info_tradeoff -- --ignored --nocapture
 #[test]
-#[ignore]
+#[ignore = "manual benchmark harness | runbook: manual-benchmark"]
 fn demo_info_tradeoff() {
     fn row(name: &str, content: &[u16]) {
         let g = measure_scroll_mode(content, 100, 24, &rich_data(), SimMode::Greedy);
@@ -377,7 +377,7 @@ fn demo_info_tradeoff() {
 /// sacrificing too much coverage. Run with:
 ///   cargo test -p jcode-tui info_widget_stability::tests::demo_lookahead_sweep -- --ignored --nocapture
 #[test]
-#[ignore]
+#[ignore = "manual benchmark harness | runbook: manual-benchmark"]
 fn demo_lookahead_sweep() {
     fn line(label: &str, r: &super::StabilityReport) {
         println!(

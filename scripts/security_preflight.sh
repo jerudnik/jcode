@@ -10,7 +10,7 @@ Usage:
   scripts/security_preflight.sh [--strict]
 
 Checks:
-  1) Secret-pattern scan in tracked source/docs/scripts
+  1) Secret scan in tracked source/docs/scripts via gitleaks
   2) World-writable file check under scripts/
   3) Rust dependency advisory scan via cargo-audit (when available)
 
@@ -44,52 +44,15 @@ cd "$repo_root"
 
 echo "=== Security Preflight ==="
 
-echo "[1/3] Scanning for likely secrets"
-secret_regex='(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN (RSA|OPENSSH|EC|DSA|PGP) PRIVATE KEY-----|AIza[0-9A-Za-z_-]{35})'
-
-set +e
-tracked_files=()
-while IFS= read -r -d '' tracked_file; do
-  tracked_files+=("$tracked_file")
-done < <(git ls-files -z)
-scan_status=1
-if [[ "${#tracked_files[@]}" -gt 0 ]]; then
-  if command -v rg >/dev/null 2>&1; then
-    rg -n --color=never -e "$secret_regex" \
-      --glob '!Cargo.lock' --glob '!*.snap' --glob '!*.png' --glob '!*.jpg' --glob '!*.jpeg' \
-      --glob '!*.gif' --glob '!*.svg' --glob '!*.pdf' --glob '!*.woff' --glob '!*.woff2' --glob '!*.ttf' \
-      "${tracked_files[@]}" > /tmp/jcode-secret-scan.txt
-    scan_status=$?
-  else
-    scan_files=()
-    for tracked_file in "${tracked_files[@]}"; do
-      case "$tracked_file" in
-        Cargo.lock|*.snap|*.png|*.jpg|*.jpeg|*.gif|*.svg|*.pdf|*.woff|*.woff2|*.ttf)
-          ;;
-        *)
-          scan_files+=("$tracked_file")
-          ;;
-      esac
-    done
-    if [[ "${#scan_files[@]}" -gt 0 ]]; then
-      grep -I -n -E "$secret_regex" "${scan_files[@]}" > /tmp/jcode-secret-scan.txt
-      scan_status=$?
-    fi
-  fi
-fi
-set -e
-
-if [[ "$scan_status" -gt 1 ]]; then
-  rm -f /tmp/jcode-secret-scan.txt
-  die "secret scan failed to execute"
+echo "[1/3] Scanning for likely secrets with gitleaks"
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks dir "$repo_root" --no-banner --redact --config "$repo_root/.gitleaks.toml"
+elif command -v nix >/dev/null 2>&1; then
+  nix run nixpkgs#gitleaks -- dir "$repo_root" --no-banner --redact --config "$repo_root/.gitleaks.toml"
+else
+  die "gitleaks is not installed (install it or run inside nix)"
 fi
 
-if [[ -s /tmp/jcode-secret-scan.txt ]]; then
-  cat /tmp/jcode-secret-scan.txt
-  rm -f /tmp/jcode-secret-scan.txt
-  die "potential secret material detected"
-fi
-rm -f /tmp/jcode-secret-scan.txt
 
 echo "[2/3] Checking script permissions"
 if find scripts -type f -perm -0002 -print -quit | grep -q .; then
@@ -98,28 +61,13 @@ if find scripts -type f -perm -0002 -print -quit | grep -q .; then
 fi
 
 echo "[3/3] Dependency advisories (cargo-audit)"
-audit_ignores=(
-  # Documented in docs/SECURITY_DEPENDENCIES.md. These are transitive
-  # advisories with tracked remediation paths; keep them visible in the triage
-  # doc while preventing unrelated CI/release work from being blocked.
-  --ignore RUSTSEC-2026-0141 # lettre via notify-email, Boring TLS backend not used by jcode
-  --ignore RUSTSEC-2026-0099 # rustls-webpki via rustls stack, awaiting upstream upgrade
-  --ignore RUSTSEC-2026-0104 # rustls-webpki via rustls stack, awaiting upstream upgrade
-  --ignore RUSTSEC-2026-0098 # rustls-webpki via rustls stack, awaiting upstream upgrade
-  --ignore RUSTSEC-2026-0049 # rustls-webpki via rustls stack, awaiting upstream upgrade
-  --ignore RUSTSEC-2026-0187 # lopdf via pdf-extract 0.8.2 (pins lopdf 0.34); PDF text extraction only, awaiting pdf-extract upgrade to lopdf >=0.42
-  --ignore RUSTSEC-2026-0194 # quick-xml via wayland-scanner (proc-macro); parses trusted Wayland protocol XML at build time only, never untrusted input at runtime
-  --ignore RUSTSEC-2026-0195 # quick-xml via wayland-scanner (proc-macro); same build-time-only exposure as RUSTSEC-2026-0194
-  --ignore RUSTSEC-2026-0190 # anyhow 1.0.100 downcast_mut unsoundness; workspace-wide, awaiting patched anyhow release
-  --ignore RUSTSEC-2026-0186 # memmap2 via UI/rendering/embedding stacks; awaiting transitive dependency upgrades
-)
 if command -v cargo-audit >/dev/null 2>&1; then
-  cargo audit "${audit_ignores[@]}"
-elif cargo audit --version >/dev/null 2>&1; then
-  cargo audit "${audit_ignores[@]}"
+  cargo-audit audit
+elif command -v cargo >/dev/null 2>&1 && cargo audit --version >/dev/null 2>&1; then
+  cargo audit
 else
   if [[ "$strict" -eq 1 ]]; then
-    die "cargo-audit is not installed (install with: cargo install cargo-audit --locked)"
+    die "cargo-audit is not installed (enter the Nix dev shell or install with: cargo install cargo-audit --locked)"
   fi
   echo "warning: cargo-audit not installed; skipping advisory check"
 fi

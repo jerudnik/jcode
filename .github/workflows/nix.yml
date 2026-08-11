@@ -1,271 +1,111 @@
 name: Nix
 
-# Builds, checks, and caches the jcode flake for the platforms this fork
-# actually serves: x86_64-linux (CI validation + cache for Linux consumers)
-# and aarch64-darwin (the maintainer's real machines). aarch64-linux was
-# dropped deliberately -- no consumer exists; restore the matrix row when one
-# does. Successful builds push to the public Cachix cache so downstream
-# flakes never rebuild from source.
-#
-# flake.lock bumps live in nix-update.yml; cargo-audit policy in security.yml.
-
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-    paths:
-      - "flake.nix"
-      - "flake.lock"
-      - "nix/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".cargo/**"
-      - "crates/**"
-      - "src/**"
-      - "assets/**"
-      - "web/jcode-mobile/**"
-      - "scripts/**"
-      - "tests/**"
-      - "apm.yml"
-      - "apm.lock.yaml"
-      - ".apm/**"
-      - ".jcode/preferred-tools.md"
-      - ".jcode/prompt-overlay.md"
-      - ".jcode/swarm-prompt.md"
-      - "README.md"
-      - "CONTRIBUTING.md"
-      - "RELEASING.md"
-      - "docs/agent-workflows.md"
-      - "docs/BRANCHING.md"
-      - "docs/NIX.md"
-      - "docs/SWARM_ARCHITECTURE.md"
-      - "docs/SWARM_TASK_GRAPH.md"
-      - "docs/ONBOARDING_SANDBOX.md"
-      - "docs/WINDOWS.md"
-      - "docs/WRAPPERS.md"
-      # Railway checkpoint commits touch only docs/fork/**, which the package
-      # fileset excludes -- but flake.nix stamps the git rev into the binary,
-      # so every commit still produces a NEW output hash. Skipping the build
-      # here left main's exact artifact unpublished, forcing consumers that pin
-      # `github:jerudnik/jcode/main` to rebuild from source. Build on these too
-      # so the commit a pin can name is always in Cachix.
-      - "docs/fork/**"
-      - ".github/workflows/**"
-  # Required context invariant: every pull request must instantiate Nix Gate.
-  # Relevance controls may move inside jobs, but never back to workflow paths.
-  pull_request:
-    branches: [main]
+  workflow_call:
+    inputs:
+      publish:
+        description: Push the built package to Cachix from main or a release tag.
+        required: false
+        type: boolean
+        default: false
+      rollback_ref:
+        description: Previous promoted main-ancestor ref used for release rollback testing.
+        required: false
+        type: string
   workflow_dispatch:
-
-concurrency:
-  group: nix-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      publish:
+        description: Push the built package to Cachix after validation.
+        required: false
+        type: boolean
+        default: false
+      rollback_ref:
+        description: Previous promoted main-ancestor ref used for release rollback testing.
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    name: fast validation
+    name: Validate Nix and workflow policy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
 
-      - name: Cachix (read-only public binary cache)
-        uses: cachix/cachix-action@v17
-        with:
-          name: jerudnik-jcode
-          skipPush: true
-
-      - name: Check workflow syntax (fork-owned workflows)
-        # Only lint the workflows this fork owns. Upstream's ci.yml and
-        # freebsd-smoke.yml are kept byte-close to the fork point and are
-        # dispatch-only.
-        #
-        # This list is asserted complete by
-        # test_every_fork_owned_workflow_is_lint_covered: every workflow
-        # present that is not an explicit upstream exemption must appear here
-        # and in the flake workflow-syntax check.
+      - name: Lint fork-owned workflows
         run: |
-          nix run nixpkgs#actionlint -- \
+          nix shell nixpkgs#actionlint --command actionlint \
             .github/workflows/docs-impact.yml \
             .github/workflows/fork-ci.yml \
             .github/workflows/fork-health.yml \
+            .github/workflows/main.yml \
             .github/workflows/security.yml \
             .github/workflows/nix.yml \
             .github/workflows/nix-update.yml \
+            .github/workflows/pr.yml \
             .github/workflows/release.yml \
+            .github/workflows/scheduled.yml \
             .github/workflows/governance-root.yml
 
-      - name: Dry-run Linux package
-        run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
+      - name: Run package recipe
+        run: nix shell nixpkgs#just -c just package
 
-      - name: Evaluate flake checks
-        run: nix flake check --accept-flake-config --no-build --all-systems
+      - name: Run release-check recipe
+        run: nix shell nixpkgs#just -c just release-check
 
-      - name: Enforce Nix-only distribution policy
+      - name: Enforce Nix distribution policy
         run: nix build .#checks.x86_64-linux.nix-distribution-policy --print-build-logs
 
-      - name: Verify flake.lock is committed
-        if: github.event_name == 'pull_request'
-        run: |
-          nix flake metadata --json > /dev/null
-          if [ -n "$(git status --porcelain flake.lock)" ]; then
-            echo "flake.lock is out of date; run 'nix flake update' and commit." >&2
-            exit 1
-          fi
-
-  matrix:
-    name: select build matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      include: ${{ steps.pick.outputs.include }}
-    steps:
-      # Needed only to read build-matrix.json; keep it minimal so matrix
-      # selection stays a fast, cheap job.
-      - uses: actions/checkout@v5
-        with:
-          sparse-checkout: .github/workflows
-          sparse-checkout-cone-mode: false
-
-      # Pull requests build + smoke-launch the real package (acceptance gate:
-      # relevant path changes must run `nix build` and prove
-      # `result/bin/jcode --version`). We restrict PRs to x86_64-linux: it is the
-      # fork's CI validation platform, runs on fast hosted ubuntu, and reads the
-      # public Cachix cache so it does not rebuild ~900 crates from source. The
-      # full push/dispatch matrix additionally covers aarch64-darwin (the
-      # maintainer machines) where cache misses are expensive on hosted macOS and
-      # a per-PR rebuild is not worth the wall-clock cost.
-      # The matrix itself lives in build-matrix.json so it is data, not shell
-      # string-building. tests/test_nix_distribution_policy.py reads that file
-      # to prove the platform support advertised in docs/NIX.md and README.md
-      # matches what CI actually builds; a matrix assembled inside this `run:`
-      # block could only be recovered by regex, and a reworded `if` would
-      # silently empty the expected set and make that guard pass vacuously.
-      - id: pick
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            key=pull_request
-          else
-            key=default
-          fi
-          include="$(jq -c --arg key "$key" '.[$key]' .github/workflows/build-matrix.json)"
-          if [ -z "$include" ] || [ "$include" = "null" ] || [ "$include" = "[]" ]; then
-            echo "build-matrix.json has no systems for '$key'; refusing to run an empty build matrix" >&2
-            exit 1
-          fi
-          echo "include=$include" >> "$GITHUB_OUTPUT"
-
   build:
-    name: build (${{ matrix.system }})
-    needs: matrix
+    name: Build Nix package (${{ matrix.system }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.matrix.outputs.include) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
-    env:
-      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && secrets.CACHIX_AUTH_TOKEN != '' }}
+        system: [x86_64-linux]
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Require Cachix publication for release tags
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          if [ "$CACHIX_CAN_PUSH" != "true" ]; then
-            echo "Tagged releases require CACHIX_AUTH_TOKEN; Cachix is the sole binary publication channel." >&2
-            exit 1
-          fi
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
 
-      - name: Cachix (read/write public binary cache)
-        if: env.CACHIX_CAN_PUSH == 'true'
-        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        uses: cachix/cachix-action@v17
+      - name: Build package for publication
+        run: |
+          nix build .#packages.${{ matrix.system }}.jcode --print-build-logs --out-link result-${{ matrix.system }}
+          nix build .#packages.${{ matrix.system }}.jcode-deps --print-build-logs --out-link result-deps-${{ matrix.system }}
+
+  publish:
+    name: Require Cachix publication for release tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [validate, build]
+    if: ${{ inputs.publish || github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
+      - name: Build package for Cachix
+        run: |
+          nix build .#packages.x86_64-linux.jcode --print-build-logs --out-link result
+          nix build .#packages.x86_64-linux.jcode-deps --print-build-logs --out-link result-deps
+
+      - name: Publish to Cachix
+        uses: cachix/cachix-action@1c64e3365467273d5948db68fb5404e3e5a85af1 # v17
         with:
           name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          # Main-branch cache upload is best-effort, but tag publication is a
-          # release requirement. Push just the final result path rather than
-          # relying on daemon post-job closure draining.
-          # Push the dependency layer as well as the final binary. The deps
-          # derivation is hash-stable across commits (per-commit build metadata
-          # is deliberately excluded from it in nix/package.nix), so publishing
-          # it lets later runs and downstream consumers skip recompiling ~900
-          # crates. Pushing only ./result left it unpublished, which is why a
-          # normal build took ~18 minutes of cold dependency compilation.
           useDaemon: false
           pathsToPush: ./result ./result-deps
           cachixArgs: -j2
 
-      - name: Cachix (read-only public binary cache)
-        if: env.CACHIX_CAN_PUSH != 'true'
-        uses: cachix/cachix-action@v17
-        with:
-          name: jerudnik-jcode
-          skipPush: true
-
-      - name: Build dependency layer
-        # Built (and pushed) separately from the package so the expensive,
-        # hash-stable crate layer lands in Cachix on its own. Building it first
-        # also means the package build below is a cache hit on this layer.
-        run: |
-          nix build .#packages.${{ matrix.system }}.jcode-deps \
-            --print-build-logs --out-link result-deps
-
-      - name: Build package
-        run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs
-
-      - name: Smoke test binary (launch gate)
-        # Prove the packaged binary launches. This is the F18 acceptance gate for
-        # every build event, PRs included: we build the real package (doCheck
-        # stays false -- the non-hermetic workspace suite is owned by ci.yml, not
-        # the sandbox) and verify it actually runs.
-        run: |
-          ./result/bin/jcode --version
-
-  release-metadata:
-    name: publish metadata-only release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [validate, build]
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release.yml
-
-  nix-gate:
-    name: Nix Gate
-    needs: [validate, matrix, build]
-    if: always() && github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      VALIDATE_RESULT: ${{ needs.validate.result }}
-      MATRIX_RESULT: ${{ needs.matrix.result }}
-      BUILD_RESULT: ${{ needs.build.result }}
-    steps:
-      - name: Require validation and package build
-        shell: bash
-        run: |
-          set -euo pipefail
-          for pair in \
-            "fast validation:$VALIDATE_RESULT" \
-            "select build matrix:$MATRIX_RESULT" \
-            "build:$BUILD_RESULT"; do
-            name=${pair%%:*}
-            result=${pair#*:}
-            if [ "$result" != success ]; then
-              echo "::error::$name concluded '$result'; expected success"
-              exit 1
-            fi
-          done

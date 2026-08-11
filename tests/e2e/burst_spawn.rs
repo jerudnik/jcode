@@ -190,8 +190,8 @@ async fn run_burst_resume_attach_stress(burst_size: usize) -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let unique_suffix = runtime_dir
+        .path()
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("burst");
@@ -394,8 +394,8 @@ async fn burst_retry_takeover_without_local_history_keeps_existing_live_clients_
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let unique_suffix = runtime_dir
+        .path()
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("burst-live");
@@ -567,8 +567,8 @@ async fn burst_attach_detach_reattach_restores_live_clients_cleanly() -> Result<
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let unique_suffix = runtime_dir
+        .path()
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("burst-reattach");
@@ -651,7 +651,7 @@ async fn burst_attach_detach_reattach_restores_live_clients_cleanly() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "resource-heavy scale validation"]
+#[ignore = "resource-heavy scale validation | runbook: manual-benchmark"]
 async fn burst_spawn_resume_attach_scales_to_100_clients() -> Result<()> {
     run_burst_resume_attach_stress(100).await
 }

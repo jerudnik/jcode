@@ -239,6 +239,7 @@ runs = int(sys.argv[5])
 command = sys.argv[6]
 times = [float(v) for v in sys.argv[7:]]
 summary = {
+    "schema": "jcode-compile-bench-v1",
     "target": target,
     "cold": cold,
     "touch": touch or None,

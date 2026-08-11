@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Extract the cargo build/test command list from a Fork CI job.
+"""Read the canonical command script for a job or recipe from `justfile`.
 
-The 21-minute `Build & Test (macOS)` job and the `Linux Tests` job are the only
-CI steps that actually build the release binary and run the test suite; the
-ratchets/clippy that `preflight.sh` already mirrors are the cheap part. This
-module reads the *exact* `cargo ...` invocations out of `.github/workflows/
-fork-ci.yml` so `ci_local.sh` can run them on fleet hardware before a PR is
-opened, and can never silently drift from what CI runs.
-
-It is deliberately dependency-free (no PyYAML in the system Python): the
-workflow is hand-formatted with a stable two-space step indentation, so a
-narrow structural scan is more honest here than pulling in a parser we would
-then have to trust to round-trip GitHub's YAML dialect. The scan is anchored to
-`run:` blocks inside the named job and only ever emits lines that begin with
-`cargo `, so a formatting change that breaks the assumption fails loudly (no
-commands found) rather than silently running the wrong thing.
+The old helper scraped GitHub workflow YAML so ci_local.sh could mimic CI. The
+new source of truth is the repo `justfile`, so this module now resolves a job
+name to a just recipe and returns the recipe body as a shell script.
 """
 
 from __future__ import annotations
@@ -25,86 +14,80 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WORKFLOW = REPO_ROOT / ".github/workflows/fork-ci.yml"
+JUSTFILE = REPO_ROOT / "justfile"
+JOB_TO_RECIPE = {
+    "macos": "full-test",
+    "linux-tests": "full-test",
+}
 
-# A job header sits at 2-space indent: `  macos:` / `  linux-tests:`.
-JOB_RE = re.compile(r"^  ([a-z0-9-]+):\s*$")
-# `run:` step bodies are indented further; we only care about the cargo lines.
-# Two shapes appear: a bare `cargo ...` line inside a `run: |` block, and an
-# inline `run: cargo ...` on a single line. Both are captured.
-CARGO_RE = re.compile(r"^\s*(?:run:\s*)?(cargo\s+.*)$")
+RECIPE_RE = re.compile(r"^(?P<name>[A-Za-z0-9_-]+):(?!\=)(?P<rest>.*)$")
 
 
-def _job_span(lines: list[str], job: str) -> tuple[int, int]:
-    """Return the [start, end) line span of `job:` within the workflow."""
-    start = None
-    for i, line in enumerate(lines):
-        m = JOB_RE.match(line)
-        if m and m.group(1) == job:
-            start = i + 1
+def resolve_recipe_name(selector: str) -> str:
+    """Map a ci_local job name to the matching recipe name."""
+
+    return JOB_TO_RECIPE.get(selector, selector)
+
+
+def _recipe_body_lines(recipe: str, justfile: Path = JUSTFILE) -> list[str]:
+    lines = justfile.read_text(encoding="utf-8").splitlines()
+    in_recipe = False
+    body: list[str] = []
+
+    for line in lines:
+        match = RECIPE_RE.match(line)
+        if match and not line[:1].isspace():
+            if in_recipe:
+                break
+            if match.group("name") == recipe:
+                in_recipe = True
             continue
-        if start is not None and JOB_RE.match(line):
-            return start, i
-    if start is None:
-        raise SystemExit(f"ci_workflow_commands: job {job!r} not found in {WORKFLOW}")
-    return start, len(lines)
 
-
-def job_cargo_commands(job: str, workflow: Path = WORKFLOW) -> list[str]:
-    """The ordered list of `cargo ...` commands CI runs in `job`."""
-    lines = workflow.read_text(encoding="utf-8").splitlines()
-    start, end = _job_span(lines, job)
-    span = lines[start:end]
-
-    commands: list[str] = []
-    pending: str | None = None
-    for raw in span:
-        # A cargo line may be preceded on its own line by the timeout wrapper
-        # ending in `\`; the next line(s) carry the cargo command.
-        m = CARGO_RE.match(raw)
-        if m and pending is None:
-            pending = m.group(1)
-        elif pending is not None:
-            pending += " " + raw.strip()
-        else:
+        if not in_recipe:
             continue
-        if pending.rstrip().endswith("\\"):
-            pending = pending.rstrip()[:-1].rstrip()
+
+        if line.strip() == "":
+            body.append("")
             continue
-        commands.append(re.sub(r"\s+", " ", pending).strip())
-        pending = None
-    if pending:
-        commands.append(re.sub(r"\s+", " ", pending.replace("\\", "")).strip())
-    return commands
+        if line[:1].isspace():
+            body.append(line)
+            continue
+        break
+
+    if not body:
+        raise SystemExit(f"ci_workflow_commands: recipe {recipe!r} not found in {justfile}")
+
+    non_empty = [len(re.match(r"^[ \t]*", line).group(0)) for line in body if line.strip()]
+    trim = min(non_empty) if non_empty else 0
+    return [line[trim:] if len(line) >= trim else "" for line in body]
+
+
+def recipe_script(recipe: str, justfile: Path = JUSTFILE) -> str:
+    return "\n".join(_recipe_body_lines(recipe, justfile)).rstrip()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("job", help="workflow job id, e.g. macos or linux-tests")
+    ap.add_argument("selector", help="job name or recipe name, e.g. macos or full-test")
     ap.add_argument(
-        "--host-target",
-        help="rewrite the pinned CI target triple to this one (e.g. the local host triple)",
+        "--justfile",
+        default=str(JUSTFILE),
+        help="path to the repository justfile",
     )
     args = ap.parse_args()
 
-    commands = job_cargo_commands(args.job)
-    if not commands:
-        print(
-            f"ci_workflow_commands: no cargo commands found in job {args.job!r}; "
-            "the workflow format may have changed",
-            file=sys.stderr,
-        )
+    justfile = Path(args.justfile)
+    recipe = resolve_recipe_name(args.selector)
+    try:
+        script = recipe_script(recipe, justfile)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
-    ci_targets = ("aarch64-apple-darwin", "x86_64-unknown-linux-gnu")
-    for cmd in commands:
-        out = cmd
-        if args.host_target:
-            for t in ci_targets:
-                out = out.replace(f"--target {t}", f"--target {args.host_target}")
-        print(out)
+    print(script)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

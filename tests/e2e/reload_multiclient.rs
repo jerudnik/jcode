@@ -16,6 +16,7 @@ async fn start_inprocess_server(
     label: &str,
     provider: Arc<dyn jcode::provider::Provider>,
 ) -> Result<(
+    ShortRuntimeDir,
     std::path::PathBuf,
     std::path::PathBuf,
     tokio::task::JoinHandle<Result<server::ServerExit>>,
@@ -27,7 +28,6 @@ async fn start_inprocess_server(
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
@@ -35,7 +35,7 @@ async fn start_inprocess_server(
         server::Server::new_with_paths(provider, socket_path.clone(), debug_socket_path.clone());
     let server_handle = tokio::spawn(async move { server_instance.run().await });
     wait_for_socket(&socket_path).await?;
-    Ok((socket_path, debug_socket_path, server_handle))
+    Ok((runtime_dir, socket_path, debug_socket_path, server_handle))
 }
 
 /// Read events until the `Done` for `msg_id` arrives, so a test can sequence
@@ -105,7 +105,7 @@ async fn reload_notifies_clients_across_independent_sessions() -> Result<()> {
 
     let provider = MockProvider::new();
     let provider: Arc<dyn Provider> = Arc::new(provider);
-    let (socket_path, debug_socket_path, server_handle) =
+    let (_runtime_dir, socket_path, debug_socket_path, server_handle) =
         start_inprocess_server("multisession", provider).await?;
 
     let result = async {
@@ -157,7 +157,7 @@ async fn reload_notifies_successor_after_session_takeover() -> Result<()> {
 
     let provider = MockProvider::new();
     let provider: Arc<dyn Provider> = Arc::new(provider);
-    let (socket_path, debug_socket_path, server_handle) =
+    let (_runtime_dir, socket_path, debug_socket_path, server_handle) =
         start_inprocess_server("takeover", provider).await?;
 
     let result = async {
@@ -240,7 +240,7 @@ async fn reload_interrupts_in_flight_streaming_turn_without_hanging() -> Result<
     });
     provider.queue_response(long_stream);
     let provider: Arc<dyn Provider> = Arc::new(provider);
-    let (socket_path, debug_socket_path, server_handle) =
+    let (_runtime_dir, socket_path, debug_socket_path, server_handle) =
         start_inprocess_server("streaming", provider).await?;
 
     let result = async {
@@ -313,7 +313,7 @@ async fn reload_marker_is_active_when_clients_are_notified() -> Result<()> {
 
     let provider = MockProvider::new();
     let provider: Arc<dyn Provider> = Arc::new(provider);
-    let (socket_path, debug_socket_path, server_handle) =
+    let (_runtime_dir, socket_path, debug_socket_path, server_handle) =
         start_inprocess_server("marker", provider).await?;
 
     let result = async {
@@ -377,7 +377,7 @@ async fn hidden_continuation_after_assistant_reply_sends_no_blank_user_turn() ->
     }
     let captures = provider.captures.clone();
     let provider: Arc<dyn Provider> = Arc::new(provider);
-    let (socket_path, debug_socket_path, server_handle) =
+    let (_runtime_dir, socket_path, debug_socket_path, server_handle) =
         start_inprocess_server("hidden-continuation", provider).await?;
 
     let result = async {

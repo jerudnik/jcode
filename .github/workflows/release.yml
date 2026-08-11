@@ -1,7 +1,24 @@
 name: Release metadata
 
 on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Candidate release tag. Defaults to v1.0.0 before the first fork release.'
+        required: false
+        default: v1.0.0
+      rollback_ref:
+        description: 'Previous promoted main-ancestor ref used for rollback testing.'
+        required: true
   workflow_call:
+    inputs:
+      rollback_ref:
+        description: 'Previous promoted main-ancestor ref used for rollback testing.'
+        required: false
+        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -10,15 +27,48 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  DEFAULT_RELEASE: v1.0.0
+  CACHIX_CACHE: jerudnik-jcode
+
 jobs:
   release-metadata:
-    name: Publish release notes
+    name: Verify Nix release and publish metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
+
+      - uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - name: Resolve release inputs
+        id: release
+        shell: bash
+        env:
+          DISPATCH_RELEASE: ${{ inputs.release }}
+          DISPATCH_ROLLBACK_REF: ${{ inputs.rollback_ref }}
+          VAR_ROLLBACK_REF: ${{ vars.JCODE_PREVIOUS_RELEASE_REF }}
+        run: |
+          set -euo pipefail
+          release="${GITHUB_REF_NAME:-}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            release="${DISPATCH_RELEASE:-$DEFAULT_RELEASE}"
+          fi
+          if [ -z "$release" ]; then
+            release="$DEFAULT_RELEASE"
+          fi
+          rollback_ref="${DISPATCH_ROLLBACK_REF:-${VAR_ROLLBACK_REF:-}}"
+          if [ -z "$rollback_ref" ]; then
+            echo "rollback_ref is required. Set workflow input rollback_ref or repository variable JCODE_PREVIOUS_RELEASE_REF." >&2
+            exit 1
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "rollback_ref=$rollback_ref" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag belongs to authoritative main
         shell: bash
@@ -27,8 +77,66 @@ jobs:
           git fetch --no-tags "https://github.com/${GITHUB_REPOSITORY}.git" main
           git merge-base --is-ancestor "${GITHUB_SHA}" FETCH_HEAD
 
+      - name: Run fork release gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--release "${{ steps.release.outputs.release }}" --rollback-ref "${{ steps.release.outputs.rollback_ref }}" --main-ref FETCH_HEAD)
+          if git rev-parse -q --verify "refs/tags/${{ steps.release.outputs.release }}" >/dev/null; then
+            args+=(--require-tag)
+          fi
+          python3 scripts/release_check.py "${args[@]}"
+
+      - name: Build or substitute Nix release outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          system="$(nix eval --raw --impure --expr builtins.currentSystem)"
+          nix build --accept-flake-config \
+            ".#packages.${system}.jcode" \
+            ".#packages.x86_64-linux.jcode-sbom" \
+            ".#packages.x86_64-linux.jcode-provenance" \
+            --no-link --print-out-paths | tee nix-release-paths.txt
+
+      - name: Verify cached Nix output
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            narinfo="https://${CACHIX_CACHE}.cachix.org/$(basename "$path").narinfo"
+            if curl --fail --silent --head "$narinfo" >/dev/null; then
+              echo "cached: $path"
+            else
+              echo "error: $path is not present in ${CACHIX_CACHE}; wait for the Nix/Cachix publication workflow instead of adding another binary channel" >&2
+              exit 1
+            fi
+          done < nix-release-paths.txt
+
+      - name: Inspect SBOM and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          sbom_path="$(nix build --accept-flake-config .#packages.x86_64-linux.jcode-sbom --no-link --print-out-paths)"
+          provenance_path="$(nix build --accept-flake-config .#packages.x86_64-linux.jcode-provenance --no-link --print-out-paths)"
+          test -s "$sbom_path/share/jcode/sbom.json"
+          test -s "$provenance_path/share/jcode/provenance.json"
+          python3 - "$provenance_path/share/jcode/provenance.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          assert data.get('package') or data.get('source'), data
+          print('provenance json inspected')
+          PY
+
+      - name: Install smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix run --accept-flake-config ".#jcode" -- version
+          nix run --accept-flake-config "github:${GITHUB_REPOSITORY}/${{ steps.release.outputs.rollback_ref }}" -- version
+
       - name: Generate release notes
-        run: scripts/generate_release_notes.sh "${GITHUB_REF_NAME}" > release_notes.md
+        run: scripts/generate_release_notes.sh "${{ steps.release.outputs.release }}" > release_notes.md
 
       - name: Publish metadata-only GitHub release
         shell: bash
@@ -36,26 +144,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            assets="$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets | length')"
+          if gh release view "${{ steps.release.outputs.release }}" >/dev/null 2>&1; then
+            assets="$(gh release view "${{ steps.release.outputs.release }}" --json assets --jq '.assets | length')"
             if [ "$assets" -ne 0 ]; then
-              echo "Release ${GITHUB_REF_NAME} already contains binary assets; refusing to publish metadata over it." >&2
+              echo "Release ${{ steps.release.outputs.release }} already contains binary assets; refusing to publish metadata over it." >&2
               exit 1
             fi
-            gh release edit "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
+            gh release edit "${{ steps.release.outputs.release }}" \
+              --title "${{ steps.release.outputs.release }}" \
               --notes-file release_notes.md \
               --draft=false \
               --latest
           else
-            gh release create "${GITHUB_REF_NAME}" \
-              --title "${GITHUB_REF_NAME}" \
+            gh release create "${{ steps.release.outputs.release }}" \
+              --title "${{ steps.release.outputs.release }}" \
               --notes-file release_notes.md \
               --latest
           fi
 
-          assets="$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets | length')"
+          assets="$(gh release view "${{ steps.release.outputs.release }}" --json assets --jq '.assets | length')"
           if [ "$assets" -ne 0 ]; then
-            echo "Release ${GITHUB_REF_NAME} must not contain binary assets; Nix and Cachix are the sole binary authority." >&2
+            echo "Release ${{ steps.release.outputs.release }} must not contain binary assets; Nix and Cachix are the sole binary authority." >&2
             exit 1
           fi

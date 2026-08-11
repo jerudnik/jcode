@@ -115,10 +115,13 @@
               ./.github/workflows/docs-impact.yml
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
+              ./.github/workflows/main.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
+              ./.github/workflows/pr.yml
               ./.github/workflows/release.yml
+              ./.github/workflows/scheduled.yml
               ./.github/workflows/governance-root.yml
             ];
           };
@@ -172,9 +175,6 @@
 
           jcode = pkgs.callPackage ./nix/package.nix {
             inherit craneLib version;
-            # Stamp the binary with the flake's source revision when available
-            # (a clean checkout). Dirty/path trees fall back to the package default.
-            gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or "nix";
           };
 
           sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
@@ -321,10 +321,13 @@
                     .github/workflows/docs-impact.yml \
                     .github/workflows/fork-ci.yml \
                     .github/workflows/fork-health.yml \
+                    .github/workflows/main.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
                     .github/workflows/nix-update.yml \
+                    .github/workflows/pr.yml \
                     .github/workflows/release.yml \
+                    .github/workflows/scheduled.yml \
                     .github/workflows/governance-root.yml
                   touch "$out"
                 '';
@@ -484,6 +487,7 @@
               pkgs.nixfmt
               pkgs.python3
               pkgs.ripgrep
+              pkgs.gitleaks
               pkgs.actionlint
               pkgs.git
               pkgs.just

@@ -24,7 +24,7 @@ fn model_dir() -> Option<PathBuf> {
 }
 
 #[test]
-#[ignore = "perf probe; requires installed model; run with --ignored --nocapture"]
+#[ignore = "perf probe; requires installed model; run with --ignored --nocapture | runbook: manual-benchmark"]
 fn embed_latency_probe() {
     let Some(dir) = model_dir() else {
         eprintln!("model not installed; skipping");

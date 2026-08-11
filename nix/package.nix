@@ -15,12 +15,10 @@
   perl,
   openssl,
   libiconv,
-  # Build metadata. Defaults keep the sandboxed build reproducible because
-  # jcode's build.rs shells out to `git` (unavailable in the Nix sandbox) and
-  # otherwise auto-increments a dev patch counter.
+  # Build metadata. Keep the executable derivation stable across repository
+  # revisions by avoiding commit-specific inputs here; provenance records the
+  # exact revision separately.
   version,
-  gitHash ? "nix",
-  gitDate ? "1970-01-01T00:00:00+00:00",
   # When true, build.rs emits a clean `vX.Y.Z (hash)` version string instead of
   # the `-dev` developer suffix. Nix builds are reproducible and pinned, so they
   # behave like release builds by default.
@@ -86,17 +84,11 @@ let
     CARGO_PROFILE = "release";
   };
 
-  # Per-commit build metadata. This is deliberately kept OUT of `commonArgs` so
-  # it does not flow into `buildDepsOnly`: the git hash/date change on every
-  # commit, and including them in the dependency derivation would invalidate the
-  # entire ~900-crate dependency cache on each commit (a full cold rebuild in CI
-  # and locally). Only `jcode-build-meta` (a workspace crate compiled in the
-  # final `buildPackage` step) reads these vars, so injecting them there alone is
-  # correct and lets the expensive dependency layer stay cached across commits.
+  # Build metadata. The package build intentionally avoids commit-specific
+  # inputs so doc-only revisions do not perturb the executable derivation. The
+  # exact repository revision is captured in the separate provenance output.
   buildMeta = {
     JCODE_BUILD_SEMVER = version;
-    JCODE_BUILD_GIT_HASH = gitHash;
-    JCODE_BUILD_GIT_DATE = gitDate;
     JCODE_BUILD_GIT_DIRTY = "false";
     # Pin the stamped source dir to a stable marker instead of the Nix build
     # sandbox path (which varies per build and is meaningless as a live

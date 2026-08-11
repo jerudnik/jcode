@@ -8,6 +8,110 @@ use std::sync::OnceLock;
 
 mod active_pids;
 
+#[derive(Debug, Clone)]
+pub struct RuntimePaths {
+    jcode_home: Option<PathBuf>,
+    harness_home: Option<PathBuf>,
+    real_home: Option<PathBuf>,
+    runtime_dir: PathBuf,
+}
+
+impl RuntimePaths {
+    pub fn current() -> Self {
+        Self {
+            jcode_home: jcode_home_override().map(PathBuf::from),
+            harness_home: test_harness_home(),
+            real_home: dirs::home_dir(),
+            runtime_dir: resolve_runtime_dir(),
+        }
+    }
+
+    pub fn runtime_dir(&self) -> PathBuf {
+        self.runtime_dir.clone()
+    }
+
+    pub fn jcode_dir(&self) -> Option<PathBuf> {
+        resolve_jcode_dir(
+            self.jcode_home.as_deref(),
+            self.harness_home.clone(),
+            self.real_home.clone(),
+        )
+    }
+
+    pub fn app_config_dir(&self) -> Result<PathBuf> {
+        resolve_app_config_dir(
+            self.jcode_home.as_deref(),
+            self.harness_home.as_deref(),
+            dirs::config_dir(),
+        )
+    }
+
+    pub fn app_cache_dir(&self) -> Result<PathBuf> {
+        resolve_app_cache_dir(
+            self.jcode_home.as_deref(),
+            self.harness_home.as_deref(),
+            dirs::cache_dir(),
+        )
+    }
+
+    pub fn durable_state_dir(&self) -> PathBuf {
+        if let Ok(dir) = std::env::var("JCODE_RUNTIME_DIR") {
+            return PathBuf::from(dir).join("durable-state");
+        }
+        match self.jcode_dir() {
+            Some(dir) => dir.join("state"),
+            None => self.runtime_dir().join("durable-state"),
+        }
+    }
+
+    pub fn user_home_path(&self, relative: impl AsRef<Path>) -> Result<PathBuf> {
+        resolve_user_home_path(
+            relative.as_ref(),
+            self.jcode_home.as_deref(),
+            self.harness_home.as_deref(),
+            dirs::home_dir(),
+        )
+    }
+
+    pub fn user_home_path_opt(&self, relative: impl AsRef<Path>) -> Option<PathBuf> {
+        let relative = relative.as_ref();
+        assert!(
+            !relative.is_absolute(),
+            "user_home_path_opt expects a relative path, got {}",
+            relative.display()
+        );
+        resolve_user_home_path_opt(
+            relative,
+            self.jcode_home.as_deref(),
+            self.harness_home.as_deref(),
+            dirs::home_dir(),
+        )
+    }
+
+    pub fn sanitize_ambient_dir_override(&self, value: Option<OsString>) -> Option<PathBuf> {
+        let path = PathBuf::from(value?);
+        if self.home_is_redirected() {
+            match dirs::home_dir() {
+                Some(real_home) if path.starts_with(&real_home) => None,
+                _ => Some(path),
+            }
+        } else {
+            Some(path)
+        }
+    }
+
+    pub fn home_is_redirected(&self) -> bool {
+        self.jcode_home.is_some() || self.harness_home.is_some()
+    }
+
+    pub fn test_root(prefix: &str) -> tempfile::TempDir {
+        match tempfile::Builder::new().prefix(prefix).tempdir() {
+            Ok(dir) => dir,
+            Err(_) => std::process::abort(),
+        }
+    }
+}
+
 /// Serializes tests that mutate the process environment.
 ///
 /// One lock for the whole crate, not one per test module: `JCODE_HOME` is
@@ -40,6 +144,10 @@ pub use active_pids::{
 ///
 /// Can be overridden with `$JCODE_RUNTIME_DIR`.
 pub fn runtime_dir() -> PathBuf {
+    resolve_runtime_dir()
+}
+
+fn resolve_runtime_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("JCODE_RUNTIME_DIR") {
         return PathBuf::from(dir);
     }
@@ -105,11 +213,7 @@ pub fn jcode_dir() -> Result<PathBuf> {
 /// Stating that once here keeps ~20 call sites from each writing
 /// `jcode_dir().ok()`, which reads like a swallowed error even though it isn't.
 pub fn jcode_dir_opt() -> Option<PathBuf> {
-    resolve_jcode_dir(
-        jcode_home_override().as_deref().map(Path::new),
-        test_harness_home(),
-        dirs::home_dir(),
-    )
+    RuntimePaths::current().jcode_dir()
 }
 
 /// The `JCODE_HOME` override, with blank values rejected.
@@ -232,7 +336,10 @@ fn is_cargo_test_binary_path(exe: &Path) -> bool {
 }
 
 pub fn logs_dir() -> Result<PathBuf> {
-    Ok(jcode_dir()?.join("logs"))
+    RuntimePaths::current()
+        .jcode_dir()
+        .map(|dir| dir.join("logs"))
+        .ok_or_else(|| anyhow::anyhow!("No home directory"))
 }
 
 /// Durable state directory for state that must survive reboots.
@@ -246,13 +353,7 @@ pub fn logs_dir() -> Result<PathBuf> {
 /// When `JCODE_RUNTIME_DIR` is set (tests and sandboxed temp servers), it
 /// takes precedence so isolated runs never touch the real jcode home.
 pub fn durable_state_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("JCODE_RUNTIME_DIR") {
-        return PathBuf::from(dir).join("durable-state");
-    }
-    match jcode_dir() {
-        Ok(dir) => dir.join("state"),
-        Err(_) => runtime_dir().join("durable-state"),
-    }
+    RuntimePaths::current().durable_state_dir()
 }
 
 /// Resolve jcode's app-owned config directory.
@@ -270,11 +371,7 @@ pub fn durable_state_dir() -> PathBuf {
 /// `test_model_picker_preserves_recommendation_priority_order` pass or fail
 /// according to which models the developer had personally selected.
 pub fn app_config_dir() -> Result<PathBuf> {
-    resolve_app_config_dir(
-        jcode_home_override().as_deref().map(Path::new),
-        test_harness_home().as_deref(),
-        dirs::config_dir(),
-    )
+    RuntimePaths::current().app_config_dir()
 }
 
 /// Pure resolution rule behind [`app_config_dir`].
@@ -308,11 +405,7 @@ fn resolve_app_config_dir(
 /// overlook and still wrong: a stale entry keyed on content the test wrote is a
 /// cross-test channel, and the writes accumulate in real user state.
 pub fn app_cache_dir() -> Result<PathBuf> {
-    resolve_app_cache_dir(
-        jcode_home_override().as_deref().map(Path::new),
-        test_harness_home().as_deref(),
-        dirs::cache_dir(),
-    )
+    RuntimePaths::current().app_cache_dir()
 }
 
 /// Pure resolution rule behind [`app_cache_dir`]. See [`resolve_app_config_dir`]
@@ -344,12 +437,7 @@ fn resolve_app_cache_dir(
 /// suite's verdict depends on which providers the developer happens to have
 /// configured.
 pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
-    resolve_user_home_path(
-        relative.as_ref(),
-        jcode_home_override().as_deref().map(Path::new),
-        test_harness_home().as_deref(),
-        dirs::home_dir(),
-    )
+    RuntimePaths::current().user_home_path(relative)
 }
 
 /// [`user_home_path`] for callers that treat a missing home as "feature
@@ -366,18 +454,7 @@ pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
 ///   the home were missing. That stays a panic, because it is a bug in the
 ///   call site rather than a property of the machine.
 pub fn user_home_path_opt(relative: impl AsRef<Path>) -> Option<PathBuf> {
-    let relative = relative.as_ref();
-    assert!(
-        !relative.is_absolute(),
-        "user_home_path_opt expects a relative path, got {}",
-        relative.display()
-    );
-    resolve_user_home_path_opt(
-        relative,
-        jcode_home_override().as_deref().map(Path::new),
-        test_harness_home().as_deref(),
-        dirs::home_dir(),
-    )
+    RuntimePaths::current().user_home_path_opt(relative)
 }
 
 /// Filter an ambient directory override (`$XDG_CONFIG_HOME`, `%LOCALAPPDATA%`,
@@ -397,14 +474,7 @@ pub fn user_home_path_opt(relative: impl AsRef<Path>) -> Option<PathBuf> {
 /// Returns `None` when the override must be ignored, so callers can fall
 /// through to their home-relative default.
 pub fn sanitize_ambient_dir_override(value: Option<OsString>) -> Option<PathBuf> {
-    let path = PathBuf::from(value?);
-    if !home_is_redirected() {
-        return Some(path);
-    }
-    match dirs::home_dir() {
-        Some(real_home) if path.starts_with(&real_home) => None,
-        _ => Some(path),
-    }
+    RuntimePaths::current().sanitize_ambient_dir_override(value)
 }
 
 /// Assert that `path` is *not* under the real user home.

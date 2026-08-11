@@ -1,0 +1,24 @@
+# Tests that boot a real jcode server (socket, session recovery, swarm
+# workers) carry internal 5s deadlines that starve when dozens of such
+# processes contend for the machine alongside the rest of the suite.
+# Alone each finishes in ~10s; fully parallel they stretch past 100s and
+# time out. Cap how many run at once instead of inflating the deadlines.
+[test-groups.server-e2e]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = "package(jcode-app-core) and (test(/^tool::communicate::tests::/) or test(/^server::tests::startup_re/))"
+test-group = "server-e2e"
+threads-required = "num-test-threads"
+
+[profile.ci]
+inherits = "default"
+fail-fast = false
+status-level = "slow"
+final-status-level = "slow"
+
+[profile.ci.junit]
+path = "junit.xml"
+report-name = "jcode-ci"
+store-success-output = false
+store-failure-output = true

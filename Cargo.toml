@@ -1,6 +1,6 @@
 [package]
 name = "jcode"
-version = "0.46.0"
+version = "1.0.0"
 publish = false
 description = "Possibly the greatest coding agent ever built — blazing-fast TUI, multi-model, swarm coordination, 30+ tools"
 edition = "2024"
@@ -86,6 +86,15 @@ members = [
     "crates/jcode-render-core",
 ]
 
+[workspace.dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.9.3"
+reqwest = { version = "0.12", default-features = false }
+serde = "1"
+serde_json = { version = "1", features = ["raw_value"] }
+tokio = "1"
+windows-sys = "0.59"
+
 [lib]
 name = "jcode"
 path = "src/lib.rs"
@@ -127,18 +136,18 @@ required-features = ["dev-bins"]
 tikv-jemallocator = { version = "0.6", features = ["unprefixed_malloc_on_supported_platforms"], optional = true }
 
 # Async runtime
-tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 futures = "0.3"
 async-trait = "0.1"
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["json", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+reqwest = { workspace = true, default-features = false, features = ["json", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 toml = "0.8"
 
 # CLI
@@ -150,7 +159,7 @@ clap = { version = "4", features = ["derive"] }
 dirs = "5"               # home directory
 anyhow = "1"
 libc = "0.2"             # Unix system calls (flock)
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 
 # Embeddings (local inference) - behind feature flag (163 crates, slow to compile)
 
@@ -227,8 +236,7 @@ mermaid = ["jcode-tui/mermaid"]
 pdf = ["jcode-tui/pdf"]
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
-
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 block2 = "0.6"

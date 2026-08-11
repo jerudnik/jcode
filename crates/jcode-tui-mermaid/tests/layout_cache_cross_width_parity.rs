@@ -301,7 +301,7 @@ fn run_cell(label: &str, content: &str, expected_path_marker: Option<&str>) -> C
 }
 
 #[test]
-#[ignore = "cross-width parity probe: run explicitly with --ignored --nocapture"]
+#[ignore = "cross-width parity probe: run explicitly with --ignored --nocapture | runbook: manual-benchmark"]
 fn layout_cache_cross_width_parity() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

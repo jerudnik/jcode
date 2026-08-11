@@ -1,263 +1,58 @@
-name: CI
+name: PR Gate
 
-# Fork policy: inherited from upstream and dispatch-only. It does NOT gate the
-# fork's rail -- fork-ci.yml (macOS-first) does that. Kept dispatchable so a
-# branch can be validated against a broader Linux/macOS matrix than fork-ci
-# runs.
-#
-# The Windows jobs (windows-build-test, powershell-syntax, and the xwin
-# cross-target check) were removed: this fork ships to macOS and Nix, publishes
-# no releases, and does not test on Windows. See issue #19.
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      docs_only:
+        description: Skip the broad route for docs-only pull requests.
+        required: true
+        type: boolean
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  CARGO_TERM_COLOR: always
-  SCCACHE_GHA_ENABLED: "true"
-  # The fork has no DEPLOY_KEY secret; guard the ssh-agent steps so manual
-  # dispatch works here while the file stays drop-in compatible upstream.
-  JCODE_HAS_DEPLOY_KEY: ${{ secrets.DEPLOY_KEY != '' }}
+permissions:
+  contents: read
 
 jobs:
-  quality:
-    name: Quality Guardrails
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
-          submodules: recursive
-
-      - name: Configure SSH for cargo git dependencies
-        if: env.JCODE_HAS_DEPLOY_KEY == 'true'
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: quality-ubuntu
-          cache-all-crates: "true"
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check all targets and all features
-        run: cargo check --all-targets --all-features
-
-      - name: Run clippy with warnings denied
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Enforce warning budget
-        shell: bash
-        run: scripts/check_warning_budget.sh
-
-      - name: Enforce oversized-file ratchet
-        shell: bash
-        run: python3 scripts/check_code_size_budget.py
-
-      - name: Enforce oversized-test ratchet
-        shell: bash
-        run: python3 scripts/check_test_size_budget.py
-
-      - name: Run Rust production filter tests
-        shell: bash
-        run: python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'
-
-      - name: Enforce panic-prone usage ratchet
-        shell: bash
-        run: python3 scripts/check_panic_budget.py
-
-      - name: Enforce swallowed-error usage ratchet
-        shell: bash
-        run: python3 scripts/check_swallowed_error_budget.py
-
-      - name: Enforce crate dependency boundaries
-        shell: bash
-        run: python3 scripts/check_dependency_boundaries.py
-
-      - name: Enforce test env lease for config-fingerprint env vars
-        shell: bash
-        run: python3 scripts/check_config_env_lease.py
-
-      - name: Enforce F20c retired distribution surface stays removed
-        shell: bash
-        run: scripts/f20c_removal_report.sh --stdout > /dev/null
-
-      - name: Enforce wildcard re-export ratchet
-        shell: bash
-        run: python3 scripts/check_wildcard_reexport_budget.py
-
-      - name: Enforce no unused dependencies
-        shell: bash
-        run: |
-          cargo install cargo-machete --locked
-          cargo machete
-
-  build:
-    name: Build & Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
-    # Some dependencies (e.g. convert_case 0.10.0 via derive_more/crossterm, and
-    # proc-macro2/quote) accidentally ship a `rust-toolchain.toml` *inside their
-    # published crate*. When cargo builds such a crate its CWD is that crate dir,
-    # so the rustup proxy honours the file: convert_case pins `channel = "1.83.0"`
-    # and proc-macro2 requests `components = ["rust-src"]`. That made every
-    # Build & Test job (a) race two parallel `rust-src` downloads and (b) later
-    # try to compile convert_case with rustc 1.83.0, failing with E0514/E0599.
-    # RUSTUP_TOOLCHAIN takes precedence over any rust-toolchain.toml override, so
-    # pinning it here makes every step use this job's installed stable toolchain.
-    env:
-      RUSTUP_TOOLCHAIN: stable
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
-          submodules: recursive
-
-      - name: Configure SSH for cargo git dependencies
-        if: env.JCODE_HAS_DEPLOY_KEY == 'true'
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-          # Pre-install rust-src in the (serial) toolchain step. Some build-script
-          # / proc-macro units trigger an on-demand `rustup component add rust-src`,
-          # and when several parallel cargo/rustc processes request it at once they
-          # race on the shared `~/.rustup/downloads/*.partial` file and fail with
-          # "could not rename ... No such file or directory". Fetching it once here
-          # removes the race. (Was failing every Build & Test job.)
-          components: rust-src
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Suffix bumped to evict caches that held 1.83.0 / <unknown rustc>
-          # artifacts produced before RUSTUP_TOOLCHAIN=stable pinned the job.
-          key: ${{ matrix.os }}-stablepin
-
-      - name: Install mold linker (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mold
-
-      - name: Build
-        shell: bash
-        run: |
-          mkdir -p .cargo
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            cat > .cargo/config.toml << 'EOF'
-          [target.x86_64-unknown-linux-gnu]
-          linker = "clang"
-          rustflags = ["-C", "link-arg=-fuse-ld=mold"]
-          EOF
-          fi
-          # NOTE: intentionally NOT exporting RUSTC_WRAPPER=sccache here. Only this
-          # step used sccache while the later `cargo test --no-run` steps did not,
-          # so sccache emitted rlibs/rmetas stamped `<unknown rustc version>` that
-          # the non-sccache test compile then rejected with E0514
-          # ("compiled by an incompatible version of rustc"). rust-cache already
-          # caches target/ across runs, so a clean, wrapper-consistent build is
-          # both correct and fast enough.
-          RUSTC="$(rustup which rustc)"
-          export RUSTC
-          CARGO_BIN="$(rustup which cargo)"
-          "$CARGO_BIN" build --release --target ${{ matrix.target }}
-
-      - name: Snapshot real home before tests (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        # Paired with the verify step after the test runs. Brackets rather than
-        # assuming a clean HOME so the same gate works on a developer machine.
-        run: |
-          scripts/check_real_home_isolation.sh --snapshot
-
-      - name: Compile library and binary tests
-        shell: bash
-        run: |
-          python3 .github/scripts/run_with_timeout.py 900 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --lib --bins --no-run
-
-      - name: Compile integration test binaries
-        shell: bash
-        # Build the integration-test binaries up front (not counted against the
-        # run steps' execution budgets). The e2e suite in particular is heavy
-        # (burst-spawn concurrency), and folding compilation into its 900s run
-        # budget was pushing slower hosted ubuntu/macos runners over the limit.
-        run: |
-          python3 .github/scripts/run_with_timeout.py 900 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} \
-            --test provider_matrix --test e2e --no-run
-
-      - name: Run provider matrix tests
-        shell: bash
-        run: |
-          python3 .github/scripts/run_with_timeout.py 600 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --test provider_matrix
-
-      - name: Run e2e tests
-        shell: bash
-        run: |
-          # e2e is fast (~1-2 min of execution); the generous budget only guards
-          # against an occasional slow hosted runner. Compilation is already done
-          # in the dedicated compile step above.
-          python3 .github/scripts/run_with_timeout.py 600 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --test e2e
-
-      - name: Enforce real-home test isolation (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        # Cheap assertion, not a second suite: the test steps above already ran
-        # in this job, so any test that resolved the real ~/.jcode instead of
-        # its per-process temp home shows up as a delta against the snapshot.
-        run: |
-          scripts/check_real_home_isolation.sh --verify-only
-
-      - name: Enforce warning budget (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          scripts/check_warning_budget.sh
-
-      - name: Security preflight (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cargo install cargo-audit --locked
-          scripts/security_preflight.sh --strict
-
-  fmt:
-    name: Format
+  docs:
+    name: Docs lint
+    if: ${{ inputs.docs_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Run docs lint recipe
+        run: nix shell nixpkgs#just nixpkgs#vale -c just lint-docs
+
+  fork-ci:
+    name: Fork CI
+    if: ${{ !inputs.docs_only }}
+    uses: ./.github/workflows/fork-ci.yml
+    secrets: inherit
+    with:
+      broad: true
+
+  security:
+    name: Security
+    if: ${{ !inputs.docs_only }}
+    uses: ./.github/workflows/security.yml
+    secrets: inherit
+    with:
+      strict: true
+      weekly: false
+
+  nix:
+    name: Nix
+    if: ${{ !inputs.docs_only }}
+    uses: ./.github/workflows/nix.yml
+    secrets: inherit
+    with:
+      publish: false
+
+  smoke:
+    name: Smoke
+    if: ${{ !inputs.docs_only }}
+    uses: ./.github/workflows/freebsd-smoke.yml
+    secrets: inherit

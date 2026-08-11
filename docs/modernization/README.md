@@ -282,7 +282,7 @@ The audit recorded:
 - 46 workspace crates and 45 crate manifests;
 - 4 production Rust files longer than 1,200 lines;
 - 22 wildcard public re-exports;
-- 11 workflows and 3 required check names;
+- 11 workflows and, before PR Gate consolidation, 3 required check names;
 - 64 shell scripts and 63 Python scripts under `scripts/`;
 - about 24,684 script lines and 42,030 test lines;
 - about 24.4 mean runner-hours per day from a limited sample of 22 runs;

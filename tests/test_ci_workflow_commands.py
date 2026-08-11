@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Tests for ci_workflow_commands: justfile-backed command scripts.
+
+The helper no longer scrapes workflow YAML. It now resolves a job or recipe
+name to the canonical shell script stored in the repo justfile, and ci_local.sh
+uses that script directly.
+"""
+
+from __future__ import annotations
+
+import unittest
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import ci_workflow_commands as cwc
+
+
+class JustfileRecipeTests(unittest.TestCase):
+    def test_job_aliases_resolve_to_full_test(self) -> None:
+        self.assertEqual(cwc.resolve_recipe_name("macos"), "full-test")
+        self.assertEqual(cwc.resolve_recipe_name("linux-tests"), "full-test")
+
+    def test_check_recipe_uses_the_workspace_check_command(self) -> None:
+        script = cwc.recipe_script("check")
+        self.assertIn(
+            "scripts/cargo_exec.sh check --locked --workspace --all-targets --all-features",
+            script,
+        )
+
+    def test_test_recipe_compiles_without_running(self) -> None:
+        script = cwc.recipe_script("test")
+        self.assertIn(
+            "scripts/cargo_exec.sh test --locked --workspace --lib --bins --no-run",
+            script,
+        )
+
+    def test_full_test_recipe_covers_release_and_suite_smoke(self) -> None:
+        script = cwc.recipe_script("full-test")
+        for expected in (
+            "JCODE_CI_TARGET",
+            "rustc -vV",
+            "scripts/cargo_exec.sh build --locked --release --target \"$target\"",
+            '"./target/$target/release/jcode" --version',
+            "scripts/cargo_exec.sh test --locked --target \"$target\" --workspace --lib --bins --no-run",
+            "scripts/cargo_exec.sh test --locked --target \"$target\" --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core",
+            "scripts/cargo_exec.sh test --locked --target \"$target\" -p jcode-tui --lib",
+            "scripts/cargo_exec.sh test --locked --target \"$target\" -p jcode-app-core --lib",
+            "scripts/cargo_exec.sh test --locked --target \"$target\" --test provider_matrix --test e2e --no-run",
+            "scripts/cargo_exec.sh test --locked --target \"$target\" --test provider_matrix",
+            "JCODE_E2E_REQUIRE_BINARY=1",
+            "JCODE_E2E_BINARY=\"$PWD/target/$target/release/jcode\"",
+        ):
+            self.assertIn(expected, script)
+
+    def test_package_recipe_uses_cargo_package(self) -> None:
+        script = cwc.recipe_script("package")
+        self.assertIn(
+            "scripts/cargo_exec.sh package --locked -p jcode --allow-dirty --no-verify --list",
+            script,
+        )
+
+    def test_release_check_recipe_builds_and_launches(self) -> None:
+        script = cwc.recipe_script("release-check")
+        self.assertIn(
+            "scripts/cargo_exec.sh build --locked --release --target \"$target\" --bin jcode",
+            script,
+        )
+        self.assertIn('"./target/$target/release/jcode" --version', script)
+
+    def test_lint_docs_recipe_uses_vale_and_repository_config(self) -> None:
+        script = cwc.recipe_script("lint-docs")
+        self.assertIn(
+            "git ls-files -z -- '*.md' ':!docs/proposals/**' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini",
+            script,
+        )
+
+    def test_missing_recipe_fails_loudly(self) -> None:
+        with self.assertRaises(SystemExit):
+            cwc.recipe_script("no-such-recipe")
+
+    def test_command_source_is_the_repo_justfile(self) -> None:
+        self.assertEqual(Path(cwc.JUSTFILE).name, "justfile")
+
+
+if __name__ == "__main__":
+    unittest.main()

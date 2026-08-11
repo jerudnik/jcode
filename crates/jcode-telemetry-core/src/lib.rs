@@ -870,10 +870,13 @@ fn post_payload(payload: serde_json::Value, timeout: Duration) -> bool {
         return false;
     };
     let client = TELEMETRY_HTTP_CLIENT.get_or_init(|| {
-        reqwest::blocking::Client::builder()
+        match reqwest::blocking::Client::builder()
             .user_agent(jcode_provider_core::JCODE_USER_AGENT)
             .build()
-            .expect("telemetry HTTP client should build")
+        {
+            Ok(client) => client,
+            Err(_) => reqwest::blocking::Client::new(),
+        }
     });
     match client
         .post(&endpoint)

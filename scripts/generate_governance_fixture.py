@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Regenerate the valid governance fixture from the manifest and workflow text.
+"""Regenerate a valid governance fixture from the manifest and workflow text.
 
-The fixture in `docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json`
-is the exact post-apply target state of design.md sections 3-4, in the aggregate
-snapshot shape `scripts/governance_compare.py` consumes. It is checked in rather
-than generated at test time so a reviewer can read the intended end state as a
-single object, and so the tests mutate a fixed artifact rather than a moving one.
+The retired ideal-base archive used to retain a checked-in fixture under
+`docs/fork/ideal-base/evidence/R07/fixtures/`. That fixture is historical and is
+not restored. This command now writes a current fixture outside the archive for
+offline `scripts/fork-health.sh --fixture` runs.
 
 Regenerate after changing the manifest or the required-context workflows:
 
     python3 scripts/generate_governance_fixture.py \
-      --workflows-dir .github/workflows
+      --workflows-dir .github/workflows \
+      --output target/fork-health/governance-valid.json
 
-`--workflows-dir` must point at workflows that already carry the four
-required-context jobs. Before `workflow-contexts.proposed.patch` lands, that is
-a scratch tree with the patch applied, not the repository's own directory.
+`--workflows-dir` must point at the workflows to check.
 """
 
 from __future__ import annotations
@@ -29,7 +27,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MANIFEST = REPO_ROOT / "scripts" / "required-checks.json"
 DEFAULT_OUTPUT = (
-    REPO_ROOT / "docs" / "fork" / "ideal-base" / "evidence" / "R07" / "fixtures" / "governance-valid.json"
+    REPO_ROOT / "target" / "fork-health" / "governance-valid.json"
 )
 
 
@@ -69,10 +67,10 @@ def build(manifest: dict[str, Any], workflows_dir: Path) -> dict[str, Any]:
 
     return {
         "_comment": (
-            "Valid governance fixture: the exact post-apply target of R07 design.md "
-            "sections 3-4, in the aggregate snapshot shape scripts/governance_compare.py "
-            "consumes. Regenerate with scripts/generate_governance_fixture.py. Tests "
-            "deep-copy this object, mutate one property, and assert the comparator goes red."
+            "Valid governance fixture in the aggregate snapshot shape "
+            "scripts/governance_compare.py consumes. Regenerate with "
+            "scripts/generate_governance_fixture.py. Tests deep-copy this object, "
+            "mutate one property, and assert the comparator goes red."
         ),
         "repository": repo,
         "rulesets": rulesets,

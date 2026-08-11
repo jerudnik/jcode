@@ -18,9 +18,7 @@ pins that property directly.
 from __future__ import annotations
 
 import datetime as dt
-import json
 import pathlib
-import re
 import subprocess
 import sys
 import tempfile
@@ -56,44 +54,6 @@ VALID_IGNORES = """
 ignore = ["RUSTSEC-2026-0141"]
 """
 
-# The surface CI actually executes. `security_preflight.sh` carries its own
-# hardcoded array, so a fixture that only writes audit.toml would prove
-# nothing about the file that really runs.
-VALID_PREFLIGHT = """#!/usr/bin/env bash
-set -euo pipefail
-audit_ignores=(
-  --ignore RUSTSEC-2026-0141 # lettre, boring-tls backend unused
-)
-cargo audit "${audit_ignores[@]}"
-"""
-
-
-def preflight_with(ids: list[str]) -> str:
-    lines = "\n".join(f"  --ignore {advisory_id}" for advisory_id in ids)
-    return (
-        "#!/usr/bin/env bash\nset -euo pipefail\naudit_ignores=(\n"
-        + lines
-        + '\n)\ncargo audit "${audit_ignores[@]}"\n'
-    )
-
-
-def yaml_needs(workflow: pathlib.Path, job_id: str) -> list[str]:
-    """The `needs:` list of one job, read without a YAML dependency.
-
-    The workflows write `needs: [a, b, c]` on one line, so a targeted regex is
-    honest here and keeps the suite runnable on a bare `python3` (which is what
-    the CI job uses).
-    """
-    text = workflow.read_text()
-    block = re.search(rf"^  {re.escape(job_id)}:\n(.*?)(?=^  \w|\Z)", text, re.M | re.S)
-    if block is None:
-        raise AssertionError(f"job {job_id} not found in {workflow}")
-    needs = re.search(r"^    needs:\s*\[(.*?)\]", block.group(1), re.M)
-    if needs is None:
-        raise AssertionError(f"job {job_id} has no inline needs: list")
-    return [item.strip().strip("'\"") for item in needs.group(1).split(",") if item.strip()]
-
-
 def run_checker(root: pathlib.Path, today: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(CHECKER), "--root", str(root), "--today", today],
@@ -104,19 +64,15 @@ def run_checker(root: pathlib.Path, today: str) -> subprocess.CompletedProcess[s
 
 
 class FixtureTree:
-    """A minimal synthetic repo: the three files the checker reads."""
+    """A minimal synthetic repo: the two files the checker reads."""
 
     def __init__(
-        self, audit: str, record: str | None, preflight: str | None = None
+        self, audit: str, record: str | None
     ) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.path = pathlib.Path(self._tmp.name)
         (self.path / ".cargo").mkdir()
         (self.path / ".cargo/audit.toml").write_text(audit)
-        (self.path / "scripts").mkdir()
-        (self.path / "scripts/security_preflight.sh").write_text(
-            VALID_PREFLIGHT if preflight is None else preflight
-        )
         if record is not None:
             (self.path / "docs/security").mkdir(parents=True)
             (self.path / "docs/security/advisories.toml").write_text(record)
@@ -161,89 +117,11 @@ class RealTreePolicy(unittest.TestCase):
         documented = {str(record["id"]) for record in document["advisory"]}
         self.assertEqual(ignored, documented)
 
-    def test_preflight_array_agrees_with_audit_toml(self) -> None:
-        """The surface CI actually executes must carry the same ignore set.
-
-        `scripts/security_preflight.sh` has its own hardcoded array and is what
-        ci.yml and security.yml --strict run. If it drifts from audit.toml,
-        the governed list and the executed list are different lists.
-        """
-        audit = tomllib.loads((ROOT / ".cargo/audit.toml").read_text())
-        ignored = {entry.split("/")[0] for entry in audit["advisories"]["ignore"]}
+    def test_security_preflight_relies_on_cargo_audit_config(self) -> None:
+        """Runtime audit suppression is single-sourced from `.cargo/audit.toml`."""
         preflight = (ROOT / "scripts/security_preflight.sh").read_text()
-        executed = set(re.findall(r"--ignore\s+(RUSTSEC-\d{4}-\d{4})", preflight))
-        self.assertEqual(executed, ignored)
-
-
-class EverySuppressionSurfaceIsGoverned(unittest.TestCase):
-    """A suppression is only as governed as its weakest surface.
-
-    The first cut of this checker read only `.cargo/audit.toml`, so an ignore
-    added straight to the preflight array -- the one CI executes -- passed
-    silently. These fixtures pin that hole shut.
-    """
-
-    def test_undocumented_preflight_ignore_fails(self) -> None:
-        preflight = preflight_with(["RUSTSEC-2026-0141", "RUSTSEC-2099-9999"])
-        with FixtureTree(VALID_IGNORES, VALID_RECORD, preflight) as tree:
-            result = run_checker(tree.path, TODAY)
-        self.assertEqual(result.returncode, 1, "an undocumented preflight ignore was accepted")
-        self.assertIn("RUSTSEC-2099-9999", result.stderr)
-        self.assertIn("security_preflight.sh", result.stderr)
-
-    def test_ignore_in_audit_but_not_preflight_fails(self) -> None:
-        audit = '[advisories]\nignore = ["RUSTSEC-2026-0141", "RUSTSEC-2026-0190"]\n'
-        record = VALID_RECORD + """
-[[advisory]]
-id = "RUSTSEC-2026-0190"
-crate_name = "anyhow"
-owner = "jerudnik"
-accepted = "2026-07-29"
-expires = "2027-01-29"
-affected_surface = "workspace-wide error handling"
-rationale = "downcast_mut unsoundness, no jcode call site casts through a shared reference"
-retire_when = "a patched anyhow release exists"
-"""
-        with FixtureTree(audit, record, VALID_PREFLIGHT) as tree:
-            result = run_checker(tree.path, TODAY)
-        self.assertEqual(result.returncode, 1, "surface drift was accepted")
-        self.assertIn("must agree", result.stderr)
-
-    def test_ignore_in_preflight_but_not_audit_fails(self) -> None:
-        preflight = preflight_with(["RUSTSEC-2026-0141", "RUSTSEC-2026-0190"])
-        record = VALID_RECORD + """
-[[advisory]]
-id = "RUSTSEC-2026-0190"
-crate_name = "anyhow"
-owner = "jerudnik"
-accepted = "2026-07-29"
-expires = "2027-01-29"
-affected_surface = "workspace-wide error handling"
-rationale = "downcast_mut unsoundness, no jcode call site casts through a shared reference"
-retire_when = "a patched anyhow release exists"
-"""
-        with FixtureTree(VALID_IGNORES, record, preflight) as tree:
-            result = run_checker(tree.path, TODAY)
-        self.assertEqual(result.returncode, 1, "surface drift was accepted")
-        self.assertIn("must agree", result.stderr)
-
-    def test_commented_out_preflight_ignore_is_not_a_suppression(self) -> None:
-        preflight = """#!/usr/bin/env bash
-audit_ignores=(
-  --ignore RUSTSEC-2026-0141
-  # --ignore RUSTSEC-2099-9999 retired, kept for history
-)
-"""
-        with FixtureTree(VALID_IGNORES, VALID_RECORD, preflight) as tree:
-            result = run_checker(tree.path, TODAY)
-        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
-
-    def test_missing_preflight_file_fails(self) -> None:
-        with FixtureTree(VALID_IGNORES, VALID_RECORD) as tree:
-            (tree.path / "scripts/security_preflight.sh").unlink()
-            result = run_checker(tree.path, TODAY)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("security_preflight.sh", result.stderr)
+        self.assertIn("cargo audit", preflight)
+        self.assertNotIn("--ignore", preflight)
 
 
 class SeverityThresholdIsGoverned(unittest.TestCase):
@@ -341,24 +219,14 @@ class UndocumentedIgnoreFails(unittest.TestCase):
     def test_stale_record_without_ignore_fails(self) -> None:
         """A record whose advisory is suppressed on *no* surface is dead weight.
 
-        Both surfaces have to be cleared, otherwise this is surface drift
-        rather than a stale record, which the checker reports separately.
+        The checker treats `.cargo/audit.toml` as the sole suppression source,
+        so removing an ID there makes its ownership record stale.
         """
         audit = "[advisories]\nignore = []\n"
-        empty_preflight = "#!/usr/bin/env bash\naudit_ignores=(\n)\n"
-        with FixtureTree(audit, VALID_RECORD, empty_preflight) as tree:
+        with FixtureTree(audit, VALID_RECORD) as tree:
             result = run_checker(tree.path, TODAY)
         self.assertEqual(result.returncode, 1)
         self.assertIn("stale record", result.stderr)
-
-    def test_half_retired_advisory_fails(self) -> None:
-        """Retiring on one surface only is caught as drift, not silently accepted."""
-        audit = "[advisories]\nignore = []\n"
-        with FixtureTree(audit, VALID_RECORD, VALID_PREFLIGHT) as tree:
-            result = run_checker(tree.path, TODAY)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("must agree", result.stderr)
-
 
 class IncompleteRecordFails(unittest.TestCase):
     def test_each_required_field_is_enforced(self) -> None:
@@ -478,21 +346,16 @@ class WiringIsReal(unittest.TestCase):
         preflight = (ROOT / "scripts/preflight.sh").read_text()
         self.assertIn("check_advisory_policy.py", preflight)
 
-    def test_required_checks_manifest_lists_the_job(self) -> None:
-        """security-gate's `needs:` and the governance manifest must agree.
-
-        `governance_compare.py --live` asserts the manifest matches the real
-        workflow. Adding a job to `needs:` without updating the manifest turns
-        the daily Fork Health live run red, and the PR run will not catch it
-        because fork-ci compares against an embedded fixture snapshot.
-        """
-        manifest = json.loads((ROOT / "scripts/required-checks.json").read_text())
-        contract = next(
-            c for c in manifest["workflow_contracts"] if c["job_id"] == "security-gate"
-        )
-        workflow = yaml_needs(ROOT / ".github/workflows/security.yml", "security-gate")
-        self.assertEqual(sorted(contract["needs"]), sorted(workflow))
-        self.assertIn("advisory-policy", contract["needs"])
+    def test_reusable_security_workflow_uses_current_job_id(self) -> None:
+        """Callers invoke the reusable security workflow through the `security` job."""
+        security = (ROOT / ".github/workflows/security.yml").read_text()
+        self.assertIn("on:\n  workflow_call:", security)
+        self.assertIn("  security:\n    name: Security checks", security)
+        for workflow_name in ("ci.yml", "scheduled.yml"):
+            workflow = (ROOT / ".github/workflows" / workflow_name).read_text()
+            with self.subTest(workflow=workflow_name):
+                self.assertIn("  security:\n", workflow)
+                self.assertIn("uses: ./.github/workflows/security.yml", workflow)
 
     def test_retired_homebrew_host_verification_is_gone(self) -> None:
         """F22's original Homebrew host-identity clause retired with the path itself."""

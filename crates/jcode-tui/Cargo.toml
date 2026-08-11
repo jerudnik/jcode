@@ -29,18 +29,18 @@ jcode-app-core = { path = "../jcode-app-core", default-features = false }
 jcode-tui-anim = { path = "../jcode-tui-anim" }
 
 # Async runtime
-tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 futures = "0.3"
 async-trait = "0.1"
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Utilities
 anyhow = "1"
 libc = "0.2"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 regex = "1"
 dirs = "5"
 similar = "2"
@@ -50,7 +50,7 @@ open = "5"
 # OAuth / hashing helpers used by the login + account UI
 base64 = "0.22"
 sha2 = "0.10"
-rand = "0.9.3"
+rand = { workspace = true }
 hex = "0.4"
 url = "2"
 urlencoding = "2"

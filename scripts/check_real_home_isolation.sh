@@ -46,7 +46,8 @@ for arg in "$@"; do
   esac
 done
 
-pkg=${JCODE_ISOLATION_PROBE_PKG:-jcode-app-core}
+pkg=${JCODE_ISOLATION_PROBE_PKG:-jcode-storage}
+probe_filter=${JCODE_ISOLATION_PROBE_FILTER:-tests::home_isolation_tests::every_ambient_root_redirects_under_a_test_harness}
 
 # Every real root jcode-storage can resolve, in the same order as the
 # `roots` array in `every_ambient_root_redirects_under_a_test_harness`. Keep
@@ -154,7 +155,7 @@ run_baseline=${TMPDIR:-/tmp}/jcode-real-home-baseline-run
 count_all_roots > "$run_baseline"
 
 printf 'real-home isolation: running %s tests with JCODE_HOME unset...\n' "$pkg" >&2
-if ! ./scripts/dev_cargo.sh test -p "$pkg" --lib >/tmp/real_home_isolation_run.txt 2>&1; then
+if ! ./scripts/dev_cargo.sh test -p "$pkg" --lib "$probe_filter" -- --exact >/tmp/real_home_isolation_run.txt 2>&1; then
   printf 'real-home isolation: probe suite failed; see /tmp/real_home_isolation_run.txt\n' >&2
   tail -20 /tmp/real_home_isolation_run.txt >&2
   exit 1
@@ -164,8 +165,8 @@ if ! report_deltas "$run_baseline"; then
   # Name the offenders: preflight discards stdout, so the failure has to be
   # actionable from stderr alone.
   # shellcheck disable=SC2016  # the backticks are literal text in the message
-  printf 'real-home isolation FAILED: `cargo test -p %s` wrote into real user state\n' \
-    "$pkg" >&2
+  printf 'real-home isolation FAILED: `cargo test -p %s --lib %s -- --exact` wrote into real user state\n' \
+    "$pkg" "$probe_filter" >&2
   fail_with_guidance
 fi
 

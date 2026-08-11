@@ -5,10 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 jcode-message-types = { path = "../jcode-message-types" }
 jcode-session-types = { path = "../jcode-session-types" }
-serde = { version = "1", features = ["derive"], optional = true }
+serde = { workspace = true, optional = true }
 
 [features]
 default = []

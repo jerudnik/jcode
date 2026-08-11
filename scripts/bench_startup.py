@@ -13,6 +13,7 @@ isolated log.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -64,6 +65,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-cold-server-spawn-ms", type=float, default=20.0)
     parser.add_argument("--max-cold-app-new-ms", type=float, default=20.0)
     parser.add_argument("--max-remote-bootstrap-history-ms", type=float, default=250.0)
+    parser.add_argument(
+        "--json-out",
+        help="write compact machine-readable benchmark results to this path",
+    )
     return parser.parse_args()
 
 
@@ -239,6 +244,58 @@ def print_cold_profile_stats(profiles: list[StartupProfile]) -> None:
     print_stats("Cold client phase: remote bootstrap history", remote_history)
 
 
+def summarize_ms(values: Iterable[float]) -> dict[str, float | int] | None:
+    vals = list(values)
+    if not vals:
+        return None
+    summary: dict[str, float | int] = {
+        "runs": len(vals),
+        "min_ms": min(vals),
+        "max_ms": max(vals),
+        "mean_ms": statistics.mean(vals),
+        "median_ms": statistics.median(vals),
+    }
+    if len(vals) > 1:
+        summary["stdev_ms"] = statistics.stdev(vals)
+    return summary
+
+
+def compact_results(
+    binary: str,
+    runs: int,
+    help_times: list[float],
+    version_times: list[float],
+    server_times: list[float],
+    cold_profiles: list[StartupProfile],
+    budgets: list[Budget],
+) -> dict[str, object]:
+    phases = ["server_check", "server_spawn_start", "server_ready", "app_new_for_remote"]
+    return {
+        "schema": "jcode-startup-bench-v1",
+        "binary": binary,
+        "runs_requested": runs,
+        "metrics": {
+            "help": summarize_ms(help_times),
+            "version": summarize_ms(version_times),
+            "server_ready": summarize_ms(server_times),
+            "cold_total": summarize_ms(p.total_ms for p in cold_profiles),
+            "remote_bootstrap_history": summarize_ms(
+                p.remote_history_ms for p in cold_profiles if p.remote_history_ms is not None
+            ),
+            "cold_phases": {
+                phase: summarize_ms(
+                    p.deltas_ms[phase] for p in cold_profiles if phase in p.deltas_ms
+                )
+                for phase in phases
+            },
+        },
+        "budgets_ms": [
+            {"name": b.name, "actual_ms": b.actual_ms, "limit_ms": b.limit_ms}
+            for b in budgets
+        ],
+    }
+
+
 def collect_budgets(
     help_times: list[float],
     version_times: list[float],
@@ -347,6 +404,19 @@ def main() -> int:
     )
 
     budgets = collect_budgets(help_times, version_times, server_times, cold_profiles, args)
+    if args.json_out:
+        payload = compact_results(
+            binary,
+            args.runs,
+            help_times,
+            version_times,
+            server_times,
+            cold_profiles,
+            budgets,
+        )
+        Path(args.json_out).write_text(json.dumps(payload, separators=(",", ":")) + "\n")
+        print(f"\nWrote JSON results: {args.json_out}")
+
     if args.check:
         failures = [b for b in budgets if b.actual_ms > b.limit_ms]
         print("\nBudget check:")

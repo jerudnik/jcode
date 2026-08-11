@@ -6,5 +6,5 @@ publish = false
 
 [dependencies]
 crossterm = "0.29"
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 jcode-memory-types = { path = "../jcode-memory-types" }

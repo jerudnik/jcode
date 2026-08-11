@@ -63,13 +63,15 @@ Never rebase the rail onto it.
 
 ## Reusing a specific external fix
 
-There is no sync or review cadence. If a specific change in the lineage project
-is independently useful, it may be imported like any other external change:
+There is no sync cadence or upstream review obligation. Pull requests are the
+normal integration path for changes in this fork. If a specific change in the
+lineage project is independently useful, it may be imported like any other
+external change:
 
 ```sh
 git fetch upstream
 git log --oneline fork-point..upstream/master   # browse
-git cherry-pick -x <sha>                        # -x records the origin
+git cherry-pick -x <sha>                        # record provenance
 ```
 
 Then run `scripts/preflight.sh`. Imported code frequently does not satisfy this
@@ -81,8 +83,9 @@ upstream changes or record adopted and skipped commits in a ledger.
 
 ## Local development
 
-Work on `main`. Topic branches should start from `main` and be folded back into
-it. Do not keep durable remote topic branches in this fork.
+Work on `main`. Topic branches should start from `main`, go through pull
+requests, and be folded back into it. Do not keep durable remote topic branches
+in this fork.
 
 Use `--force-with-lease`, never plain `--force`, when updating `main`.
 
@@ -97,7 +100,7 @@ too, so changes to `main` go through pull requests like everyone else's.
 
 | Ruleset | Rules | Applies to |
 |---|---|---|
-| `protect-fork-rails` | `deletion`, `non_fast_forward`, `pull_request` (zero required approvals, merge commits only, review-thread resolution), `required_status_checks` (`Governance Root`, `Fork CI Gate`, `Security Gate`, `Nix Gate`) | `refs/heads/main` |
+| `protect-fork-rails` | `deletion`, `non_fast_forward`, `pull_request` (zero required approvals, merge commits only, review-thread resolution), required status checks from `scripts/required-checks.json` | `refs/heads/main` |
 | `no-stray-branches` | `creation` | everything except `main` and `automation/**` |
 
 The repository itself allows merge commits only (squash and rebase merging are
@@ -106,24 +109,21 @@ branch-protection rule on `main` was removed when the rulesets took over; the
 rulesets are the only server-side protection.
 
 These are repository configuration, not files, so nothing in a clone reveals
-them. They listed the retired rails until the fork collapsed to one, and the
-stale entries blocked their own deletion. `scripts/fork-health.sh` compares a
-live or fixture governance snapshot against `scripts/required-checks.json`
-(the machine-readable manifest of this state) and fails closed on any drift.
+them. The live required-check names are mirrored only in
+`scripts/required-checks.json`; print them with `jq -r '.required_checks[].context' scripts/required-checks.json`.
+`scripts/fork-health.sh` compares a live or fixture governance snapshot against
+that manifest and fails closed on any drift.
 
-Twenty-seven governance paths (the manifest, the comparator, the fork-health
-script, the governance workflows, and the R07 evidence contract, enumerated in
-`docs/fork/ideal-base/evidence/R07/github-governance.proposed.json`) are
-protected by the `Governance Root` required check: any PR that changes them
-goes red and can only land through the transaction-bound maintenance procedure
-in `docs/fork/ideal-base/evidence/R07/design.md` section 4 (capture the ruleset
-body, drop the check, merge conditioned on the exact head SHA, restore the body
-byte-identically, prove a single merge in the window).
+Governance and workflow changes now land through ordinary pull requests. When a
+ruleset, required check, or workflow name changes, update the manifest and the
+checker together with the settings change. There is no separate maintenance-
+window procedure for retired ideal-base rails.
 
 ## Audits
 
 ```sh
-scripts/fork-health.sh --fixture docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json   # offline
+python3 scripts/generate_governance_fixture.py --output target/fork-health/governance-valid.json
+scripts/fork-health.sh --fixture target/fork-health/governance-valid.json   # offline
 scripts/fork-health.sh --live                                                                      # compares live GitHub state
 ```
 
@@ -141,17 +141,18 @@ Every workflow lives on `main` with everything else.
 | Workflow | Role | Trigger |
 |---|---|---|
 | `docs-impact.yml` | Advisory branch-wide DOX review packet derived from APM scopes | PR open/update/reopen/ready-for-review |
-| `fork-ci.yml` | The fork's real gate: quality + macOS build/test, advisory Linux tests | push/PR to `main`, weekly strict run |
-| `nix.yml` | Flake validation + maintained-system builds + Cachix binary publication | push/PR touching build inputs and `v*` tags |
-| `security.yml` | Secret scan + triaged cargo-audit gate; weekly full advisory report | push/PR touching deps, weekly |
+| `pr.yml` | Pull request classifier plus PR Gate entrypoint | PR to `main` |
+| `ci.yml` | Reusable PR Gate orchestrator: docs lint for docs-only PRs, otherwise fork, security, Nix, and smoke helpers | workflow_call from `pr.yml` |
+| `fork-ci.yml` | Reusable fork helper for quality + macOS build/test, advisory Linux tests | workflow_call from `ci.yml` and `scheduled.yml` |
+| `security.yml` | Reusable secret-scan + triaged cargo-audit helper; weekly full advisory report | workflow_call from `ci.yml` and `scheduled.yml` |
+| `nix.yml` | Reusable flake validation + maintained-system build helper, plus Cachix publication when requested | workflow_call from `ci.yml`, `main.yml`, and `scheduled.yml` |
+| `freebsd-smoke.yml` | Reusable FreeBSD smoke helper | workflow_call from `ci.yml`, `main.yml`, and `scheduled.yml` |
+| `main.yml` | Main-branch publish and smoke checks | push to `main` |
+| `scheduled.yml` | Weekly broad checks: fork, security, Nix, and smoke | weekly schedule, manual dispatch |
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
 | `governance-root.yml` | Governance-path audit gate: fails PRs that change protected governance files outside the recorded maintenance procedure (R07) | PR to `main` |
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
 | `release.yml` | Metadata-only GitHub release notes; rejects attached assets | tag push matching `v*` |
-| `ci.yml`, `freebsd-smoke.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
-
-The inherited upstream workflows are dispatch-only. They do not gate anything;
-`fork-ci.yml` does.
 
 ## Platforms
 

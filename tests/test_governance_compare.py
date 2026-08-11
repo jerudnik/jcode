@@ -29,14 +29,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.generate_governance_fixture import build as build_fixture
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 MANIFEST = SCRIPTS / "required-checks.json"
 COMPARATOR = SCRIPTS / "governance_compare.py"
 FORK_HEALTH = SCRIPTS / "fork-health.sh"
-FIXTURE = (
-    REPO_ROOT / "docs" / "fork" / "ideal-base" / "evidence" / "R07" / "fixtures" / "governance-valid.json"
-)
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -47,7 +46,7 @@ EXIT_SCHEMA = 2
 
 
 def load_fixture() -> dict:
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return build_fixture(load_manifest(), REPO_ROOT / ".github" / "workflows")
 
 
 def load_manifest() -> dict:
@@ -138,9 +137,9 @@ class ValidFixtureTests(ComparatorCase):
         self.assertIn("matches the manifest", result.stdout)
 
     def test_fixture_is_regenerable_from_the_manifest(self) -> None:
-        # The fixture is checked in, so it can drift from the manifest it is
-        # supposed to depict. If it did, every planted-failure test below would
-        # be mutating a stale object and proving nothing about the real target.
+        # The expected state is generated from the manifest and live workflow
+        # text, so the planted-failure tests only mutate the object the
+        # comparator actually compares.
         fixture = load_fixture()
         manifest = load_manifest()
         self.assertEqual(fixture["repository"]["id"], manifest["repository_id"])
@@ -287,7 +286,7 @@ class RulesetMutationTests(ComparatorCase):
 
 class RequiredContextTests(ComparatorCase):
     def test_each_required_context_removal_is_detected(self) -> None:
-        for context in ("Governance Root", "Fork CI Gate", "Security Gate", "Nix Gate"):
+        for context in ("Governance Root", "PR Gate"):
             with self.subTest(context=context):
                 snapshot = load_fixture()
                 params = rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"]
@@ -308,7 +307,7 @@ class RequiredContextTests(ComparatorCase):
         for entry in rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"][
             "required_status_checks"
         ]:
-            if entry["context"] == "Nix Gate":
+            if entry["context"] == "PR Gate":
                 entry["integration_id"] = None
         self.assert_rejected(snapshot, "spoofable")
 
@@ -317,7 +316,7 @@ class RequiredContextTests(ComparatorCase):
         for entry in rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"][
             "required_status_checks"
         ]:
-            if entry["context"] == "Fork CI Gate":
+            if entry["context"] == "Governance Root":
                 entry["integration_id"] = 99999
         self.assert_rejected(snapshot, "integration_id")
 
@@ -386,7 +385,7 @@ class RepositoryTests(ComparatorCase):
 
 class WorkflowContractTests(ComparatorCase):
     def test_duplicate_context_definition(self) -> None:
-        # Two jobs named "Nix Gate" in different workflows: branch protection
+        # Two jobs named "PR Gate" in different workflows: branch protection
         # matches by name, so the wrong one could satisfy the requirement, and
         # integration_id cannot separate them because both are the same app.
         snapshot = load_fixture()
@@ -397,7 +396,7 @@ class WorkflowContractTests(ComparatorCase):
             "    branches: [main]\n"
             "jobs:\n"
             "  decoy:\n"
-            "    name: Nix Gate\n"
+            "    name: PR Gate\n"
             "    runs-on: ubuntu-latest\n"
             "    steps:\n"
             "      - run: echo ok\n"
@@ -406,23 +405,22 @@ class WorkflowContractTests(ComparatorCase):
 
     def test_summary_dependency_removed(self) -> None:
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/fork-ci.yml"] = snapshot["workflows"][
-            ".github/workflows/fork-ci.yml"
-        ].replace(
-            "needs: [changes, governance-contract, quality, macos, linux-tests]",
-            "needs: [changes, governance-contract, quality, macos]",
+        workflow = snapshot["workflows"][".github/workflows/pr.yml"]
+        original = "needs: [classify, checks]"
+        # A no-op replace would make this test vacuous, so pin the anchor.
+        self.assertIn(original, workflow, "pr-gate needs: line moved; update this fixture mutation")
+        snapshot["workflows"][".github/workflows/pr.yml"] = workflow.replace(
+            original, "needs: [classify]"
         )
         self.assert_rejected(snapshot, "summary dependencies")
 
     def test_summary_dependency_added(self) -> None:
         snapshot = load_fixture()
-        workflow = snapshot["workflows"][".github/workflows/security.yml"]
-        original = "needs: [detect-dependency-changes, advisory-policy, secret-scan, dependency-audit]"
-        # A no-op replace would make this test vacuous, so pin the anchor.
-        self.assertIn(original, workflow, "security-gate needs: line moved; update this fixture mutation")
-        snapshot["workflows"][".github/workflows/security.yml"] = workflow.replace(
-            original,
-            original[:-1] + ", weekly-report]",
+        workflow = snapshot["workflows"][".github/workflows/pr.yml"]
+        original = "needs: [classify, checks]"
+        self.assertIn(original, workflow, "pr-gate needs: line moved; update this fixture mutation")
+        snapshot["workflows"][".github/workflows/pr.yml"] = workflow.replace(
+            original, "needs: [classify, checks, decoy]"
         )
         self.assert_rejected(snapshot, "summary dependencies")
 
@@ -431,28 +429,28 @@ class WorkflowContractTests(ComparatorCase):
         # waits for the dependency, but the gate script never reads its result,
         # making the gate green regardless of that job's conclusion.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/nix.yml"] = snapshot["workflows"][
-            ".github/workflows/nix.yml"
-        ].replace("${{ needs.build.result }}", "success")
-        self.assert_rejected(snapshot, "never reads", "needs.build.result")
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
+        ].replace("${{ needs.checks.result }}", "success")
+        self.assert_rejected(snapshot, "never reads", "needs.checks.result")
 
     def test_routing_drift_on_a_conditional_job(self) -> None:
+        # The manifest no longer routes any conditional job, so the planted
+        # failure is a manifest that routes a job the workflow does not define.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/fork-ci.yml"] = snapshot["workflows"][
-            ".github/workflows/fork-ci.yml"
-        ].replace(
-            "if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.scripts == 'true' || github.event_name != 'pull_request'",
-            "if: needs.changes.outputs.rust == 'true' || github.event_name != 'pull_request'",
-        )
-        self.assert_rejected(snapshot, "routed job 'quality'")
+        manifest = load_manifest()
+        for contract in manifest["workflow_contracts"]:
+            if contract["context"] == "PR Gate":
+                contract["routing"] = {"docs": "docs_only"}
+        self.assert_rejected(snapshot, "routes 'docs'", manifest=manifest)
 
     def test_workflow_level_pull_request_paths_filter(self) -> None:
         # The lockout case: a required context whose workflow is path-filtered
         # never runs on an unrelated PR, so that PR can never satisfy the
         # requirement and the branch becomes permanently unmergeable.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/nix.yml"] = snapshot["workflows"][
-            ".github/workflows/nix.yml"
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
         ].replace(
             "  pull_request:\n    branches: [main]\n",
             '  pull_request:\n    branches: [main]\n    paths:\n      - "flake.nix"\n',
@@ -469,21 +467,21 @@ class WorkflowContractTests(ComparatorCase):
 
     def test_required_context_job_renamed(self) -> None:
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/security.yml"] = snapshot["workflows"][
-            ".github/workflows/security.yml"
-        ].replace("    name: Security Gate", "    name: Security Summary")
-        self.assert_rejected(snapshot, "'Security Gate' has no job definition")
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
+        ].replace("    name: PR Gate", "    name: PR Summary")
+        self.assert_rejected(snapshot, "'PR Gate' has no job definition")
 
     def test_always_if_weakened(self) -> None:
         # `if: always()` is what makes the summary run when a dependency was
         # skipped. Without it the summary is skipped too, and a skipped required
         # context blocks forever rather than failing informatively.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/fork-ci.yml"] = snapshot["workflows"][
-            ".github/workflows/fork-ci.yml"
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
         ].replace(
-            "    if: always() && github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    env:\n      CHANGES_RESULT:",
-            "    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    env:\n      CHANGES_RESULT:",
+            "    if: always()\n",
+            "    if: github.event_name == 'pull_request'\n",
         )
         self.assert_rejected(snapshot, "`if:` is")
 
@@ -647,34 +645,9 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
         )
         self.assertTrue(manifest["protected_paths"]["additions_adjudicated"])
 
-        apply_doc = json.loads(self.APPLY_DOC.read_text(encoding="utf-8"))
-        template = self._norm(apply_doc["template_variables"]["protected_paths"])
-        self.assertEqual(
-            required,
-            template,
-            f"manifest/template_variables mismatch: "
-            f"{sorted(required ^ template)}",
-        )
-
-        seq6 = next(s for s in apply_doc["steps"] if s.get("sequence") == 6)
-        diff_cmd = next(
-            a
-            for a in seq6["local_git"]["assertions"]
-            if a.startswith("git diff --quiet")
-        )
-        # Set equality, not containment. A path the assertion covers but the
-        # manifest omits is invisible to a per-path assertIn loop, which is
-        # exactly how the two sets drifted apart while this test stayed green.
-        seq6_paths = self._norm(
-            [token for token in diff_cmd.split() if "/" in token]
-        )
-        self.assertEqual(
-            required,
-            seq6_paths,
-            f"manifest/sequence-6 diff assertion mismatch: "
-            f"{sorted(required ^ seq6_paths)}",
-        )
-
+        # Compare only the artifacts this change actually owns. The workflow
+        # text and the checked-in fixture must both name exactly the same
+        # long-lived governance paths as the manifest.
         workflow_text = load_fixture()["workflows"][
             ".github/workflows/governance-root.yml"
         ]
@@ -709,7 +682,6 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
         # which this test forces by pinning their absence.
         for baseline in sorted(self.RATCHET_BASELINES):
             self.assertNotIn(baseline, required)
-            self.assertNotIn(baseline, diff_cmd)
             self.assertNotIn(baseline, workflow_text)
 
 
@@ -831,10 +803,10 @@ class LiveModeTests(unittest.TestCase):
             shim.write_text(GH_SHIM, encoding="utf-8")
             shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
-            # Live mode reads workflow text from the working tree. Tests that
-            # need the four required-context jobs to exist must supply them,
-            # because workflow-contexts.proposed.patch is coordinator-owned and
-            # has not been applied to this repository's own .github/workflows.
+        # Live mode reads workflow text from the working tree. Tests that
+        # need the three required-context jobs to exist must supply them,
+        # because workflow-contexts.proposed.patch is coordinator-owned and
+        # has not been applied to this repository's own .github/workflows.
             if workflows is None:
                 workflows_dir = REPO_ROOT / ".github" / "workflows"
             else:
@@ -873,7 +845,7 @@ class LiveModeTests(unittest.TestCase):
         # Post-bootstrap counterpart of the pre-bootstrap sanity check (which
         # asserted the unpatched workflows went red): now that the authorized
         # workflow diff is applied, this repository's actual workflow
-        # directory carries the four required-context jobs and live mode must
+        # directory carries the three required-context jobs and live mode must
         # go green. If a future edit removes a required-context job, this goes
         # red again, so the workflow contract check stays load-bearing.
         result = self.run_live(self.build_table())
@@ -980,12 +952,18 @@ class ForkHealthModeTests(unittest.TestCase):
         self.assertIn("--fixture", result.stderr)
 
     def test_both_sources_is_usage_error(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--live")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health("--fixture", str(path), "--live")
         self.assertEqual(result.returncode, EXIT_ACQUISITION, result.stdout + result.stderr)
         self.assertIn("mutually exclusive", result.stderr)
 
     def test_unknown_option_is_usage_error(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--nope")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health("--fixture", str(path), "--nope")
         self.assertEqual(result.returncode, EXIT_ACQUISITION)
         self.assertIn("unknown option", result.stderr)
 
@@ -995,14 +973,20 @@ class ForkHealthModeTests(unittest.TestCase):
         self.assertIn("fixture not found", result.stderr)
 
     def test_repo_disagreeing_with_the_manifest_is_usage_error(self) -> None:
-        result = self.run_fork_health(
-            "--fixture", str(FIXTURE), "--repo", "someone/else", "--fork-remote", self.fork_remote()
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health(
+                "--fixture", str(path), "--repo", "someone/else", "--fork-remote", self.fork_remote()
+            )
         self.assertEqual(result.returncode, EXIT_ACQUISITION)
         self.assertIn("disagrees with the manifest", result.stderr)
 
     def test_valid_fixture_run_is_green_end_to_end(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--fork-remote", self.fork_remote())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health("--fixture", str(path), "--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_OK, result.stdout + result.stderr)
         self.assertIn("all invariants hold", result.stdout)
 

@@ -17,8 +17,8 @@ jcode-tui-messages = { path = "../jcode-tui-messages" }
 libc = "0.2"
 pollster = "0.3"
 pulldown-cmark = "0.12"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 wgpu = "0.19"
 winit = "0.29"
 

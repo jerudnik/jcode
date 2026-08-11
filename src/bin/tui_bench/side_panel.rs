@@ -1,6 +1,6 @@
 use super::{SidePanelSource, make_text};
 use anyhow::{Context, Result};
-use jcode::side_panel::{
+use jcode_tui::side_panel::{
     SidePanelPage, SidePanelPageFormat, SidePanelPageSource, SidePanelSnapshot,
 };
 use std::fs;

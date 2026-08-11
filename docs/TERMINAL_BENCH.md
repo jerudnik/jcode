@@ -2,6 +2,21 @@
 
 This document describes the cleanest currently-working path for running jcode on Terminal-Bench 2.0 through Harbor.
 
+## Local performance trend benchmarks
+
+These benchmarks are for local trend data, scheduled observation, and release notes. They are intentionally nonblocking until enough same-host history exists, because startup, compile, terminal, and memory numbers vary heavily by machine load, terminal stack, filesystem cache, and installed helper tools.
+
+Keep each run's raw output machine-readable and small. Store JSON artifacts as build logs or local files, not as required CI checks.
+
+| Area | Stable command | Primary trend metric | Suggested nonblocking regression range |
+| --- | --- | --- | --- |
+| Startup | `python3 scripts/bench_startup.py ./target/release/jcode --runs 5 --json-out /var/tmp/jcode-startup-bench.json` | `metrics.cold_total.median_ms`, plus `metrics.server_ready.median_ms` | Warn when same-host median grows by more than 25% or 100 ms, whichever is larger, for two consecutive scheduled runs. |
+| Warm compile | `scripts/bench_compile.sh check --runs 5 --edit src/main.rs --json` | `median_seconds` | Warn when same-host median grows by more than 20% or 5 s, whichever is larger, for two consecutive scheduled runs. |
+| TUI visible/input delay | `python3 scripts/bench_startup_visible_ready.py --tools jcode --runs 10 --json-out /var/tmp/jcode-visible-ready-bench.json` | `tools.jcode.first_visible_summary.median_ms` and `tools.jcode.input_ready_summary.median_ms` | Warn when same-host median grows by more than 25% or 250 ms, whichever is larger. Keep failures local if terminal emulation differs between hosts. |
+| Memory | `python3 scripts/bench_memory_cli.py --tools jcode_memory_off jcode_memory_on --sessions 1 --json-out /var/tmp/jcode-memory-bench.json` | `results[].pss_mb` | Warn when same-host PSS grows by more than 20% or 100 MB, whichever is larger, after confirming no model cache or auth-state change. |
+
+Use the lower-cost commands for scheduled collection and rerun manually with higher `--runs` when a trend looks suspicious. Do not make any of these blocking gates until the range has been checked against several runs on the same worker class.
+
 ## What is in the repo
 
 - `scripts/jcode_harbor_agent.py`

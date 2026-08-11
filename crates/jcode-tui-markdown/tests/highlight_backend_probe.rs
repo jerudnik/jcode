@@ -94,7 +94,7 @@ fn workload() -> Vec<(&'static str, &'static str)> {
 /// Measures grammar-compile cost (first pass), steady-state throughput, and
 /// resident-memory growth from compiled highlight grammars.
 #[test]
-#[ignore = "perf/memory probe; run explicitly with --ignored --nocapture"]
+#[ignore = "perf/memory probe; run explicitly with --ignored --nocapture | runbook: manual-benchmark"]
 fn highlight_backend_probe() {
     let lines = workload();
 

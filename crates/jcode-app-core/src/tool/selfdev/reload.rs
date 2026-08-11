@@ -1,5 +1,5 @@
 use super::*;
-pub use jcode_selfdev_types::ReloadRecoveryDirective;
+pub use jcode_selfdev_types::{ReloadEnvironment, ReloadRecoveryDirective, ReloadWaitMode};
 
 impl ReloadContext {
     fn sanitize_session_id(session_id: &str) -> String {
@@ -224,37 +224,157 @@ pub fn persisted_background_tasks_note(session_id: &str) -> String {
     notes
 }
 
+/// Resolve the repository a reload applies to.
+///
+/// An explicit `working_dir` is authoritative: it must resolve through that
+/// directory's ancestors or not at all, so a caller pointed at a non-repository
+/// never silently reloads the ambient repo instead.
 pub(super) fn resolve_selfdev_reload_repo_dir(
     working_dir: Option<&std::path::Path>,
 ) -> Option<std::path::PathBuf> {
-    resolve_selfdev_reload_repo_dir_from(build::get_repo_dir(), working_dir)
+    match working_dir {
+        Some(dir) => build::find_repo_in_ancestors(dir),
+        None => build::get_repo_dir(),
+    }
 }
 
+/// Precedence helper covering the working-dir-wins rule in isolation.
+#[cfg(test)]
 pub(super) fn resolve_selfdev_reload_repo_dir_from(
     primary: Option<std::path::PathBuf>,
     working_dir: Option<&std::path::Path>,
 ) -> Option<std::path::PathBuf> {
-    primary.or_else(|| working_dir.and_then(build::find_repo_in_ancestors))
+    working_dir
+        .and_then(build::find_repo_in_ancestors)
+        .or(primary)
 }
 
-/// Resolve the repo dir for a reload, or fall back to a synthetic path in test
-/// sessions.
-///
-/// A test session (`JCODE_TEST_SESSION`) fakes everything repo-derived further
-/// down `do_reload` — source state, publish, smoke test, and the on-disk binary
-/// check — so repo discovery must not be load-bearing there either. Build/test
-/// environments without a discoverable repository (e.g. remote builders that
-/// sync the source tree without `.git`) exercise the reload signal/ack
-/// contract, which does not depend on repository identity.
-pub(super) fn reload_repo_dir_or_test_fallback(
-    resolved: Option<std::path::PathBuf>,
-    is_test_session: bool,
-) -> Result<std::path::PathBuf> {
-    match resolved {
-        Some(dir) => Ok(dir),
-        None if is_test_session => Ok(std::env::temp_dir().join("jcode-test-session-repo")),
-        None => Err(anyhow::anyhow!("Could not find jcode repository directory")),
+#[cfg(test)]
+fn reload_environment_override() -> &'static std::sync::Mutex<Option<ReloadEnvironment>> {
+    static OVERRIDE: std::sync::OnceLock<std::sync::Mutex<Option<ReloadEnvironment>>> =
+        std::sync::OnceLock::new();
+    OVERRIDE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+#[cfg(test)]
+pub(super) struct ReloadEnvironmentGuard {
+    previous: Option<ReloadEnvironment>,
+}
+
+#[cfg(test)]
+pub(super) fn override_reload_environment_for_tests(
+    environment: ReloadEnvironment,
+) -> ReloadEnvironmentGuard {
+    let mut guard = reload_environment_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = guard.replace(environment);
+    ReloadEnvironmentGuard { previous }
+}
+
+#[cfg(test)]
+impl Drop for ReloadEnvironmentGuard {
+    fn drop(&mut self) {
+        let mut guard = reload_environment_override()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = self.previous.take();
     }
+}
+
+/// Build the synthetic reload environment used by test sessions.
+///
+/// Mirrors the real environment closely enough to exercise the reload
+/// signal/ack contract while depending on nothing that must exist on disk.
+fn test_session_reload_environment(
+    resolved_repo_dir: Option<std::path::PathBuf>,
+) -> ReloadEnvironment {
+    let repo_dir = resolved_repo_dir
+        .unwrap_or_else(|| std::env::temp_dir().join("jcode-test-session-repo"));
+    let target_binary =
+        build::find_dev_binary(&repo_dir).unwrap_or_else(|| build::release_binary_path(&repo_dir));
+    let source = build::SourceState {
+        repo_scope: "test-repo-scope".to_string(),
+        worktree_scope: "test-worktree-scope".to_string(),
+        short_hash: "test-reload-hash".to_string(),
+        full_hash: "test-reload-hash-full".to_string(),
+        dirty: true,
+        fingerprint: "test-reload-fingerprint".to_string(),
+        version_label: "test-reload-hash".to_string(),
+        changed_paths: 0,
+    };
+    let runtime_identity = source
+        .runtime_identity_projection("selfdev", build::resolve_binary_payload(&target_binary));
+
+    ReloadEnvironment {
+        repo_dir,
+        target_binary,
+        version_before: jcode_build_meta::VERSION.to_string(),
+        version_after: source.version_label.clone(),
+        wait_mode: ReloadWaitMode::AcknowledgeOnly {
+            message: format!(
+                "Reload acknowledged for build {}. Server is restarting now.",
+                source.version_label
+            ),
+        },
+        source,
+        runtime_identity,
+    }
+}
+
+fn prepare_reload_environment(working_dir: Option<&std::path::Path>) -> Result<ReloadEnvironment> {
+    #[cfg(test)]
+    if let Some(environment) = reload_environment_override()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    {
+        return Ok(environment);
+    }
+
+    let resolved_repo_dir = resolve_selfdev_reload_repo_dir(working_dir);
+
+    // A test session fakes everything repo-derived below -- source state,
+    // publish, smoke test, and the on-disk binary check -- so repo discovery
+    // must not be load-bearing there either. Build/test environments without a
+    // discoverable repository (e.g. remote builders that sync the source tree
+    // without `.git`) exercise the reload signal/ack contract, which does not
+    // depend on repository identity or on which profile was built locally.
+    if SelfDevTool::is_test_session() {
+        return Ok(test_session_reload_environment(resolved_repo_dir));
+    }
+
+    let repo_dir = resolved_repo_dir
+        .ok_or_else(|| anyhow::anyhow!("Could not find jcode repository directory"))?;
+
+    let target_binary =
+        build::find_dev_binary(&repo_dir).unwrap_or_else(|| build::release_binary_path(&repo_dir));
+    if !target_binary.exists() {
+        return Err(anyhow::anyhow!(
+            "No binary found at {}.\n\
+             Run 'jcode self-dev --build' first, or build with 'scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode' and then try reload again.",
+            target_binary.display()
+        ));
+    }
+
+    let source = build::current_source_state(&repo_dir)?;
+    let published = build::publish_local_current_build_for_source(&repo_dir, &source)?;
+    build::smoke_test_server_binary(&published.published_path)?;
+
+    let runtime_identity = source
+        .runtime_identity_projection("selfdev", build::resolve_binary_payload(&target_binary));
+
+    Ok(ReloadEnvironment {
+        repo_dir,
+        target_binary,
+        version_before: jcode_build_meta::VERSION.to_string(),
+        version_after: source.version_label.clone(),
+        source,
+        runtime_identity,
+        wait_mode: ReloadWaitMode::WaitForHandoff {
+            socket_path: server::socket_path(),
+        },
+    })
 }
 
 impl SelfDevTool {
@@ -265,66 +385,13 @@ impl SelfDevTool {
         execution_mode: ToolExecutionMode,
         working_dir: Option<&std::path::Path>,
     ) -> Result<ToolOutput> {
-        let repo_dir = reload_repo_dir_or_test_fallback(
-            resolve_selfdev_reload_repo_dir(working_dir),
-            SelfDevTool::is_test_session(),
-        )?;
-
-        let target_binary = build::find_dev_binary(&repo_dir)
-            .unwrap_or_else(|| build::release_binary_path(&repo_dir));
-        // In a test session the rest of this method fakes the build source,
-        // hash and published state, so the real on-disk binary check is both
-        // inconsistent and environment-dependent (CI builds a release binary;
-        // a local debug/selfdev checkout may not have target/release/jcode).
-        // Skipping it lets the reload-signal/ack contract be exercised
-        // deterministically regardless of which profile was built locally.
-        if !SelfDevTool::is_test_session() && !target_binary.exists() {
-            return Ok(ToolOutput::new(
-                format!(
-                    "No binary found at {}.\n\
-                     Run 'jcode self-dev --build' first, or build with 'scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode' and then try reload again.",
-                    target_binary.display()
-                )
-                .to_string(),
-            ));
-        }
-
-        let source = if SelfDevTool::is_test_session() {
-            build::SourceState {
-                repo_scope: "test-repo-scope".to_string(),
-                worktree_scope: "test-worktree-scope".to_string(),
-                short_hash: "test-reload-hash".to_string(),
-                full_hash: "test-reload-hash-full".to_string(),
-                dirty: true,
-                fingerprint: "test-reload-fingerprint".to_string(),
-                version_label: "test-reload-hash".to_string(),
-                changed_paths: 0,
-            }
-        } else {
-            build::current_source_state(&repo_dir)?
-        };
-        let hash = source.version_label.clone();
-        let version_before = jcode_build_meta::VERSION.to_string();
-        let published = if SelfDevTool::is_test_session() {
-            None
-        } else {
-            Some(build::publish_local_current_build_for_source(
-                &repo_dir, &source,
-            )?)
-        };
-        if !SelfDevTool::is_test_session() {
-            let published_build = published.as_ref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "published build metadata was missing after publish_local_current_build_for_source"
-                )
-            })?;
-            build::smoke_test_server_binary(&published_build.published_path)?;
-        }
+        let environment = prepare_reload_environment(working_dir)?;
+        let hash = environment.version_after.clone();
 
         // Save reload context for continuation after restart
         let reload_ctx = ReloadContext {
             task_context: context,
-            version_before,
+            version_before: environment.version_before.clone(),
             version_after: hash.clone(),
             session_id: session_id.to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -340,15 +407,11 @@ impl SelfDevTool {
         crate::logging::info("Reload context saved successfully");
 
         // Signal the server via in-process channel (replaces filesystem-based rebuild-signal)
-        let runtime_identity = source.runtime_identity_projection(
-            "selfdev",
-            crate::build::resolve_binary_payload(&target_binary),
-        );
         let request_id = server::send_reload_signal_with_runtime_identity(
             hash.clone(),
             Some(session_id.to_string()),
             true,
-            Some(runtime_identity),
+            Some(environment.runtime_identity.clone()),
         );
         crate::logging::info(&format!(
             "selfdev reload: request={} session_id={} hash={} execution_mode={:?}",
@@ -376,34 +439,30 @@ impl SelfDevTool {
         ));
 
         match execution_mode {
-            ToolExecutionMode::Direct => {
-                if SelfDevTool::is_test_session() {
-                    return Ok(ToolOutput::new(format!(
-                        "Reload acknowledged for build {}. Server is restarting now.",
-                        ack.hash
-                    )));
-                }
-                match server::await_reload_handoff(&server::socket_path(), timeout).await {
-                    server::ReloadWaitStatus::Ready => Ok(ToolOutput::new(format!(
-                        "Reload completed successfully for build {}. Server reported ready.",
-                        ack.hash
-                    ))),
-                    server::ReloadWaitStatus::Failed(detail) => Err(anyhow::anyhow!(
-                        "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
-                        ack.hash,
-                        server::socket_path().display(),
-                        detail.unwrap_or_else(|| "unknown reload failure".to_string()),
-                        server::reload_state_summary(std::time::Duration::from_secs(60))
-                    )),
-                    server::ReloadWaitStatus::Idle | server::ReloadWaitStatus::Waiting { .. } => {
-                        Err(anyhow::anyhow!(
+            ToolExecutionMode::Direct => match environment.wait_mode {
+                ReloadWaitMode::WaitForHandoff { ref socket_path } => {
+                    match server::await_reload_handoff(socket_path, timeout).await {
+                        server::ReloadWaitStatus::Ready => Ok(ToolOutput::new(format!(
+                            "Reload completed successfully for build {}. Server reported ready.",
+                            ack.hash
+                        ))),
+                        server::ReloadWaitStatus::Failed(detail) => Err(anyhow::anyhow!(
+                            "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
+                            ack.hash,
+                            socket_path.display(),
+                            detail.unwrap_or_else(|| "unknown reload failure".to_string()),
+                            server::reload_state_summary(std::time::Duration::from_secs(60))
+                        )),
+                        server::ReloadWaitStatus::Idle
+                        | server::ReloadWaitStatus::Waiting { .. } => Err(anyhow::anyhow!(
                             "Reload was acknowledged for build {}, but readiness could not be confirmed within {}s.",
                             ack.hash,
                             timeout.as_secs()
-                        ))
+                        )),
                     }
                 }
-            }
+                ReloadWaitMode::AcknowledgeOnly { message } => Ok(ToolOutput::new(message)),
+            },
             ToolExecutionMode::AgentTurn => {
                 // In normal agent turns the reload will intentionally terminate this
                 // process shortly after the server acknowledges the request. Return a

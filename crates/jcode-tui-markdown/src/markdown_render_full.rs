@@ -426,6 +426,15 @@ pub fn render_markdown_with_width(text: &str, max_width: Option<usize>) -> Vec<L
                         lines.push(mermaid_sidebar_placeholder(
                             "↗ mermaid diagram (image protocols unavailable)",
                         ));
+                        // Close out the code block state before skipping the
+                        // render: `continue` bypasses the shared cleanup below,
+                        // and leaving `in_code_block` set makes the rest of the
+                        // message accumulate into `code_block_content` and
+                        // re-render at EOF as a bogus "streaming" fence.
+                        exit_centered_structured_block(&mut centered_blocks, lines.len());
+                        in_code_block = false;
+                        code_block_lang = None;
+                        code_block_content.clear();
                         continue;
                     }
                     let result = if streaming_mode {

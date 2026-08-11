@@ -201,8 +201,11 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("metadata-only GitHub release", workflow)
         self.assertIn("must not contain binary assets", workflow)
-        self.assertIn("workflow_call", workflow)
-        self.assertNotIn("tags:", workflow)
+        # release.yml owns its own v* tag trigger. Chaining it from nix.yml
+        # via workflow_call forced a contents:write grant into the PR Gate call
+        # tree, which GitHub rejects at workflow load (startup_failure on every
+        # pull request). The two tag-triggered workflows run independently.
+        self.assertIn("tags:", workflow)
         for banned in (
             "actions/upload-artifact",
             "actions/download-artifact",
@@ -250,12 +253,30 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         self.assertIn("Require Cachix publication for release tags", nix_workflow)
         self.assertIn("nix build .#packages.${{ matrix.system }}.jcode", nix_workflow)
         self.assertIn("needs: [validate, build]", nix_workflow)
-        self.assertIn("uses: ./.github/workflows/release.yml", nix_workflow)
+        # nix.yml must not call release.yml: that chain is what injected a
+        # contents:write requirement into the PR Gate call tree.
+        self.assertNotIn("uses: ./.github/workflows/release.yml", nix_workflow)
         self.assertNotIn("ios.yml", nix_workflow)
         self.assertIn("retiredPathViolations", flake)
         self.assertIn("builtins.pathExists ./ios", flake)
         self.assertIn("builtins.pathExists ./docs/IOS_APP.md", flake)
         self.assertIn('if [ -n "$retiredPathViolations" ]', flake)
+
+    def test_package_identity_stays_separate_from_exact_provenance(self) -> None:
+        flake = (ROOT / "flake.nix").read_text()
+        package = (ROOT / "nix/package.nix").read_text()
+
+        self.assertIn("inherit craneLib version;", flake)
+        self.assertNotIn("gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or \"nix\";", flake)
+        self.assertNotIn("gitHash ?", package)
+        self.assertNotIn("gitDate ?", package)
+        self.assertNotIn("JCODE_BUILD_GIT_HASH", package)
+        self.assertNotIn("JCODE_BUILD_GIT_DATE", package)
+        self.assertIn("JCODE_BUILD_GIT_DIRTY", package)
+        self.assertIn('sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";', flake)
+        self.assertIn("sourceDisplayRevision =", flake)
+        self.assertIn("jcode-provenance = pkgs.callPackage ./nix/provenance.nix", flake)
+        self.assertIn("packages.<system>.jcode", (ROOT / "docs/NIX.md").read_text())
 
     def test_runtime_update_commands_cannot_acquire_or_replace_jcode(self) -> None:
         update = (ROOT / "crates/jcode-app-core/src/update.rs").read_text()

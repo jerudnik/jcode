@@ -297,6 +297,7 @@ def main() -> None:
     cwd = Path(args.cwd).resolve()
 
     results: dict[str, object] = {
+        "schema": "jcode-visible-ready-bench-v1",
         "runs": args.runs,
         "timeout_s": args.timeout,
         "cwd": str(cwd),
@@ -322,7 +323,7 @@ def main() -> None:
         }
 
     out_path = Path(args.json_out)
-    out_path.write_text(json.dumps(results, indent=2))
+    out_path.write_text(json.dumps(results, separators=(",", ":")) + "\n")
     print(f"WROTE {out_path}", flush=True)
 
 

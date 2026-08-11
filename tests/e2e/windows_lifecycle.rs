@@ -27,7 +27,7 @@ impl SpawnedWindowsServer {
     }
 
     fn spawn(prefix: &str) -> Result<Self> {
-        let temp_root = tempfile::Builder::new().prefix(prefix).tempdir()?;
+        let temp_root = jcode::storage::RuntimePaths::test_root(prefix);
         let home_dir = temp_root.path().join("home");
         let runtime_dir = temp_root.path().join("runtime");
         let install_dir = temp_root.path().join("install");

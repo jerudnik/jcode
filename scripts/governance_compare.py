@@ -921,13 +921,12 @@ def manifest_root() -> Path | None:
 
 
 def check_protected_paths(manifest: dict[str, Any], report: Report) -> list[str]:
-    """Return the protected list the audit gate is required to declare.
+    """Return the protected path set the audit gate is required to declare.
 
-    `proposed_additions` are Stream G's finding about helper scripts that
-    execute inside required contexts but are missing from design.md section 4's
-    list. Until the integration gate adjudicates them they are reported, not
-    enforced: enforcing an unadjudicated list here would let this file widen a
-    governance boundary the design fixed elsewhere.
+    The manifest is the source of truth. Every declared path must exist in the
+    working tree, and any adjudicated additions are enforced as part of the same
+    set. That keeps the comparator aligned with the live governance rule list
+    instead of inferring its own boundary.
     """
     protected = manifest["protected_paths"]
     required = list(protected["required"])

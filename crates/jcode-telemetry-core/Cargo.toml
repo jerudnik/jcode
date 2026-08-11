@@ -9,7 +9,7 @@ name = "jcode_telemetry_core"
 path = "src/lib.rs"
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 jcode-build-meta = { path = "../jcode-build-meta" }
 jcode-core = { path = "../jcode-core" }
 jcode-logging = { path = "../jcode-logging" }
@@ -17,10 +17,10 @@ jcode-provider-core = { path = "../jcode-provider-core" }
 jcode-selfdev-types = { path = "../jcode-selfdev-types" }
 jcode-storage = { path = "../jcode-storage" }
 jcode-usage-types = { path = "../jcode-usage-types" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
-serde_json = "1"
+reqwest = { workspace = true, default-features = false, features = ["json", "blocking", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+serde_json = { workspace = true }
 walkdir = "2"
-tokio = { version = "1", features = ["rt"] }
+tokio = { workspace = true, features = ["rt"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

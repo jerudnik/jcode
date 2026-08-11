@@ -110,7 +110,6 @@ async fn test_socket_model_cycle_supported_models() -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
@@ -161,7 +160,6 @@ async fn test_resume_restores_model_and_tool_history() -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
 
     let mut session = Session::create(None, Some("Resume Test".to_string()));
     session.model = Some("gpt-5.2-codex".to_string());
@@ -262,7 +260,6 @@ async fn test_resume_session_with_local_history_uses_metadata_only_history() -> 
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
 
     let mut session = Session::create(None, Some("Target Subscribe Test".to_string()));
     session.model = Some("model-a".to_string());
@@ -417,7 +414,6 @@ async fn test_resume_all_sessions_continues_interrupted_live_session() -> Result
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
 
     // A session left with a pending user turn the assistant never answered.
     let mut session = Session::create(None, Some("Interrupted Session".to_string()));
@@ -502,7 +498,6 @@ async fn test_resume_session_reports_reload_interruption_for_peer_sessions() -> 
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
 
     let mut session = Session::create(None, Some("Reload Interrupted Session".to_string()));
     session.model = Some("model-a".to_string());
@@ -577,7 +572,6 @@ async fn test_subscribe_selfdev_hint_marks_canary() -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
@@ -625,7 +619,6 @@ async fn test_subscribe_working_dir_without_selfdev_hint_stays_normal() -> Resul
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
@@ -688,7 +681,6 @@ async fn test_model_switch_resets_provider_session() -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
@@ -789,7 +781,6 @@ async fn test_model_switch_is_per_session() -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
