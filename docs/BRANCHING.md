@@ -154,6 +154,12 @@ Every workflow lives on `main` with everything else.
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
 | `release.yml` | Metadata-only GitHub release notes; rejects attached assets | tag push matching `v*` |
 
+All fork-owned workflows are linted by actionlint in `nix.yml` and the flake
+workflow-syntax check; `freebsd-smoke.yml` is the sole upstream exemption.
+Reusable-workflow call sites and permissions are policy-checked by
+`scripts/check_reusable_workflow_calls.py` and
+`scripts/check_workflow_permissions.py`.
+
 ## Platforms
 
 This independent hard fork builds and tests on macOS and Linux and distributes

@@ -1,0 +1,12 @@
+on:
+  workflow_call:
+    secrets:
+      TOKEN:
+        required: true
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build

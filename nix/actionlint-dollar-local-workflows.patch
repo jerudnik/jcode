@@ -1,0 +1,64 @@
+--- a/rule_workflow_call.go
++++ b/rule_workflow_call.go
+@@ -59,0 +60,12 @@
++	// The $/ prefix denotes this repository, so it must never fall through to
++	// repository-reference parsing where a trailing @ref would be accepted.
++	if strings.HasPrefix(u.Value, "$/") {
++		rule.cache.writeCache(u.Value, nil)
++		rule.Errorf(
++			u.Pos,
++			"reusable workflow call %q at \"uses\" must not specify a ref for a same-repository $/ workflow",
++			u.Value,
++		)
++		return nil
++	}
++
+@@ -64 +76 @@
+-	if strings.HasPrefix(u.Value, "./") {
++	if strings.HasPrefix(u.Value, "./") || strings.HasPrefix(u.Value, "$/") {
+@@ -148 +160 @@
+-// Parse ./{path/{filename}
++// Parse ./{path/{filename} or $/{path/{filename} for same-repository calls.
+@@ -151 +163,5 @@
+-	if !strings.HasPrefix(u, "./") {
++	if strings.HasPrefix(u, "./") {
++		u = strings.TrimPrefix(u, "./")
++	} else if strings.HasPrefix(u, "$/") {
++		u = strings.TrimPrefix(u, "$/")
++	} else {
+@@ -154 +169,0 @@
+-	u = strings.TrimPrefix(u, "./")
+@@ -156 +171 @@
+-	// Cannot container a ref
++	// Cannot contain a ref
+--- a/reusable_workflow.go
++++ b/reusable_workflow.go
+@@ -199 +199,2 @@
+-// is not set to 'proj' field or the spec does not start with "./", this method immediately returns with nil.
++// is not set to 'proj' field or the spec is not a same-repository local reference starting with "./"
++// or "$/", this method immediately returns with nil.
+@@ -208 +209 @@
+-	if c.proj == nil || !strings.HasPrefix(spec, "./") || ContainsExpression(spec) {
++	if c.proj == nil || ContainsExpression(spec) {
+@@ -210,0 +212,6 @@
++	key := spec
++	if strings.HasPrefix(key, "$/") {
++		key = "./" + strings.TrimPrefix(key, "$/")
++	} else if !strings.HasPrefix(key, "./") {
++		return nil, nil
++	}
+@@ -212 +219 @@
+-	if m, ok := c.readCache(spec); ok {
++	if m, ok := c.readCache(key); ok {
+@@ -217 +224 @@
+-	file := filepath.Join(c.proj.RootDir(), filepath.FromSlash(spec))
++	file := filepath.Join(c.proj.RootDir(), filepath.FromSlash(key))
+@@ -220 +227 @@
+-		c.writeCache(spec, nil) // Remember the workflow file was not found
++		c.writeCache(key, nil) // Remember the workflow file was not found
+@@ -226 +233 @@
+-		c.writeCache(spec, nil) // Remember the workflow file was invalid
++		c.writeCache(key, nil) // Remember the workflow file was invalid
+@@ -232 +239 @@
+-	c.writeCache(spec, m)
++	c.writeCache(key, m)

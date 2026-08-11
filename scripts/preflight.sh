@@ -153,7 +153,9 @@ else
   printf '  cargo install cargo-machete --locked\n'
 fi
 
-# Lint any fork-owned workflow files that changed (mirrors the nix.yml step).
+# Fast local hint only: lint tracked .yml workflow edits visible in `git diff
+# HEAD` when actionlint is installed. This does not include untracked files or
+# .yaml names; the required Nix Gate's dynamic inventory is authoritative.
 if command -v actionlint >/dev/null 2>&1; then
   changed_wf=$(git diff --name-only --diff-filter=d HEAD -- '.github/workflows/*.yml' 2>/dev/null || true)
   if [ -n "$changed_wf" ]; then
