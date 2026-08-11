@@ -169,24 +169,6 @@ async fn stream_response(
     let connect_start = std::time::Instant::now();
 
     let url = format!("{}/chat/completions", api_base);
-    let mut req = apply_kimi_coding_agent_headers(
-        auth.apply(
-            client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .header("Accept-Encoding", "identity"),
-        )
-        .await?,
-        &api_base,
-        Some(&model),
-    );
-
-    if send_openrouter_headers {
-        req = req
-            .header("HTTP-Referer", "https://github.com/jcode")
-            .header("X-Title", "jcode");
-    }
-
     // Bound the connect + response-header phase only. A plain
     // `RequestBuilder::timeout` would cap the entire exchange including the
     // SSE body, killing long streams, so wrap `send()` instead. If the server
@@ -194,27 +176,56 @@ async fn stream_response(
     // returns headers, fail fast and let the retry loop open a fresh
     // connection rather than blocking the turn forever.
     const RESPONSE_HEADERS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-    let response = match tokio::time::timeout(RESPONSE_HEADERS_TIMEOUT, req.json(&request).send())
+    let mut retried_after_unauthorized = false;
+    let response = loop {
+        let (request_builder, observed_token) = auth
+            .apply_with_observed_token(
+                client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Accept-Encoding", "identity"),
+            )
+            .await?;
+        let mut request_builder = apply_coding_agent_headers(request_builder, &api_base, &auth)?;
+        if send_openrouter_headers {
+            request_builder = request_builder
+                .header("HTTP-Referer", "https://github.com/jcode")
+                .header("X-Title", "jcode");
+        }
+        let response = match tokio::time::timeout(
+            RESPONSE_HEADERS_TIMEOUT,
+            request_builder.json(&request).send(),
+        )
         .await
-    {
-        Ok(result) => result.with_context(|| {
-            let hint = local_endpoint_troubleshooting_hint(&api_base, &model);
-            format!(
-                "Failed to send OpenAI-compatible chat request\n  endpoint: {}\n  model: {}\n  auth: {}\n{}",
+        {
+            Ok(result) => result.with_context(|| {
+                let hint = local_endpoint_troubleshooting_hint(&api_base, &model);
+                format!(
+                    "Failed to send OpenAI-compatible chat request\n  endpoint: {}\n  model: {}\n  auth: {}\n{}",
+                    url,
+                    model,
+                    auth.label(),
+                    hint
+                )
+            })?,
+            Err(_) => anyhow::bail!(
+                "OpenAI-compatible chat request timed out waiting for response headers\n  endpoint: {}\n  model: {}\n  auth: {}\n  timeout: {}s\n{}",
                 url,
                 model,
                 auth.label(),
-                hint
-            )
-        })?,
-        Err(_) => anyhow::bail!(
-            "OpenAI-compatible chat request timed out waiting for response headers\n  endpoint: {}\n  model: {}\n  auth: {}\n  timeout: {}s\n{}",
-            url,
-            model,
-            auth.label(),
-            RESPONSE_HEADERS_TIMEOUT.as_secs(),
-            local_endpoint_troubleshooting_hint(&api_base, &model)
-        ),
+                RESPONSE_HEADERS_TIMEOUT.as_secs(),
+                local_endpoint_troubleshooting_hint(&api_base, &model)
+            ),
+        };
+        if should_refresh_after_unauthorized(response.status(), &auth, retried_after_unauthorized)
+            && auth
+                .refresh_after_unauthorized(observed_token.as_deref())
+                .await?
+        {
+            retried_after_unauthorized = true;
+            continue;
+        }
+        break response;
     };
 
     let connect_ms = connect_start.elapsed().as_millis();

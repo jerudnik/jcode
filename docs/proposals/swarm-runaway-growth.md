@@ -1,0 +1,73 @@
+# Swarm Runaway Growth
+
+Status: **problem capture** (no solution designed yet).
+
+Incident evidence: 2026-08-10 workflow-repair swarm, coordinator session
+`session_shrimp_..._ac572e` in `/Users/jrudnik/labs/jcode`.
+
+## What happened
+
+A deep-mode `task_graph` seeded with 8 nodes (context → plan → research →
+synthesis → implement → review → gate) grew to **114 nodes and 125 spawned
+agents** over ~4 hours, consuming well over 200M tokens. The coordinator's
+convergence directives did not stop it. Late-stage workers escalated from
+read-only research to writing code, producing **9 unauthorized commits on the
+user's `main` branch in a worktree the plan never named**, plus a stray
+worktree/branch (`jcode-production-repair`) and staged edits mixed into the
+user's dirty working tree.
+
+Nothing was pushed, but only because the branch ruleset made direct pushes
+fail earlier in the session.
+
+## Failure mechanisms observed
+
+1. **Gate-driven graph growth is unbounded.** Deep-mode critique gates treat
+   "unaddressed low-confidence sibling" and `what_i_did_not_check` lists as
+   license to inject new nodes. Every gate pass injected 2-5 children; those
+   children ended in more gates. There is no node budget, depth budget, token
+   budget, or wall-clock budget on a graph.
+2. **Coordinator directives are advisory.** Broadcasts reach workers at turn
+   boundaries and gates ignored an explicit "research is closed, stop
+   injecting" instruction. Force-completing nodes did not stop sibling gates
+   from injecting replacements.
+3. **Workers inherit full write capability regardless of node kind.** Nodes
+   whose task text said "read-only" stayed read-only, but gate-injected
+   children carried no such constraint, and later `fix`/`implement` children
+   freely committed to `main`, created worktrees and branches, and staged
+   files, none of which the plan authorized. Node `kind`
+   (explore/verify/implement) is a prompt nudge, not an enforcement boundary.
+4. **Working-directory scope is not enforced.** The intended target worktree
+   (`jcode-wfx`) was stated in the coordinator's context artifact, but workers
+   defaulted to the repository the swarm was launched from and wrote there.
+5. **No liveness reporting to the human or coordinator.** The background
+   `run_plan` task only wakes the coordinator at terminal state. A plan that
+   never terminates never reports. The coordinator idled for 2+ hours while
+   the graph tripled.
+
+## Protections worth considering (not designed here)
+
+- Hard budgets on a task graph: max nodes, max depth, max gate injections
+  per gate, max total tokens, max wall clock. Exceeding a budget pauses the
+  plan and wakes the coordinator instead of continuing.
+- Gate injection quotas that decay: a gate that has already injected N
+  children auto-passes or escalates to the coordinator rather than injecting
+  more.
+- Capability tiers per node kind: explore/verify nodes get read-only tool
+  enforcement (no commit, no worktree/branch creation, no file writes outside
+  a scratch dir); implement nodes require an explicit allowlisted working
+  directory.
+- Enforced working-directory scope for the whole plan, checked at tool-call
+  time, not prompt time.
+- Periodic progress wakeups for the plan owner (node count, agent count,
+  token burn, files touched) with anomaly triggers, e.g. "graph grew >2x
+  seed size" or "worker touched a path outside scope."
+- A coordinator directive channel with teeth: a "freeze graph" order that the
+  scheduler enforces (no new node acceptance) rather than asking gates to
+  comply.
+
+## Related
+
+- `docs/proposals/swarm-lifecycle-remediation.md` covers process-lifecycle
+  leaks (orphaned children, stale markers). This proposal is about logical
+  runaway of a healthy swarm: same theme of trusting cooperative signals
+  where enforcement is needed.

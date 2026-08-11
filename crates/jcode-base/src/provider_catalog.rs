@@ -893,6 +893,10 @@ pub fn openai_compatible_profile_is_configured(profile: OpenAiCompatibleProfile)
         return configured;
     }
 
+    if profile.id == KIMI_PROFILE.id {
+        return crate::auth::kimi::is_configured();
+    }
+
     let resolved = resolve_openai_compatible_profile(profile);
     if load_api_key(&ApiKeyCredentialSource::from_resolved_catalog_profile(
         &resolved,

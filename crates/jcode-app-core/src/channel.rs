@@ -155,6 +155,77 @@ impl ChannelRegistry {
 // Telegram channel
 // ---------------------------------------------------------------------------
 
+/// Temporary rig: deliver an inbound channel message straight to a live
+/// interactive session instead of the ambient directive queue. Finds a
+/// client-connected session over the server socket (preferring non-swarm
+/// sessions), then reuses the NotifySession path scheduled tasks use: a live
+/// turn if the session is idle, a soft interrupt if it is busy. Returns the
+/// session id on success; callers fall back to the ambient queue on error.
+async fn deliver_to_live_session(source: &str, text: &str) -> anyhow::Result<String> {
+    let mut client = crate::server::Client::connect().await?;
+    let req_id = client.debug_command("sessions", None).await?;
+    let output = loop {
+        match client.read_event().await? {
+            crate::protocol::ServerEvent::DebugResponse { id, ok, output } if id == req_id => {
+                if !ok {
+                    anyhow::bail!("sessions debug command failed: {}", output);
+                }
+                break output;
+            }
+            crate::protocol::ServerEvent::Error { id, message, .. } if id == req_id => {
+                anyhow::bail!(message)
+            }
+            _ => continue,
+        }
+    };
+    let sessions: Vec<serde_json::Value> = serde_json::from_str(&output)?;
+    // Optional pin: ~/.jcode/telegram-target-session names the preferred
+    // live session (first line, exact id). Falls back to heuristics when the
+    // pinned session is not connected.
+    let pinned: Option<String> = crate::storage::jcode_dir()
+        .ok()
+        .map(|d| d.join("telegram-target-session"))
+        .filter(|p| p.exists())
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.lines().next().unwrap_or("").trim().to_string())
+        .filter(|s| !s.is_empty());
+    let session_id_of = |s: &serde_json::Value| -> Option<String> {
+        s.get("session_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+    };
+    let target = pinned
+        .and_then(|pin| {
+            sessions
+                .iter()
+                .find(|s| session_id_of(s).as_deref() == Some(pin.as_str()))
+                .and_then(session_id_of)
+        })
+        .or_else(|| {
+            sessions
+                .iter()
+                .find(|s| s.get("swarm_id").map(|v| v.is_null()).unwrap_or(true))
+                .or_else(|| sessions.first())
+                .and_then(session_id_of)
+        })
+        .ok_or_else(|| anyhow::anyhow!("no live client sessions"))?;
+    let notify_id = client
+        .notify_session(
+            &target,
+            &format!("[{} message from user]\n{}", source, text),
+        )
+        .await?;
+    loop {
+        match client.read_event().await? {
+            crate::protocol::ServerEvent::Done { id } if id == notify_id => return Ok(target),
+            crate::protocol::ServerEvent::Error { id, message, .. } if id == notify_id => {
+                anyhow::bail!(message)
+            }
+            _ => continue,
+        }
+    }
+}
+
 pub struct TelegramChannel {
     token: String,
     chat_id: String,
@@ -257,15 +328,32 @@ impl MessageChannel for TelegramChannel {
                                     .await;
                             }
                         } else {
-                            let injected = runner.inject_message(trimmed, "telegram").await;
-                            logging::info(&format!(
-                                "telegram reply injected into session injected={}",
-                                injected
-                            ));
-                            let ack = if injected {
-                                format!("💬 Message sent to active session: _{}_", trimmed)
-                            } else {
-                                format!("📋 Message queued, waking agent: _{}_", trimmed)
+                            // Try a live interactive session first (temporary
+                            // rig); fall back to the ambient queue.
+                            let ack = match deliver_to_live_session("telegram", trimmed).await {
+                                Ok(session_id) => {
+                                    logging::info(&format!(
+                                        "telegram reply delivered to live session {}",
+                                        session_id
+                                    ));
+                                    format!("💬 Delivered to live session: _{}_", trimmed)
+                                }
+                                Err(err) => {
+                                    logging::info(&format!(
+                                        "telegram live delivery unavailable ({}); using ambient queue",
+                                        err
+                                    ));
+                                    let injected = runner.inject_message(trimmed, "telegram").await;
+                                    logging::info(&format!(
+                                        "telegram reply injected into session injected={}",
+                                        injected
+                                    ));
+                                    if injected {
+                                        format!("💬 Message sent to active session: _{}_", trimmed)
+                                    } else {
+                                        format!("📋 Message queued, waking agent: _{}_", trimmed)
+                                    }
+                                }
                             };
                             let _ = self.send(&ack).await;
                         }
