@@ -342,13 +342,21 @@ impl App {
             }
             LoginProviderTarget::OpenAiCompatible(profile) => {
                 let resolved = crate::provider_catalog::resolve_openai_compatible_profile(profile);
+                if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
+                    crate::auth::kimi::clear_tokens()?;
+                    crate::auth::kimi::set_auth_mode(None)?;
+                }
                 Self::clear_api_key_login(&resolved.api_key_env, &resolved.env_file)?;
                 crate::provider_catalog::save_env_value_to_env_file(
                     crate::provider_catalog::OPENAI_COMPAT_LOCAL_ENABLED_ENV,
                     &resolved.env_file,
                     None,
                 )?;
-                Ok(format!("Logged out of {} API key.", resolved.display_name))
+                if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
+                    Ok("Logged out of Kimi OAuth and API-key credentials.".to_string())
+                } else {
+                    Ok(format!("Logged out of {} API key.", resolved.display_name))
+                }
             }
             LoginProviderTarget::Cursor => {
                 crate::auth::cursor::clear_api_key()?;
@@ -489,6 +497,13 @@ impl App {
             Ok(()) => summary.push("Gemini".to_string()),
             Err(err) => errors.push(format!("Gemini: {}", err)),
         }
+        let kimi_configured = crate::auth::kimi::has_oauth_tokens();
+        match crate::auth::kimi::clear_tokens().and_then(|_| crate::auth::kimi::set_auth_mode(None))
+        {
+            Ok(()) if kimi_configured => summary.push("Kimi OAuth".to_string()),
+            Ok(()) => {}
+            Err(err) => errors.push(format!("Kimi OAuth: {}", err)),
+        }
 
         crate::auth::AuthStatus::invalidate_cache();
 
@@ -583,6 +598,11 @@ impl App {
             }
             crate::provider_catalog::LoginProviderTarget::Bedrock => self.start_bedrock_login(),
             crate::provider_catalog::LoginProviderTarget::Azure => self.start_azure_login(),
+            crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile)
+                if profile.id == crate::provider_catalog::KIMI_PROFILE.id =>
+            {
+                self.start_kimi_login()
+            }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 self.start_openai_compatible_profile_login(profile)
             }
@@ -1450,6 +1470,87 @@ impl App {
         ));
         self.set_status_notice("Login: paste cursor key...");
         self.begin_pending_login(PendingLogin::CursorApiKey);
+    }
+
+    fn start_kimi_login(&mut self) {
+        self.set_status_notice("Login: kimi device flow...");
+        self.begin_pending_login(PendingLogin::Kimi);
+
+        tokio::spawn(async move {
+            let device = match crate::auth::kimi::request_device_authorization().await {
+                Ok(device) => device,
+                Err(error) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "kimi".to_string(),
+                        success: false,
+                        message: format!("Kimi device flow failed: {}", error),
+                    }));
+                    return;
+                }
+            };
+
+            let clipboard_ok = copy_to_clipboard(&device.user_code);
+            let clipboard_msg = if clipboard_ok {
+                " (copied to clipboard)"
+            } else {
+                ""
+            };
+            let qr_section = crate::login_qr::markdown_section_for_tui(
+                &device.verification_uri_complete,
+                "Scan this on another device to open the Kimi verification page:",
+            )
+            .map(|section| format!("\n\n{section}"))
+            .unwrap_or_default();
+            Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                provider: "kimi_code".to_string(),
+                success: true,
+                message: format!(
+                    "Kimi Code Login\n\nYour code: {}{}\n\nOpening browser to {} ...\nAuthorize Jcode with your Kimi account.{}\n\nWaiting for authorization... (type /cancel to abort)",
+                    device.user_code,
+                    clipboard_msg,
+                    device.verification_uri_complete,
+                    qr_section
+                ),
+            }));
+
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = Self::open_auth_browser(&device.verification_uri_complete);
+
+            let tokens = match crate::auth::kimi::poll_for_tokens(&device).await {
+                Ok(tokens) => tokens,
+                Err(error) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "kimi".to_string(),
+                        success: false,
+                        message: format!("Kimi login failed: {}", error),
+                    }));
+                    return;
+                }
+            };
+
+            let result = crate::auth::kimi::save_tokens(&tokens).and_then(|_| {
+                crate::auth::kimi::set_auth_mode(Some(crate::auth::kimi::KimiAuthMode::OAuth))
+            });
+            match result {
+                Ok(()) => Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                    provider: "kimi".to_string(),
+                    success: true,
+                    message:
+                        "Authenticated with Kimi Code.\n\nKimi models are now available in /model."
+                            .to_string(),
+                })),
+                Err(error) => Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                    provider: "kimi".to_string(),
+                    success: false,
+                    message: format!("Failed to save Kimi credentials: {}", error),
+                })),
+            }
+        });
+
+        self.push_display_message(DisplayMessage::system(
+            "Kimi Code Login\n\nStarting device flow... please wait. Type /cancel to abort."
+                .to_string(),
+        ));
     }
 
     fn start_copilot_login(&mut self) {
@@ -2354,6 +2455,14 @@ impl App {
                 ));
                 self.pending_login = Some(PendingLogin::Copilot);
             }
+            PendingLogin::Kimi => {
+                self.push_display_message(DisplayMessage::system(
+                    "Kimi login is waiting for browser authorization.\n\
+                     Complete the login in your browser, or type /cancel to abort."
+                        .to_string(),
+                ));
+                self.pending_login = Some(PendingLogin::Kimi);
+            }
             PendingLogin::AutoImportSelection { candidates } => {
                 let selected = match crate::external_auth::parse_external_auth_review_selection(
                     &input,
@@ -2710,7 +2819,7 @@ impl App {
     }
 
     pub(super) fn handle_login_completed(&mut self, login: LoginCompleted) {
-        if login.provider == "copilot_code" {
+        if matches!(login.provider.as_str(), "copilot_code" | "kimi_code") {
             self.push_display_message(DisplayMessage::system(login.message.clone()));
             if let Some(code) = login
                 .message
@@ -2718,7 +2827,12 @@ impl App {
                 .nth(1)
                 .and_then(|s| s.split_whitespace().next())
             {
-                self.set_status_notice(format!("Login: enter {} at GitHub", code));
+                let destination = if login.provider == "kimi_code" {
+                    "Kimi"
+                } else {
+                    "GitHub"
+                };
+                self.set_status_notice(format!("Login: enter {} at {}", code, destination));
             }
             return;
         }

@@ -14,6 +14,7 @@ pub mod gemini;
 pub mod google;
 pub(crate) mod google_oauth;
 pub mod integration;
+pub mod kimi;
 pub mod lifecycle;
 pub mod login_diagnostics;
 pub mod login_flows;
@@ -465,7 +466,11 @@ impl AuthStatus {
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 let resolved = crate::provider_catalog::resolve_openai_compatible_profile(profile);
                 if self.state_for_provider(provider) == AuthState::Available {
-                    if resolved.requires_api_key {
+                    if profile.id == crate::provider_catalog::KIMI_PROFILE.id
+                        && crate::auth::kimi::has_oauth_tokens()
+                    {
+                        "OAuth (automatic refresh)".to_string()
+                    } else if resolved.requires_api_key {
                         format!("API key (`{}`)", resolved.api_key_env)
                     } else if crate::provider_catalog::load_api_key(
                         &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
@@ -688,43 +693,60 @@ impl AuthStatus {
                 )
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
-                // Prefer the active named config profile's credential location
-                // (set via `--provider-profile`) over the built-in profile env
-                // so the reported source matches what runtime actually uses (#402).
-                let (source, detail) = if let Some((key_env, env_file)) =
-                    crate::provider_catalog::active_named_provider_profile_credential_source()
+                if profile.id == crate::provider_catalog::KIMI_PROFILE.id
+                    && crate::auth::kimi::has_oauth_tokens()
                 {
-                    summarize_sources(vec![
-                        env_source(&key_env),
-                        config_source(&key_env, &env_file, format!("~/.config/jcode/{}", env_file)),
-                        external_api_key_source(&key_env),
-                    ])
+                    (
+                        AuthCredentialSource::JcodeManagedFile,
+                        "Kimi OAuth token store (`~/.config/jcode/kimi/credentials.json`)"
+                            .to_string(),
+                        AuthExpiryConfidence::Exact,
+                        AuthRefreshSupport::Automatic,
+                        AuthValidationMethod::TimestampCheck,
+                    )
                 } else {
-                    let resolved =
-                        crate::provider_catalog::resolve_openai_compatible_profile(profile);
-                    let credential_source =
+                    // Prefer the active named config profile's credential location
+                    // (set via `--provider-profile`) over the built-in profile env
+                    // so the reported source matches what runtime actually uses (#402).
+                    let (source, detail) = if let Some((key_env, env_file)) =
+                        crate::provider_catalog::active_named_provider_profile_credential_source()
+                    {
+                        summarize_sources(vec![
+                            env_source(&key_env),
+                            config_source(
+                                &key_env,
+                                &env_file,
+                                format!("~/.config/jcode/{}", env_file),
+                            ),
+                            external_api_key_source(&key_env),
+                        ])
+                    } else {
+                        let resolved =
+                            crate::provider_catalog::resolve_openai_compatible_profile(profile);
+                        let credential_source =
                         crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
                             &resolved,
                         );
-                    let mut sources = Vec::new();
-                    for env_key in credential_source.candidate_env_keys() {
-                        sources.push(env_source(env_key));
-                        sources.push(config_source(
-                            env_key,
-                            credential_source.env_file(),
-                            format!("~/.config/jcode/{}", credential_source.env_file()),
-                        ));
-                        sources.push(external_api_key_source(env_key));
-                    }
-                    summarize_sources(sources)
-                };
-                (
-                    source,
-                    detail,
-                    AuthExpiryConfidence::NotApplicable,
-                    AuthRefreshSupport::NotApplicable,
-                    AuthValidationMethod::PresenceCheck,
-                )
+                        let mut sources = Vec::new();
+                        for env_key in credential_source.candidate_env_keys() {
+                            sources.push(env_source(env_key));
+                            sources.push(config_source(
+                                env_key,
+                                credential_source.env_file(),
+                                format!("~/.config/jcode/{}", credential_source.env_file()),
+                            ));
+                            sources.push(external_api_key_source(env_key));
+                        }
+                        summarize_sources(sources)
+                    };
+                    (
+                        source,
+                        detail,
+                        AuthExpiryConfidence::NotApplicable,
+                        AuthRefreshSupport::NotApplicable,
+                        AuthValidationMethod::PresenceCheck,
+                    )
+                }
             }
             _ => assessment_for_key(self, provider.auth_state_key, state),
         };
