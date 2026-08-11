@@ -533,6 +533,16 @@ fn add_cache_breakpoint(messages: &mut [Message]) -> bool {
     false
 }
 
+/// Total request timeout for non-streaming catalog/endpoint metadata fetches.
+///
+/// These requests sit on the critical path of `complete()` (via
+/// `model_supports_cache` -> `model_pricing` -> `fetch_models`), so an
+/// unanswered request must fail fast instead of blocking a whole agent turn.
+/// Without this, a connection that dies after the request is sent (observed
+/// as the socket parked in CLOSE_WAIT behind Cloudflare) hangs the read
+/// forever: the shared client only sets a *connect* timeout.
+const METADATA_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 async fn fetch_models_from_api(
     client: Client,
     api_base: String,
@@ -543,6 +553,7 @@ async fn fetch_models_from_api(
     let url = jcode_base::provider_catalog::openai_compatible_models_url(&api_base);
     let response =
         apply_kimi_coding_agent_headers(auth.apply(client.get(&url)).await?, &api_base, None)
+            .timeout(METADATA_REQUEST_TIMEOUT)
             .send()
             .await
             .with_context(|| {
@@ -2582,6 +2593,7 @@ impl OpenRouterProvider {
             .auth
             .apply(self.client.get(&url))
             .await?
+            .timeout(METADATA_REQUEST_TIMEOUT)
             .send()
             .await
             .context("Failed to fetch endpoint data")?;
@@ -2637,6 +2649,7 @@ impl OpenRouterProvider {
             .auth
             .apply(self.client.get(&url))
             .await?
+            .timeout(METADATA_REQUEST_TIMEOUT)
             .send()
             .await
             .context("Failed to refresh endpoint data")?;

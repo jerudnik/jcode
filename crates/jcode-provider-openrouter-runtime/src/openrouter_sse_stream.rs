@@ -187,11 +187,17 @@ async fn stream_response(
             .header("X-Title", "jcode");
     }
 
-    let response = req
-        .json(&request)
-        .send()
+    // Bound the connect + response-header phase only. A plain
+    // `RequestBuilder::timeout` would cap the entire exchange including the
+    // SSE body, killing long streams, so wrap `send()` instead. If the server
+    // (or an intermediary like Cloudflare) accepts the request but never
+    // returns headers, fail fast and let the retry loop open a fresh
+    // connection rather than blocking the turn forever.
+    const RESPONSE_HEADERS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+    let response = match tokio::time::timeout(RESPONSE_HEADERS_TIMEOUT, req.json(&request).send())
         .await
-        .with_context(|| {
+    {
+        Ok(result) => result.with_context(|| {
             let hint = local_endpoint_troubleshooting_hint(&api_base, &model);
             format!(
                 "Failed to send OpenAI-compatible chat request\n  endpoint: {}\n  model: {}\n  auth: {}\n{}",
@@ -200,7 +206,16 @@ async fn stream_response(
                 auth.label(),
                 hint
             )
-        })?;
+        })?,
+        Err(_) => anyhow::bail!(
+            "OpenAI-compatible chat request timed out waiting for response headers\n  endpoint: {}\n  model: {}\n  auth: {}\n  timeout: {}s\n{}",
+            url,
+            model,
+            auth.label(),
+            RESPONSE_HEADERS_TIMEOUT.as_secs(),
+            local_endpoint_troubleshooting_hint(&api_base, &model)
+        ),
+    };
 
     let connect_ms = connect_start.elapsed().as_millis();
     jcode_base::logging::info(&format!(
