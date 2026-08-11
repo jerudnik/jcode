@@ -101,7 +101,7 @@ jobs:
           nix build .#packages.x86_64-linux.jcode-deps --print-build-logs --out-link result-deps
 
       - name: Publish to Cachix
-        uses: cachix/cachix-action@1c64e3365467273d5948db68fb5404e3e5a85af1 # v17
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
           name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
