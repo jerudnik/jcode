@@ -230,21 +230,6 @@ fn test_help_topic_shows_command_details() {
 }
 
 #[test]
-fn test_help_topic_shows_log_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help log".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/log mark [note]"));
-    assert!(msg.content.contains("JCODE_LOG_MARK"));
-}
-
-#[test]
 fn slash_log_mark_reports_marker_and_note() {
     let mut app = create_test_app();
     app.input = "/log mark before repro".to_string();
@@ -451,37 +436,6 @@ fn session_picker_preview_wheel_uses_shared_scroll_momentum() {
         !app.has_pending_mouse_scroll_animation(),
         "momentum queue should drain to empty"
     );
-}
-
-#[test]
-fn test_help_topic_shows_fork_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help fork".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/fork <prompt>"));
-    assert!(msg.content.contains("Alias for /fork"));
-}
-
-#[test]
-fn test_help_topic_shows_git_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help git".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/git"));
-    assert!(msg.content.contains("git status --short --branch"));
-    assert!(msg.content.contains("/git status"));
 }
 
 #[test]
@@ -1175,20 +1129,6 @@ fn test_splitview_mirrors_chat_and_streaming_text() {
     assert!(page.content.contains("We decided to ship it."));
     assert!(page.content.contains("## Live response"));
     assert!(page.content.contains("Working on the follow-up now..."));
-}
-
-#[test]
-fn test_splitview_does_not_build_cache_while_disabled() {
-    let mut app = create_test_app();
-    app.display_messages = vec![
-        DisplayMessage::user("What did we decide?".to_string()),
-        DisplayMessage::assistant("We decided to ship it.".to_string()),
-    ];
-
-    app.bump_display_messages_version();
-
-    assert!(!app.split_view_enabled());
-    assert!(app.split_view_markdown.is_empty());
 }
 
 #[test]

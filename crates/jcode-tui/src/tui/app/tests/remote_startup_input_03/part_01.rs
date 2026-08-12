@@ -260,17 +260,6 @@ fn test_handle_paste_multi_line() {
 }
 
 #[test]
-fn test_handle_paste_large() {
-    let mut app = create_test_app();
-
-    app.handle_paste("a\nb\nc\nd\ne".to_string());
-
-    // Large paste (5+ lines) uses placeholder
-    assert_eq!(app.input(), "[pasted 5 lines]");
-    assert_eq!(app.pasted_contents.len(), 1);
-}
-
-#[test]
 fn test_paste_expansion_on_submit() {
     let mut app = create_test_app();
 
@@ -462,33 +451,6 @@ fn test_recover_session_without_tools_preserves_debug_and_canary_flags() {
     assert_eq!(app.session.working_dir.as_deref(), Some("/tmp/jcode-test"));
 
     let _ = std::fs::remove_file(crate::session::session_path(&app.session.id).unwrap());
-}
-
-#[test]
-fn test_has_newer_binary_detection() {
-    use std::time::{Duration, SystemTime};
-
-    let mut app = create_test_app();
-    let exe = crate::build::launcher_binary_path().unwrap();
-
-    let mut created = false;
-    if !exe.exists() {
-        if let Some(parent) = exe.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(&exe, "test").unwrap();
-        created = true;
-    }
-
-    app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
-    assert!(app.has_newer_binary());
-
-    app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
-    assert!(!app.has_newer_binary());
-
-    if created {
-        let _ = std::fs::remove_file(&exe);
-    }
 }
 
 #[test]

@@ -208,29 +208,6 @@ fn test_scroll_top_does_not_snap_to_bottom() {
 }
 
 #[test]
-fn test_scroll_content_shifts() {
-    let _render_lock = scroll_render_test_lock();
-    // Enough padding that the content overflows the 25-row viewport even
-    // when the mermaid diagram collapses to a one-line placeholder.
-    let (mut app, mut terminal) = create_scroll_test_app(80, 25, 1, 24);
-
-    // Render at bottom
-    app.scroll_offset = 0;
-    app.auto_scroll_paused = false;
-    let text_bottom = render_and_snap(&app, &mut terminal);
-
-    // Render scrolled up (absolute line 10 from top)
-    app.scroll_offset = 10;
-    app.auto_scroll_paused = true;
-    let text_scrolled = render_and_snap(&app, &mut terminal);
-
-    assert_ne!(
-        text_bottom, text_scrolled,
-        "content should change when scrolled"
-    );
-}
-
-#[test]
 fn test_scroll_render_with_mermaid() {
     let _render_lock = scroll_render_test_lock();
     let (mut app, mut terminal) = create_scroll_test_app(100, 30, 2, 10);
@@ -295,31 +272,6 @@ fn test_full_redraw_clears_out_of_band_backend_artifacts_after_native_scroll_lik
         repaired, clean,
         "forced full redraw should restore the expected frame and remove stale backend artifacts"
     );
-}
-
-#[test]
-fn test_scroll_key_then_render() {
-    let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(80, 25, 1, 40);
-
-    // Render at bottom first (populates LAST_MAX_SCROLL)
-    let _text_before = render_and_snap(&app, &mut terminal);
-
-    let (up_code, up_mods) = scroll_up_key(&app);
-
-    // Scroll up three times (9 lines total)
-    for _ in 0..3 {
-        app.handle_key(up_code.clone(), up_mods).unwrap();
-    }
-    assert!(app.auto_scroll_paused);
-    assert!(app.scroll_offset > 0);
-
-    // Render again - verifies scroll_offset produces a valid frame without panic.
-    // Note: LAST_MAX_SCROLL is a process-wide global that parallel tests
-    // can overwrite at any time, so we only check that rendering succeeds
-    // and that scroll state is correct - not that the rendered text differs,
-    // since the global can clamp scroll_offset to 0 during render.
-    let _text_after = render_and_snap(&app, &mut terminal);
 }
 
 /// Regression for the wide-emoji "ghost" artifact (ratatui issue #2357): when

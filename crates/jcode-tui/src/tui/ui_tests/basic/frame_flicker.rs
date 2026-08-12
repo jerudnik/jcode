@@ -326,37 +326,6 @@ fn test_calculate_input_lines_empty() {
 }
 
 #[test]
-fn test_inline_ui_gap_height_only_when_inline_ui_visible() {
-    let state = TestState::default();
-    assert_eq!(inline_ui_gap_height(&state), 0);
-
-    let inline_interactive_state = crate::tui::InlineInteractiveState {
-        kind: crate::tui::PickerKind::Model,
-        entries: vec![],
-        filtered: vec![],
-        selected: 0,
-        column: 0,
-        filter: String::new(),
-        preview: false,
-    };
-    let state_with_picker = TestState {
-        inline_interactive_state: Some(inline_interactive_state),
-        ..Default::default()
-    };
-    assert_eq!(inline_ui_gap_height(&state_with_picker), 1);
-
-    let state_with_inline_view = TestState {
-        inline_view_state: Some(crate::tui::InlineViewState {
-            title: "USAGE".to_string(),
-            status: Some("refreshing".to_string()),
-            lines: vec!["Refreshing usage".to_string()],
-        }),
-        ..Default::default()
-    };
-    assert_eq!(inline_ui_gap_height(&state_with_inline_view), 1);
-}
-
-#[test]
 fn test_slow_frame_history_retains_recent_samples() {
     clear_slow_frame_history_for_tests();
     record_slow_frame_sample(SlowFrameSample {

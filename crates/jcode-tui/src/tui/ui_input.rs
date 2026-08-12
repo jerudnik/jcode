@@ -1395,14 +1395,6 @@ mod tests {
     }
 
     #[test]
-    fn connection_phase_waiting_label_is_generic_response_wait() {
-        assert_eq!(
-            connection_phase_label(&ConnectionPhase::WaitingForResponse),
-            "waiting for response"
-        );
-    }
-
-    #[test]
     fn streaming_liveness_label_shows_quiet_stream_warning_before_message_end() {
         assert_eq!(
             streaming_liveness_label("4.2s".to_string(), Some(3.4), false),

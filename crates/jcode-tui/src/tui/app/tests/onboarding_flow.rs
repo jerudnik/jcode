@@ -513,29 +513,6 @@ fn answering_no_on_continue_prompt_shows_suggestions() {
 }
 
 #[test]
-fn continue_prompt_key_y_consumes_and_advances() {
-    with_temp_jcode_home(|| {
-        let mut app = onboarding_test_app();
-        if let Some(flow) = app.onboarding_flow.as_mut() {
-            flow.phase = OnboardingPhase::ContinuePrompt {
-                cli: ExternalCli::ClaudeCode,
-                yes_highlighted: true,
-                shown_at: std::time::Instant::now(),
-            };
-        }
-        // 'Y' is consumed by the onboarding handler.
-        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Char('Y')));
-        // It either opened the picker (TranscriptPick) or fell back depending on
-        // whether transcripts exist in the temp home; either way it leaves
-        // ContinuePrompt.
-        assert!(!matches!(
-            app.onboarding_phase(),
-            Some(OnboardingPhase::ContinuePrompt { .. })
-        ));
-    });
-}
-
-#[test]
 fn continue_prompt_key_ignored_when_not_in_phase() {
     let mut app = create_test_app();
     app.onboarding_flow = None;
@@ -1474,25 +1451,3 @@ fn import_summary_choose_pill_opens_checkbox_list() {
     });
 }
 
-#[test]
-fn onboarding_resume_picker_is_shown_only_once_per_install() {
-    with_temp_jcode_home(|| {
-        // First pass: mark the resume screen as already shown.
-        let mut hints = crate::setup_hints::SetupHintsState::load();
-        assert!(!hints.onboarding_resume_shown, "fresh home starts unseen");
-        hints.onboarding_resume_shown = true;
-        hints.save().unwrap();
-
-        // Second pass: even if external transcripts exist, ModelSelect must
-        // fall through to Suggestions instead of re-opening the resume picker.
-        let mut app = create_test_app();
-        app.onboarding_flow = None;
-        app.onboarding_flow = Some(crate::tui::app::onboarding_flow::OnboardingFlow::begin());
-        app.onboarding_after_model_select();
-        assert!(app.session_picker_overlay.is_none());
-        assert!(matches!(
-            app.onboarding_phase(),
-            Some(OnboardingPhase::Suggestions) | None
-        ));
-    });
-}

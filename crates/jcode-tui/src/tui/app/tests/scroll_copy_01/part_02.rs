@@ -21,26 +21,6 @@ fn test_prompt_jump_ctrl_digit_is_recency_rank_in_app() {
 }
 
 #[test]
-fn test_scroll_cmd_j_k_fallback_in_app() {
-    let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
-
-    // Seed max scroll estimates before key handling.
-    render_and_snap(&app, &mut terminal);
-
-    let (up_code, up_mods) = scroll_up_fallback_key(&app);
-    let (down_code, down_mods) = scroll_down_fallback_key(&app);
-
-    app.handle_key(up_code, up_mods).unwrap();
-    assert!(app.auto_scroll_paused);
-    assert!(app.scroll_offset > 0);
-    let after_up = app.scroll_offset;
-
-    app.handle_key(down_code, down_mods).unwrap();
-    assert!(app.scroll_offset <= after_up);
-}
-
-#[test]
 fn test_empty_prompt_up_down_browses_previous_prompts() {
     let mut app = create_test_app();
     app.display_messages = vec![

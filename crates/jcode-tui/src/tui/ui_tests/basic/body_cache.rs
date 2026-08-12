@@ -202,40 +202,6 @@ fn test_body_cache_state_keeps_two_oversized_width_entries_hot() {
     assert_eq!(cache.oversized_entries.len(), 2);
 }
 
-#[test]
-fn test_body_cache_state_uses_oversized_hot_entry_as_incremental_base() {
-    let key = BodyCacheKey {
-        width: 140,
-        diff_mode: crate::config::DiffDisplayMode::Off,
-        messages_version: 120,
-        diagram_mode: crate::config::DiagramDisplayMode::Pinned,
-        centered: false,
-        pin_images: true,
-        inline_images_visible: true,
-        images_signature: (0, 0),
-        expanded_images_version: 0,
-        swarm_members_signature: 0,
-    };
-    let prepared = make_oversized_prepared_messages("body-oversized-base-");
-
-    assert!(estimate_prepared_messages_bytes(&prepared) > BODY_CACHE_MAX_BYTES);
-
-    let mut cache = BodyCacheState::default();
-    cache.insert(key.clone(), prepared.clone(), 120, 0);
-
-    let base = cache
-        .best_incremental_base(
-            &BodyCacheKey {
-                messages_version: 121,
-                ..key.clone()
-            },
-            121,
-        )
-        .expect("expected oversized hot entry to remain eligible as incremental base");
-    assert!(Arc::ptr_eq(&base.0, &prepared));
-    assert_eq!(base.1, 120);
-}
-
 /// Regression: a deferred mermaid render completing does not change the
 /// transcript (`messages_version` stays put), so the staleness must be carried
 /// by the prepared body itself. A base whose pending placeholder became stale

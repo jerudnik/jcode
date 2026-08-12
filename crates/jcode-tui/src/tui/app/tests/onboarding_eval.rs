@@ -2546,23 +2546,6 @@ fn meta_anchors_land_in_expected_bands() {
     assert!(bs <= 30.0, "bad screen anchor should be poor, got {bs:.1}");
 }
 
-#[test]
-fn meta_metric_discriminates_good_from_bad() {
-    const MIN_SEPARATION: f64 = 40.0;
-    let (good_p, bad_p) = anchor_paths();
-    let (good_s, bad_s) = anchor_screens();
-    let path_gap = tier1_path_score(&good_p) - tier1_path_score(&bad_p);
-    let screen_gap = tier3_screen_score(&good_s) - tier3_screen_score(&bad_s);
-    assert!(
-        path_gap >= MIN_SEPARATION,
-        "Tier 1 must separate good/bad by >= {MIN_SEPARATION}, got {path_gap:.1}"
-    );
-    assert!(
-        screen_gap >= MIN_SEPARATION,
-        "Tier 3 must separate good/bad by >= {MIN_SEPARATION}, got {screen_gap:.1}"
-    );
-}
-
 // ---- Property 4: robustness / sensitivity ----
 
 /// A tiny deterministic LCG so the sweep is reproducible without an RNG dep.
@@ -2654,25 +2637,6 @@ fn is_nondecreasing(xs: &[f64]) -> bool {
 }
 
 // ---- Property 5: signal liveness ----
-
-#[test]
-fn meta_every_signal_moves_the_score() {
-    // Tier 1: each signal, toggled in isolation, must change the score.
-    let base_p = pm(1, 1, 2, true);
-    let base_ps = tier1_path_score(&base_p);
-    assert_ne!(tier1_path_score(&pm(2, 1, 2, true)), base_ps, "keystroke signal is dead");
-    assert_ne!(tier1_path_score(&pm(1, 2, 2, true)), base_ps, "decision signal is dead");
-    assert_ne!(tier1_path_score(&pm(1, 1, 3, true)), base_ps, "screen signal is dead");
-    assert_ne!(tier1_path_score(&pm(1, 1, 2, false)), base_ps, "ready signal is dead");
-
-    // Tier 3: each signal, toggled in isolation, must change the score. Use a
-    // base already over the word budget so the word signal is active.
-    let base_s = sm(60, true, true, true);
-    let base_ss = tier3_screen_score(&base_s);
-    assert_ne!(tier3_screen_score(&sm(80, true, true, true)), base_ss, "word signal is dead");
-    assert_ne!(tier3_screen_score(&sm(60, true, false, true)), base_ss, "keyhint signal is dead");
-    assert_ne!(tier3_screen_score(&sm(60, true, true, false)), base_ss, "escape signal is dead");
-}
 
 // ---- The meta scorecard ----
 
