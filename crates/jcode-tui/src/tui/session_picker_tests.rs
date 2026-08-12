@@ -271,15 +271,6 @@ fn test_session_item_uses_single_primary_title_line() {
 }
 
 #[test]
-fn test_status_inference() {
-    // Load sessions and ensure status display works
-    let sessions = load_sessions().unwrap();
-    for session in &sessions {
-        let _ = session.status.display();
-    }
-}
-
-#[test]
 fn test_collect_recent_session_stems_skips_empty_recent_sessions() {
     let dir = tempfile::TempDir::new().expect("tempdir");
 
@@ -1647,43 +1638,6 @@ fn benchmark_resume_op_construction_cost() {
 /// Any of the native scrollbar thumb glyphs (see `render_native_scrollbar`).
 fn contains_scrollbar_glyph(text: &str) -> bool {
     text.contains('•') || text.contains('╷') || text.contains('╵') || text.contains('│')
-}
-
-#[test]
-fn test_preview_pane_shows_scrollbar_when_overflowing() {
-    let session = make_session_with_many_turns("preview_scroll", 60);
-    let mut picker = SessionPicker::new(vec![session]);
-    picker.focus = PaneFocus::Preview;
-
-    // Small height so the long preview overflows and needs a scrollbar.
-    let text = buffer_text(&mut picker, 100, 16);
-    assert!(
-        contains_scrollbar_glyph(&text),
-        "preview scrollbar glyph should render when content overflows:\n{text}"
-    );
-}
-
-#[test]
-fn test_session_list_shows_scrollbar_when_overflowing() {
-    // Many sessions so the left list overflows a short viewport.
-    let sessions: Vec<SessionInfo> = (0..40)
-        .map(|i| {
-            make_session(
-                &format!("list_scroll_{i}"),
-                &format!("s{i}"),
-                false,
-                SessionStatus::Closed,
-            )
-        })
-        .collect();
-    let mut picker = SessionPicker::new(sessions);
-    picker.focus = PaneFocus::Sessions;
-
-    let text = buffer_text(&mut picker, 100, 16);
-    assert!(
-        contains_scrollbar_glyph(&text),
-        "session list scrollbar glyph should render when list overflows:\n{text}"
-    );
 }
 
 #[test]

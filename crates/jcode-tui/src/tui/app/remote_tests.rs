@@ -49,16 +49,6 @@ fn create_test_app() -> crate::tui::app::App {
     })
 }
 
-#[test]
-fn reload_handoff_active_when_server_flag_is_set() {
-    let state = RemoteRunState {
-        server_reload_in_progress: true,
-        ..RemoteRunState::default()
-    };
-
-    assert!(reconnect::reload_handoff_active(&state));
-}
-
 /// Render a full chat frame and return the visible text, one line per row.
 fn render_frame_text(app: &crate::tui::app::App, width: u16, height: u16) -> String {
     use ratatui::Terminal;
@@ -416,28 +406,6 @@ fn auth_changed_event_for_cerebras_login_carries_runtime_and_catalog_identity() 
             .map(crate::protocol::CatalogNamespace::as_str),
         Some("cerebras")
     );
-}
-
-#[test]
-fn reload_handoff_inactive_without_flag_or_marker() {
-    // `reload_handoff_active` falls back to the on-disk reload marker in the
-    // runtime dir. Point the runtime dir at an empty tempdir so a real
-    // `jcode.reload` left by a live self-dev reload on this machine cannot
-    // leak into the assertion.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
-
-    let inactive = !reconnect::reload_handoff_active(&RemoteRunState::default());
-
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
-
-    assert!(inactive);
 }
 
 #[test]

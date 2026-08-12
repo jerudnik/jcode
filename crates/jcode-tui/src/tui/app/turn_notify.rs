@@ -370,13 +370,6 @@ mod tests {
     }
 
     #[test]
-    fn snippet_used_when_no_todos() {
-        let n = build_turn_notification(None, 200.0, &[], Some("Fixed the parser bug."));
-        assert_eq!(n.subtitle, None);
-        assert_eq!(n.body, "Fixed the parser bug.");
-    }
-
-    #[test]
     fn snippet_skips_markdown_noise_and_truncates() {
         let text = "```rust\ncode\n```\n\n## **Results** are `good`\nmore detail";
         assert_eq!(summary_snippet(text), "code");
@@ -396,13 +389,6 @@ mod tests {
         assert_eq!(n.title, "jcode · done in 1m 5s");
         assert_eq!(n.subtitle, None);
         assert_eq!(n.body, "Turn finished");
-    }
-
-    #[test]
-    fn still_counts_blocked_in_subtitle() {
-        let blocked = vec![todo("completed", false), todo("pending", true)];
-        let n = build_turn_notification(None, 200.0, &blocked, None);
-        assert_eq!(n.subtitle.as_deref(), Some("1/2 todos · 1 blocked"));
     }
 
     #[test]

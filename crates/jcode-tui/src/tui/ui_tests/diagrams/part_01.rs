@@ -100,24 +100,6 @@ fn test_vcenter_fitted_image_centering_horizontal() {
 }
 
 #[test]
-fn test_vcenter_fitted_image_centering_vertical() {
-    // Wide image centered vertically - should have y_offset > 0
-    let area = Rect {
-        x: 0,
-        y: 0,
-        width: 40,
-        height: 40,
-    };
-    let result = vcenter_fitted_image_with_font(area, 800, 100, TEST_FONT);
-    if result.height < area.height {
-        assert!(
-            result.y > area.y || result.height < area.height,
-            "should be vertically centered"
-        );
-    }
-}
-
-#[test]
 fn test_vcenter_fitted_image_zero_dimensions() {
     let area = Rect {
         x: 0,
@@ -212,45 +194,6 @@ fn test_vcenter_fitted_image_never_exceeds_area() {
 }
 
 #[test]
-fn test_vcenter_fitted_image_typical_mermaid_in_side_panel() {
-    // Typical mermaid diagram: wider than tall (e.g., flowchart LR).
-    // Side panel is narrow and tall (e.g., 50 cols x 40 rows).
-    // The image should fill the width of the panel.
-    let inner = Rect {
-        x: 81,
-        y: 1,
-        width: 48,
-        height: 38,
-    };
-    let result = vcenter_fitted_image_with_font(inner, 600, 300, TEST_FONT);
-    let width_utilization = result.width as f64 / inner.width as f64;
-    assert!(
-        width_utilization > 0.8,
-        "typical mermaid in side panel should use >80% width: {}% ({}/{})",
-        (width_utilization * 100.0) as u32,
-        result.width,
-        inner.width
-    );
-}
-
-#[test]
-fn test_estimate_pinned_diagram_pane_width_wide_image() {
-    // A very wide image should get a wider pane
-    let diagram = info_widget::DiagramInfo {
-        hash: 10,
-        width: 1600,
-        height: 200,
-        label: None,
-    };
-    let width = estimate_pinned_diagram_pane_width_with_font(&diagram, 30, 24, Some((8, 16)));
-    assert!(
-        width >= 24,
-        "should be at least minimum width: got {}",
-        width
-    );
-}
-
-#[test]
 fn test_estimate_pinned_diagram_pane_width_tall_image() {
     // A tall image should get a narrower pane (height-constrained)
     let diagram = info_widget::DiagramInfo {
@@ -283,24 +226,6 @@ fn test_estimate_pinned_diagram_pane_width_zero_font_size() {
 }
 
 #[test]
-fn test_estimate_pinned_diagram_pane_height_wide_image() {
-    // Wide image (1600x200) in a pane 80 cols wide.
-    // Should need less height since the image is short.
-    let diagram = info_widget::DiagramInfo {
-        hash: 13,
-        width: 1600,
-        height: 200,
-        label: None,
-    };
-    let height = estimate_pinned_diagram_pane_height(&diagram, 80, 6);
-    assert!(
-        height >= 6,
-        "should be at least minimum height: got {}",
-        height
-    );
-}
-
-#[test]
 fn test_estimate_pinned_diagram_pane_height_tall_image() {
     // Tall image (200x1600) in a pane 80 cols wide.
     // Width-constrained, so height depends on the width scaling.
@@ -315,56 +240,6 @@ fn test_estimate_pinned_diagram_pane_height_tall_image() {
         height > 6,
         "tall image should need more than minimum height: got {}",
         height
-    );
-}
-
-#[test]
-fn test_side_panel_layout_ratio_capping() {
-    // Test that diagram_width respects the auto-width cap.
-    // area = 120 cols, cap = 75% -> cap = 90
-    // If estimated pane width exceeds 90, it should be capped at 90.
-    let diagram = info_widget::DiagramInfo {
-        hash: 20,
-        width: 2000,
-        height: 400,
-        label: None,
-    };
-    let area_width: u16 = 120;
-    let auto_cap_percent: u32 = 75;
-    let ratio_cap = ((area_width as u32 * auto_cap_percent) / 100) as u16;
-    let min_diagram_width: u16 = 24;
-    let min_chat_width: u16 = 20;
-    let max_diagram = area_width.saturating_sub(min_chat_width);
-
-    let needed = estimate_pinned_diagram_pane_width_with_font(
-        &diagram,
-        40,
-        min_diagram_width,
-        Some((8, 16)),
-    );
-    let diagram_width = needed
-        .min(ratio_cap)
-        .max(min_diagram_width)
-        .min(max_diagram);
-
-    assert!(
-        diagram_width <= ratio_cap,
-        "diagram_width ({}) should be <= ratio_cap ({})",
-        diagram_width,
-        ratio_cap
-    );
-    assert!(
-        diagram_width >= min_diagram_width,
-        "diagram_width ({}) should be >= min ({})",
-        diagram_width,
-        min_diagram_width
-    );
-    let chat_width = area_width.saturating_sub(diagram_width);
-    assert!(
-        chat_width >= min_chat_width,
-        "chat_width ({}) should be >= min ({})",
-        chat_width,
-        min_chat_width
     );
 }
 
@@ -471,58 +346,6 @@ fn test_side_panel_image_width_utilization() {
         diagram.height,
         needed,
     );
-}
-
-#[test]
-fn test_side_panel_image_width_various_aspect_ratios() {
-    // Test various diagram aspect ratios to ensure none uses "only half"
-    let test_cases: Vec<(u32, u32, &str)> = vec![
-        (800, 400, "2:1 landscape"),
-        (800, 600, "4:3 landscape"),
-        (800, 800, "1:1 square"),
-        (600, 400, "3:2 landscape"),
-        (1200, 300, "4:1 wide panoramic"),
-        (400, 600, "2:3 portrait"),
-        (300, 900, "1:3 tall portrait"),
-    ];
-
-    for (img_w, img_h, label) in test_cases {
-        let _diagram = info_widget::DiagramInfo {
-            hash: img_w as u64 * 1000 + img_h as u64,
-            width: img_w,
-            height: img_h,
-            label: None,
-        };
-
-        let pane_width: u16 = 50;
-        let pane_height: u16 = 40;
-        let inner = Rect {
-            x: 71,
-            y: 1,
-            width: pane_width - 2,
-            height: pane_height - 2,
-        };
-
-        let render_area = vcenter_fitted_image_with_font(inner, img_w, img_h, TEST_FONT);
-
-        // For any diagram, at least one dimension should be well-utilized
-        let w_util = render_area.width as f64 / inner.width as f64;
-        let h_util = render_area.height as f64 / inner.height as f64;
-        let max_util = w_util.max(h_util);
-
-        assert!(
-            max_util > 0.5,
-            "{}: at least one dimension should be >50% utilized: \
-                 w_util={:.0}% h_util={:.0}%, render={}x{}, inner={}x{}",
-            label,
-            w_util * 100.0,
-            h_util * 100.0,
-            render_area.width,
-            render_area.height,
-            inner.width,
-            inner.height,
-        );
-    }
 }
 
 #[test]

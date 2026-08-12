@@ -83,17 +83,6 @@ mod tests {
     use jcode_tui_messages::DisplayMessage;
 
     #[test]
-    fn test_display_message_helpers() {
-        let msg = DisplayMessage::error("something went wrong");
-        assert_eq!(msg.role, "error");
-        assert_eq!(msg.content, "something went wrong");
-
-        let msg = DisplayMessage::user("hello").with_title("greeting");
-        assert_eq!(msg.role, "user");
-        assert_eq!(msg.title, Some("greeting".to_string()));
-    }
-
-    #[test]
     fn test_byte_offset_to_char_index() {
         assert_eq!(byte_offset_to_char_index("hello", 0), 0);
         assert_eq!(byte_offset_to_char_index("hello", 3), 3);

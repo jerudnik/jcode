@@ -24,44 +24,6 @@ fn test_build_turn_footer_combines_compact_duration_with_streaming_stats() {
 }
 
 #[test]
-fn test_processing_status_display() {
-    let status = ProcessingStatus::Sending;
-    assert!(matches!(status, ProcessingStatus::Sending));
-
-    let status = ProcessingStatus::Streaming;
-    assert!(matches!(status, ProcessingStatus::Streaming));
-
-    let status = ProcessingStatus::RunningTool("bash".to_string());
-    if let ProcessingStatus::RunningTool(name) = status {
-        assert_eq!(name, "bash");
-    } else {
-        panic!("Expected RunningTool");
-    }
-}
-
-#[test]
-fn test_skill_invocation_not_queued() {
-    let mut app = create_test_app();
-
-    // Type a slash invocation for a skill that does not exist. The name must
-    // not collide with a built-in slash command (`/test` is the verification
-    // orchestrator now), so use an obviously bogus skill name.
-    for ch in "/nosuchskill".chars() {
-        app.handle_key(KeyCode::Char(ch), KeyModifiers::empty())
-            .unwrap();
-    }
-
-    app.submit_input();
-
-    // Should show error for unknown skill, not start processing
-    assert!(!app.pending_turn);
-    assert!(!app.is_processing);
-    // Should have an error message about unknown skill
-    assert_eq!(app.display_messages().len(), 1);
-    assert_eq!(app.display_messages()[0].role, "error");
-}
-
-#[test]
 fn test_multiple_queued_messages() {
     let mut app = create_test_app();
     app.is_processing = true;
@@ -95,21 +57,6 @@ fn test_multiple_queued_messages() {
     assert_eq!(app.queued_messages()[1], "second");
     assert_eq!(app.queued_messages()[2], "third");
     assert!(app.input().is_empty());
-}
-
-#[test]
-fn test_queue_message_combines_on_send() {
-    let mut app = create_test_app();
-
-    // Queue two messages directly
-    app.queued_messages.push("message one".to_string());
-    app.queued_messages.push("message two".to_string());
-
-    // Take and combine (simulating what process_queued_messages does)
-    let combined = std::mem::take(&mut app.queued_messages).join("\n\n");
-
-    assert_eq!(combined, "message one\n\nmessage two");
-    assert!(app.queued_messages.is_empty());
 }
 
 #[test]

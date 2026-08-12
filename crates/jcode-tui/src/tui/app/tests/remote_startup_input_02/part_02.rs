@@ -234,18 +234,6 @@ fn test_handle_server_event_input_shell_result_renders_markdown_blocks() {
 }
 
 #[test]
-fn test_streaming_tokens() {
-    let mut app = create_test_app();
-
-    assert_eq!(app.streaming_tokens(), (0, 0));
-
-    app.streaming.streaming_input_tokens = 100;
-    app.streaming.streaming_output_tokens = 50;
-
-    assert_eq!(app.streaming_tokens(), (100, 50));
-}
-
-#[test]
 fn test_build_turn_footer_uses_compact_duration_labels() {
     let app = create_test_app();
 

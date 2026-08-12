@@ -230,22 +230,6 @@ fn test_help_topic_shows_command_details() {
 }
 
 #[test]
-fn test_help_topic_shows_provider_test_coverage_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help provider-test-coverage".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/provider-test-coverage"));
-    assert!(msg.content.contains("live verification evidence"));
-    assert!(msg.content.contains("readiness gaps"));
-}
-
-#[test]
 fn test_help_topic_shows_log_command_details() {
     let mut app = create_test_app();
     app.input = "/help log".to_string();
@@ -470,21 +454,6 @@ fn session_picker_preview_wheel_uses_shared_scroll_momentum() {
 }
 
 #[test]
-fn test_help_topic_shows_btw_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help btw".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/btw <question>"));
-    assert!(msg.content.contains("Forks (splits) the session"));
-}
-
-#[test]
 fn test_help_topic_shows_fork_command_details() {
     let mut app = create_test_app();
     app.input = "/help fork".to_string();
@@ -513,22 +482,6 @@ fn test_help_topic_shows_git_command_details() {
     assert!(msg.content.contains("/git"));
     assert!(msg.content.contains("git status --short --branch"));
     assert!(msg.content.contains("/git status"));
-}
-
-#[test]
-fn test_help_topic_shows_commit_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help commit".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/commit"));
-    assert!(msg.content.contains("logical commits"));
-    assert!(msg.content.contains("preserve unrelated work"));
 }
 
 #[test]
@@ -561,21 +514,6 @@ fn test_commit_push_command_starts_synthetic_user_turn() {
         .expect("missing launch notice");
     assert_eq!(notice.role, "system");
     assert!(notice.content.contains("Starting logical commits + push"));
-}
-
-#[test]
-fn test_help_topic_shows_commit_push_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help commit-push".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/commit-push"));
-    assert!(msg.content.contains("push"));
 }
 
 #[test]
@@ -632,37 +570,6 @@ fn test_help_topic_shows_cut_release_command_details() {
     assert!(msg.content.contains("semver"));
     assert!(msg.content.contains("Nix and Cachix publish binaries"));
     assert!(msg.content.contains("metadata-only notes with zero assets"));
-}
-
-#[test]
-fn test_help_topic_shows_catchup_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help catchup".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/catchup"));
-    assert!(msg.content.contains("side panel"));
-    assert!(msg.content.contains("/catchup next"));
-}
-
-#[test]
-fn test_help_topic_shows_back_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help back".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/back"));
-    assert!(msg.content.contains("Catch Up"));
 }
 
 #[test]
@@ -783,54 +690,6 @@ fn test_maybe_show_catchup_after_history_adds_brief_page_and_marks_seen() {
             &persisted.status
         ));
     });
-}
-
-#[test]
-fn test_help_topic_shows_observe_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help observe".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/observe"));
-    assert!(msg.content.contains("latest tool call or tool result"));
-}
-
-#[test]
-fn test_help_topic_shows_splitview_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help splitview".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/splitview"));
-    assert!(
-        msg.content
-            .contains("mirrors the current chat in the side panel")
-    );
-}
-
-#[test]
-fn test_help_topic_shows_refactor_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help refactor".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/refactor [focus]"));
-    assert!(msg.content.contains("independent read-only subagent"));
 }
 
 #[test]

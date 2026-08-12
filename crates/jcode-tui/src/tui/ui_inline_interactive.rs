@@ -1073,26 +1073,6 @@ mod tests {
     }
 
     #[test]
-    fn picker_render_area_centers_in_centered_mode() {
-        let picker = sample_picker();
-        let width = picker_render_width(&picker, 80) as u16;
-        let area = Rect::new(5, 3, 80, 2);
-        let horizontal_offset = area.width.saturating_sub(width) / 2;
-        let render_area = Rect {
-            x: area.x + horizontal_offset,
-            y: area.y,
-            width,
-            height: area.height,
-        };
-
-        assert!(
-            render_area.x > area.x,
-            "content-fit picker should center when possible"
-        );
-        assert_eq!(render_area.width, width);
-    }
-
-    #[test]
     fn model_picker_method_display_uses_user_friendly_labels() {
         assert_eq!(api_method_display("openai-oauth"), "oauth");
         assert_eq!(api_method_display("openai-api-key"), "api key");

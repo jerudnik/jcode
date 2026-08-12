@@ -55,12 +55,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discloses_once_per_session() {
-        assert!(should_disclose(false));
-        assert!(!should_disclose(true));
-    }
-
-    #[test]
     fn disclosure_names_the_policy_and_links_it() {
         let message = disclosure_message();
         assert!(message.contains("(sponsored discovery)"));

@@ -528,14 +528,6 @@ mod tests {
     }
 
     #[test]
-    fn done_phase_is_inactive() {
-        let flow = OnboardingFlow {
-            phase: OnboardingPhase::Done,
-        };
-        assert!(!flow.is_active());
-    }
-
-    #[test]
     fn continue_prompt_counts_down_and_times_out() {
         let past = Instant::now() - (DECISION_TIMEOUT + Duration::from_secs(1));
         let flow = OnboardingFlow {

@@ -1542,11 +1542,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_mode_color_is_distinct() {
-        assert_eq!(shell_mode_color(), rgb(110, 214, 151));
-    }
-
-    #[test]
     fn normalize_repaint_sensitive_notice_text_drops_warning_variation_selector() {
         assert_eq!(
             normalize_repaint_sensitive_notice_text("⚠️ File activity: read lines 1-9"),

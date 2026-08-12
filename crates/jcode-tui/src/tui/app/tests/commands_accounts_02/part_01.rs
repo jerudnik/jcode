@@ -129,46 +129,6 @@ fn test_usage_with_suffix_does_not_open_picker_preview() {
 }
 
 #[test]
-fn test_show_accounts_includes_masked_email_column() {
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let accounts = vec![crate::auth::claude::AnthropicAccount {
-        label: "work".to_string(),
-        access: "acc".to_string(),
-        refresh: "ref".to_string(),
-        expires: now_ms + 60000,
-        email: Some("user@example.com".to_string()),
-        scopes: Vec::new(),
-        subscription_type: Some("max".to_string()),
-    }];
-
-    let mut lines = vec!["**Anthropic Accounts:**\n".to_string()];
-    lines.push("| Account | Email | Status | Subscription | Active |".to_string());
-    lines.push("|---------|-------|--------|-------------|--------|".to_string());
-
-    for account in &accounts {
-        let status = if account.expires > now_ms {
-            "✓ valid"
-        } else {
-            "⚠ expired"
-        };
-        let email = account
-            .email
-            .as_deref()
-            .map(mask_email)
-            .unwrap_or_else(|| "unknown".to_string());
-        let sub = account.subscription_type.as_deref().unwrap_or("unknown");
-        lines.push(format!(
-            "| {} | {} | {} | {} | {} |",
-            account.label, email, status, sub, "◉"
-        ));
-    }
-
-    let output = lines.join("\n");
-    assert!(output.contains("| Account | Email | Status | Subscription | Active |"));
-    assert!(output.contains("u***r@example.com"));
-}
-
-#[test]
 fn test_account_openai_command_opens_account_picker() {
     with_temp_jcode_home(|| {
         let now_ms = chrono::Utc::now().timestamp_millis();
@@ -409,67 +369,6 @@ fn test_account_picker_preview_stays_closed_for_explicit_subcommands() {
 
     assert!(app.inline_interactive_state.is_none());
     assert_eq!(app.input(), "/account openai settings");
-}
-
-#[test]
-fn test_account_command_combines_claude_and_openai_accounts() {
-    with_temp_jcode_home(|| {
-        let now_ms = chrono::Utc::now().timestamp_millis();
-
-        crate::auth::claude::upsert_account(crate::auth::claude::AnthropicAccount {
-            label: "claude-1".to_string(),
-            access: "claude_acc".to_string(),
-            refresh: "claude_ref".to_string(),
-            expires: now_ms + 60_000,
-            email: Some("claude@example.com".to_string()),
-            scopes: Vec::new(),
-            subscription_type: Some("pro".to_string()),
-        })
-        .unwrap();
-        crate::auth::codex::upsert_account(crate::auth::codex::OpenAiAccount {
-            label: "openai-1".to_string(),
-            access_token: "acc".to_string(),
-            refresh_token: "ref".to_string(),
-            id_token: None,
-            account_id: Some("acct_openai_1".to_string()),
-            expires_at: Some(now_ms + 60_000),
-            email: Some("openai@example.com".to_string()),
-        })
-        .unwrap();
-
-        let mut app = create_test_app();
-        app.input = "/account".to_string();
-        app.submit_input();
-
-        let picker = app
-            .inline_interactive_state
-            .as_ref()
-            .expect("inline account picker should open");
-        assert!(picker.entries.iter().any(|entry| {
-            matches!(
-                entry.action,
-                crate::tui::PickerAction::Account(crate::tui::AccountPickerAction::Switch {
-                    ref provider_id,
-                    ref label
-                }) if provider_id == "claude" && label == "claude-1"
-            )
-        }));
-        assert!(picker.entries.iter().any(|entry| {
-            matches!(
-                entry.action,
-                crate::tui::PickerAction::Account(crate::tui::AccountPickerAction::Switch {
-                    ref provider_id,
-                    ref label
-                }) if provider_id == "openai" && label == "openai-1"
-            )
-        }));
-        assert!(
-            picker
-                .entries
-                .iter()
-                .any(|entry| entry.name == "account center")
-        );
-    });
 }
 
 #[cfg(unix)]

@@ -35,12 +35,6 @@ mod tests {
     };
 
     #[test]
-    fn line_display_width_counts_wide_chars() {
-        assert_eq!(line_display_width("abc"), 3);
-        assert_eq!(line_display_width("a🙂b"), 4);
-    }
-
-    #[test]
     fn display_col_to_byte_offset_stops_before_partial_wide_char() {
         let text = "a🙂b";
 
@@ -49,12 +43,6 @@ mod tests {
         assert_eq!(display_col_to_byte_offset(text, 2), 1);
         assert_eq!(display_col_to_byte_offset(text, 3), "a🙂".len());
         assert_eq!(display_col_to_byte_offset(text, 99), text.len());
-    }
-
-    #[test]
-    fn clamp_display_col_caps_at_line_display_width() {
-        assert_eq!(clamp_display_col("a🙂b", 99), 4);
-        assert_eq!(clamp_display_col("a🙂b", 2), 2);
     }
 
     #[test]

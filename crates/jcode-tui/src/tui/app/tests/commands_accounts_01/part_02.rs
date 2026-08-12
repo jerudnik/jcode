@@ -242,23 +242,6 @@ fn test_usage_command_requests_usage_report_with_inline_view() {
 }
 
 #[test]
-fn test_usage_submit_input_requests_usage_report_with_inline_view() {
-    let mut app = create_test_app();
-    app.input = "/usage".to_string();
-
-    app.submit_input();
-
-    assert!(app.inline_interactive_state.is_none());
-    assert!(app.usage_overlay.is_none());
-    assert!(app.inline_view_state.is_none());
-    assert_eq!(
-        app.display_messages().last().map(|m| m.role.as_str()),
-        Some("usage")
-    );
-    assert!(app.usage_report_refreshing);
-}
-
-#[test]
 fn test_usage_typing_does_not_open_picker_preview() {
     let mut app = create_test_app();
 

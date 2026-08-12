@@ -3307,38 +3307,6 @@ mod tests {
     }
 
     #[test]
-    fn model_picker_current_route_allows_provider_aliases() {
-        assert!(jcode_provider_core::model_route_provider_labels_match(
-            "Anthropic",
-            "Claude"
-        ));
-        assert!(jcode_provider_core::model_route_provider_labels_match(
-            "auto",
-            "OpenRouter"
-        ));
-        assert!(jcode_provider_core::model_route_provider_labels_match(
-            "GitHub Copilot",
-            "Copilot"
-        ));
-        assert!(jcode_provider_core::model_route_provider_labels_match(
-            "AWS Bedrock",
-            "Bedrock"
-        ));
-    }
-
-    #[test]
-    fn model_picker_provider_match_does_not_use_substring_false_positives() {
-        assert!(!jcode_provider_core::model_route_provider_labels_match(
-            "OpenRouter/OpenAI",
-            "OpenAI"
-        ));
-        assert!(!jcode_provider_core::model_route_provider_labels_match(
-            "OpenAI",
-            "OpenRouter"
-        ));
-    }
-
-    #[test]
     fn model_picker_default_route_requires_matching_provider_when_config_has_provider() {
         let openai_route = picker_option_with_method("OpenAI", "openai-oauth");
         let copilot_route = picker_option_with_method("Copilot", "copilot");

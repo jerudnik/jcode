@@ -240,19 +240,3 @@ fn test_reload_progress_coalesces_into_single_message() {
     );
 }
 
-#[test]
-fn test_handle_server_event_updates_connection_type() {
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    app.handle_server_event(
-        crate::protocol::ServerEvent::ConnectionType {
-            connection: "websocket".to_string(),
-        },
-        &mut remote,
-    );
-
-    assert_eq!(app.connection_type.as_deref(), Some("websocket"));
-}

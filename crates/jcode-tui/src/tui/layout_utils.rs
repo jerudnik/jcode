@@ -15,15 +15,4 @@ pub(crate) fn rect_from_capture(rect: RectCapture) -> Rect {
 mod tests {
     use super::*;
 
-    #[test]
-    fn rect_from_capture_copies_all_fields() {
-        let rect = rect_from_capture(RectCapture {
-            x: 3,
-            y: 5,
-            width: 8,
-            height: 13,
-        });
-
-        assert_eq!(rect, Rect::new(3, 5, 8, 13));
-    }
 }

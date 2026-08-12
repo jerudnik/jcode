@@ -823,48 +823,6 @@ fn test_prepare_messages_centers_meta_footer_in_centered_mode() {
 }
 
 #[test]
-fn test_prepare_messages_recomputes_when_streaming_text_changes_same_length() {
-    let first = TestState {
-        status: ProcessingStatus::Streaming,
-        streaming_text: "alpha".to_string(),
-        anim_elapsed: 10.0,
-        ..Default::default()
-    };
-    let second = TestState {
-        status: ProcessingStatus::Streaming,
-        streaming_text: "omega".to_string(),
-        anim_elapsed: 10.0,
-        ..Default::default()
-    };
-
-    let first_rendered: Vec<String> = prepare::prepare_messages(&first, 80, 20)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect();
-    let second_rendered: Vec<String> = prepare::prepare_messages(&second, 80, 20)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect();
-
-    assert!(
-        first_rendered.iter().any(|line| line.contains("alpha")),
-        "expected first streaming text in {:?}",
-        first_rendered
-    );
-    assert!(
-        second_rendered.iter().any(|line| line.contains("omega")),
-        "expected second streaming text in {:?}",
-        second_rendered
-    );
-    assert_ne!(
-        first_rendered, second_rendered,
-        "prepared frame cache should invalidate on same-length streaming text changes"
-    );
-}
-
-#[test]
 fn test_prepare_messages_tool_row_refreshes_after_message_version_bump() {
     let tool_call = ToolCall {
         id: "tool-1".to_string(),

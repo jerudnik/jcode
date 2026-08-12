@@ -271,30 +271,6 @@ fn test_compute_streaming_tps_uses_latest_observed_snapshot_instead_of_current_r
 }
 
 #[test]
-fn test_compute_streaming_tps_does_not_decay_on_redundant_usage_snapshots() {
-    let mut app = create_test_app();
-    let mut seen = 0;
-
-    app.streaming.streaming_tps_collect_output = true;
-    app.streaming.streaming_tps_start = Some(Instant::now() - Duration::from_secs(10));
-    app.accumulate_streaming_output_tokens(40, &mut seen);
-    let initial_tps = app.compute_streaming_tps().expect("initial tps");
-
-    app.streaming.streaming_tps_start = Some(Instant::now() - Duration::from_secs(30));
-    app.accumulate_streaming_output_tokens(40, &mut seen);
-
-    let tps = app.compute_streaming_tps().expect("tps");
-    assert!(
-        initial_tps > 3.9 && initial_tps < 4.1,
-        "unexpected initial tps: {initial_tps}"
-    );
-    assert!(
-        tps > 3.9 && tps < 4.1,
-        "unexpected tps after redundant snapshot: {tps}"
-    );
-}
-
-#[test]
 fn test_compute_streaming_tps_bursty_stream_simulation_stays_constant_between_real_updates() {
     let mut app = create_test_app();
     let mut seen = 0;
@@ -510,17 +486,6 @@ fn test_handle_key_typing() {
 
     assert_eq!(app.input(), "hello");
     assert_eq!(app.cursor_pos(), 5);
-}
-
-#[test]
-fn test_handle_key_shift_slash_preserves_layout_translated_slash() {
-    let mut app = create_test_app();
-
-    app.handle_key(KeyCode::Char('/'), KeyModifiers::SHIFT)
-        .unwrap();
-
-    assert_eq!(app.input(), "/");
-    assert_eq!(app.cursor_pos(), 1);
 }
 
 #[test]

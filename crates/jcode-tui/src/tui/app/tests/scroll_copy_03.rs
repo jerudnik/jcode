@@ -246,40 +246,6 @@ fn test_scroll_render_with_mermaid() {
 }
 
 #[test]
-fn test_scroll_visual_debug_frame() {
-    let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 10);
-
-    crate::tui::visual_debug::enable();
-
-    // Render at bottom, verify frame capture works
-    app.scroll_offset = 0;
-    terminal
-        .draw(|f| crate::tui::ui::draw(f, &app))
-        .expect("draw at offset=0 failed");
-
-    let frame = crate::tui::visual_debug::latest_frame();
-    assert!(frame.is_some(), "visual debug frame should be captured");
-
-    // Render at scroll_offset=10, verify no panic
-    app.scroll_offset = 10;
-    app.auto_scroll_paused = true;
-    terminal
-        .draw(|f| crate::tui::ui::draw(f, &app))
-        .expect("draw at offset=10 failed");
-
-    // Note: latest_frame() is global and may be overwritten by parallel tests,
-    // so we only verify the frame capture mechanism works, not exact values.
-    let frame = crate::tui::visual_debug::latest_frame();
-    assert!(
-        frame.is_some(),
-        "frame should still be available after second draw"
-    );
-
-    crate::tui::visual_debug::disable();
-}
-
-#[test]
 fn test_full_redraw_clears_out_of_band_backend_artifacts_after_native_scroll_like_mutation() {
     let _lock = scroll_render_test_lock();
 

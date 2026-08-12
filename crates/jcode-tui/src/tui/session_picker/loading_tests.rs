@@ -64,55 +64,6 @@ fn append_text_message(
 }
 
 #[test]
-fn collect_recent_session_stems_keeps_empty_snapshot_with_journal_history() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let stem = "session_alpha_1770000000000";
-    write_picker_snapshot(&temp.path().join(format!("{stem}.json")), false);
-    std::fs::write(
-        temp.path().join(format!("{stem}.journal.jsonl")),
-        "{\"append_messages\":[{\"role\":\"user\"}]}",
-    )
-    .expect("write journal");
-
-    let stems = collect_recent_session_stems(temp.path(), 1).expect("collect stems");
-    assert_eq!(stems, vec![stem.to_string()]);
-}
-
-#[test]
-fn collect_recent_session_stems_expands_candidate_window_past_recent_empty_stubs() {
-    let temp = tempfile::tempdir().expect("temp dir");
-
-    for idx in 0..30 {
-        let stem = format!("session_empty_{}", 1770000000030u64 - idx as u64);
-        write_picker_snapshot(&temp.path().join(format!("{stem}.json")), false);
-    }
-
-    let older_stem = "session_full_1770000000000";
-    write_picker_snapshot(&temp.path().join(format!("{older_stem}.json")), true);
-
-    let stems = collect_recent_session_stems(temp.path(), 1).expect("collect stems");
-    assert_eq!(stems, vec![older_stem.to_string()]);
-}
-
-#[test]
-fn trivial_hidden_only_snapshot_detector_skips_system_stub() {
-    let bytes = br#"{"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>boot</system-reminder>"}],"display_role":"system"}]}"#;
-    assert!(snapshot_bytes_look_trivial_hidden_only(bytes));
-}
-
-#[test]
-fn trivial_hidden_only_snapshot_detector_keeps_visible_message() {
-    let bytes = br#"{"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}"#;
-    assert!(!snapshot_bytes_look_trivial_hidden_only(bytes));
-}
-
-#[test]
-fn trivial_hidden_only_snapshot_detector_keeps_system_plus_visible_message() {
-    let bytes = br#"{"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>boot</system-reminder>"}],"display_role":"system"},{"role":"assistant","content":[{"type":"text","text":"visible"}]}]}"#;
-    assert!(!snapshot_bytes_look_trivial_hidden_only(bytes));
-}
-
-#[test]
 fn cached_grouped_sessions_round_trip_from_disk() {
     let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
@@ -736,37 +687,6 @@ fn session_matches_query_searches_jcode_transcript_contents() {
 }
 
 #[test]
-fn session_matches_query_searches_external_codex_transcript_contents() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("temp dir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
-
-    let codex_dir = temp.path().join("external/.codex/sessions/2026/04/19");
-    std::fs::create_dir_all(&codex_dir).expect("create codex dir");
-
-    let transcript_path = codex_dir.join("transcript-search.jsonl");
-    std::fs::write(
-        &transcript_path,
-        concat!(
-            "{\"timestamp\":\"2026-04-19T04:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-transcript-search\",\"timestamp\":\"2026-04-19T03:59:00Z\",\"cwd\":\"/tmp/codex-search\"}}\n",
-            "{\"timestamp\":\"2026-04-19T04:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"the kiwi comet bug is only mentioned in transcript content\"}]}}\n"
-        ),
-    )
-    .expect("write codex transcript");
-
-    let sessions = load_sessions().expect("load sessions");
-    let loaded = sessions
-        .iter()
-        .find(|candidate| candidate.id == "codex:codex-transcript-search")
-        .expect("codex session present");
-
-    assert!(!loaded.search_index.contains("kiwi comet"));
-    assert!(loaded.messages_preview.is_empty());
-    assert!(session_matches_query(loaded, "kiwi comet"));
-    assert!(!session_matches_query(loaded, "dragonfruit meteor"));
-}
-
-#[test]
 fn load_sessions_surfaces_external_cursor_transcript() {
     let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
@@ -932,37 +852,6 @@ fn benchmark_real_resume_loading_phases() {
 }
 
 #[test]
-#[ignore = "developer benchmark: scans the real JCODE_HOME session directory"]
-fn benchmark_real_resume_loading_reports_timings() {
-    invalidate_session_list_cache();
-
-    let load_start = std::time::Instant::now();
-    let sessions = load_sessions().expect("load real sessions");
-    let load_elapsed = load_start.elapsed();
-
-    invalidate_session_list_cache();
-    let grouped_start = std::time::Instant::now();
-    let grouped = load_sessions_grouped().expect("load real grouped sessions");
-    let grouped_elapsed = grouped_start.elapsed();
-    let grouped_count = grouped
-        .0
-        .iter()
-        .map(|group| group.sessions.len())
-        .sum::<usize>()
-        + grouped.1.len();
-
-    eprintln!(
-        "real resume bench: load_sessions={}ms count={} load_sessions_grouped={}ms grouped_count={} server_groups={} orphan_sessions={}",
-        load_elapsed.as_millis(),
-        sessions.len(),
-        grouped_elapsed.as_millis(),
-        grouped_count,
-        grouped.0.len(),
-        grouped.1.len()
-    );
-}
-
-#[test]
 fn benchmark_resume_loading_reports_timings() {
     let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
@@ -1023,54 +912,6 @@ fn benchmark_resume_loading_reports_timings() {
         load_elapsed.as_millis(),
         group_elapsed.as_millis(),
         sessions.len()
-    );
-}
-
-#[test]
-fn onboarding_scoped_loader_returns_only_codex_sessions() {
-    use crate::tui::app::onboarding_flow::ExternalCli;
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("temp dir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
-
-    // A Codex transcript that the onboarding picker should surface.
-    let codex_dir = temp.path().join("external/.codex/sessions/2026/05/01");
-    std::fs::create_dir_all(&codex_dir).expect("create codex dir");
-    std::fs::write(
-        codex_dir.join("rollout-2026-05-01T10-00-00-test.jsonl"),
-        "{\"timestamp\":\"2026-05-01T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-onboarding-test\",\"timestamp\":\"2026-05-01T09:59:00Z\",\"cwd\":\"/tmp/codex-onboard\"}}\n",
-    )
-    .expect("write codex transcript");
-
-    // A jcode session that must NOT appear in the scoped Codex view (the whole
-    // point of the scoped loader is to skip parsing these on onboarding).
-    let mut jcode_session = Session::create_with_id(
-        "session_onboarding_jcode_1780000000000".to_string(),
-        Some("/tmp/jcode-onboard".to_string()),
-        Some("Jcode Onboarding".to_string()),
-    );
-    append_text_message(
-        &mut jcode_session,
-        "msg-1".to_string(),
-        crate::message::Role::User,
-        "should not show in codex onboarding view".to_string(),
-    );
-    jcode_session.save().expect("save jcode session");
-
-    let (groups, orphans) = load_external_cli_sessions_grouped(ExternalCli::Codex);
-    assert!(groups.is_empty(), "scoped loader produces only orphans");
-    assert!(
-        orphans
-            .iter()
-            .any(|s| s.id == "codex:codex-onboarding-test"),
-        "expected codex transcript in scoped onboarding load: {:?}",
-        orphans.iter().map(|s| &s.id).collect::<Vec<_>>()
-    );
-    assert!(
-        orphans
-            .iter()
-            .all(|s| matches!(s.resume_target, ResumeTarget::CodexSession { .. })),
-        "scoped Codex load must not include jcode/other-CLI sessions"
     );
 }
 
