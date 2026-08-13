@@ -124,6 +124,7 @@ Focused validation matrix after the current DTO splits:
 | Ambient behavior modules | `cargo check --profile selfdev -p jcode --bin jcode` | `cargo test --profile selfdev -p jcode ambient::ambient_tests --lib`; `cargo test --profile selfdev -p jcode ambient::scheduler::tests --lib`; `cargo test --profile selfdev -p jcode ambient::runner::runner_tests --lib` | Avoid bare `ambient` as a required gate for module-only refactors because it selects cross-module TUI/config state tests. |
 | Memory activity DTOs | `cargo check --profile selfdev -p jcode-memory-types -p jcode-core -p jcode --bin jcode` | `cargo test --profile selfdev -p jcode runtime_memory_log --lib`; `cargo test --profile selfdev -p jcode tui::info_widget::tests --lib` | `memory::activity` currently matches no tests, so use consumer tests. |
 | Goal/todo/catchup core DTOs | `cargo check --profile selfdev -p jcode-core -p jcode --bin jcode` | Exact goal/todo/catchup filters if behavior changes. | Currently small/stable enough to leave in `jcode-core`; revisit if churn grows. |
+| ACP subprocess runtime | `cargo check -p jcode-provider-acp-runtime --all-targets` | `cargo test -p jcode-provider-acp-runtime --test protocol` | Owns the provider-neutral ACP v1 stdio process, session, permission, timeout, and cancellation lifecycle. Provider identity, auth selection, prompt conversion, model discovery, session setup, and update mapping stay in provider policy implementations. |
 
 
 ## Compile baseline observations
