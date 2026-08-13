@@ -416,6 +416,22 @@ mod tests {
     }
 
     #[test]
+    fn zai_login_identifies_coding_plan_subscription_key() {
+        let provider = resolve_login_provider("zai").expect("Z.AI provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::ApiKey);
+        assert_eq!(provider.menu_detail, "Coding Plan subscription API key");
+
+        let LoginProviderTarget::OpenAiCompatible(profile) = provider.target else {
+            panic!("Z.AI must use its OpenAI-compatible Coding Plan endpoint");
+        };
+        assert_eq!(profile.api_base, "https://api.z.ai/api/coding/paas/v4");
+        assert_eq!(profile.setup_url, "https://docs.z.ai/devpack/quick-start");
+        assert_eq!(profile.default_model, Some("glm-5.2"));
+        assert_eq!(profile.api_key_env, "ZHIPU_API_KEY");
+        assert_eq!(profile.api_key_aliases, &["ZAI_API_KEY"]);
+    }
+
+    #[test]
     fn resolve_login_provider_loose_matches_id_alias_and_display_name() {
         // id
         assert_eq!(

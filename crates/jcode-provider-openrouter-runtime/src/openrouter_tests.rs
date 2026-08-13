@@ -426,6 +426,57 @@ fn direct_deepseek_profile_omits_image_url_parts() {
     );
 }
 
+#[test]
+fn direct_zai_profile_rejects_image_input() {
+    let _lock = ENV_LOCK.lock();
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("zai".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("glm-5.2".to_string())),
+        ..make_custom_compatible_provider()
+    };
+    assert!(!provider.supports_image_input());
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![
+            ContentBlock::Text {
+                text: "describe this".to_string(),
+                cache_control: None,
+            },
+            ContentBlock::Image {
+                media_type: "image/png".to_string(),
+                data: "aW1hZ2U=".to_string(),
+            },
+        ],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    assert!(!request.contains(r#""type":"image_url""#));
+    assert!(request.contains("Image omitted"));
+}
+
 /// Extract the JSON request body from a captured raw HTTP request.
 fn parse_captured_request_body(request: &str) -> serde_json::Value {
     let body = request
@@ -1224,7 +1275,7 @@ fn autodetected_profile_seeds_default_model_and_cache_namespace() {
     write_test_api_key(&zai.env_file, &zai.api_key_env, "test-zai-key");
 
     let provider = OpenRouterProvider::new().expect("provider");
-    assert_eq!(provider.model.blocking_read().clone(), "glm-4.5");
+    assert_eq!(provider.model.blocking_read().clone(), "glm-5.2");
     assert_eq!(
         std::env::var("JCODE_OPENROUTER_CACHE_NAMESPACE")
             .ok()
@@ -1533,6 +1584,68 @@ fn direct_deepseek_request_effort_mapping_uses_supported_values() {
         .map(OpenRouterProvider::normalize_deepseek_request_effort),
         ["none", "low", "high", "high", "max", "max", "max"]
     );
+}
+
+#[test]
+fn direct_zai_request_sends_supported_effort_and_thinking() {
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        model: Arc::new(RwLock::new("glm-5.2".to_string())),
+        profile_id: Some("zai".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    assert_eq!(
+        [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "swarm",
+            "swarm-deep"
+        ]
+        .map(OpenRouterProvider::normalize_zai_request_effort),
+        ["none", "low", "high", "high", "max", "max", "max"]
+    );
+    provider
+        .set_reasoning_effort("xhigh")
+        .expect("Z.AI profile should accept internal xhigh effort");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["thinking"]["type"], "enabled");
+    assert_eq!(body["reasoning_effort"], "max");
+    assert_ne!(body["reasoning_effort"], "xhigh");
 }
 
 #[test]

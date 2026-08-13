@@ -397,8 +397,12 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("qwen3.5-plus");
         }
         "zai" => {
-            push("glm-4.5");
+            // Current Coding Plan roster first; older entries remain available
+            // for stored sessions and endpoint compatibility.
+            push("glm-5.2");
+            push("glm-5-turbo");
             push("glm-4.7");
+            push("glm-4.5");
             push("glm-5");
             push("glm-5.1");
             push("glm-4.7-flash");

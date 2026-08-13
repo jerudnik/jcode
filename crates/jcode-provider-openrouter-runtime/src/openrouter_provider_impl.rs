@@ -66,6 +66,11 @@ impl Provider for OpenRouterProvider {
         // synthesized blank field when no reasoning was returned.
         let direct_deepseek_model =
             !self.supports_provider_features && Self::model_is_deepseek_family(&model);
+        let direct_zai_profile = !self.supports_provider_features
+            && self
+                .profile_id
+                .as_deref()
+                .is_some_and(|id| id.eq_ignore_ascii_case("zai"));
         let allow_reasoning =
             (self.supports_provider_features || kimi_coding_endpoint || direct_deepseek_model)
                 && thinking_enabled != Some(false);
@@ -158,11 +163,19 @@ impl Provider for OpenRouterProvider {
                 // GPT-family models on direct compat gateways (e.g. OpenCode
                 // Zen serving gpt-5.3-codex-spark) take the standard OpenAI
                 // `reasoning_effort` field with OpenAI's effort vocabulary.
-                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
+                let effort = if direct_zai_profile {
+                    Self::normalize_zai_request_effort(effort)
+                } else if jcode_base::prompt::is_swarm_effort(effort) {
                     "xhigh"
                 } else {
                     effort
                 };
+                if direct_zai_profile {
+                    request["thinking"] = serde_json::json!({
+                        "type": if effort == "none" { "disabled" } else { "enabled" }
+                    });
+                    sent_reasoning_config = true;
+                }
                 if effort != "none" {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
