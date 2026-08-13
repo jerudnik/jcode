@@ -1570,6 +1570,74 @@ fn direct_deepseek_profile_exposes_max_reasoning_effort() {
 }
 
 #[test]
+fn kimi_k3_exposes_only_supported_reasoning_efforts() {
+    let provider = OpenRouterProvider {
+        model: Arc::new(RwLock::new("k3".to_string())),
+        profile_id: Some("kimi".to_string()),
+        supports_provider_features: false,
+        ..make_custom_compatible_provider()
+    };
+
+    assert_eq!(
+        provider.available_efforts(),
+        vec!["low", "high", "max", "swarm", "swarm-deep"]
+    );
+    provider
+        .set_reasoning_effort("medium")
+        .expect("Kimi K3 should accept the medium alias");
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("high"));
+    provider.set_model("kimi-for-coding").unwrap();
+    assert!(provider.available_efforts().is_empty());
+}
+
+#[test]
+fn kimi_k3_request_sends_top_level_supported_reasoning_effort() {
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        model: Arc::new(RwLock::new("k3-256k".to_string())),
+        profile_id: Some("kimi".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    provider
+        .set_reasoning_effort("xhigh")
+        .expect("Kimi K3 should map xhigh to max");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["reasoning_effort"], "max");
+    assert!(body.get("thinking").is_none());
+}
+
+#[test]
 fn direct_deepseek_request_effort_mapping_uses_supported_values() {
     assert_eq!(
         [

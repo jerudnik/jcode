@@ -147,7 +147,11 @@ impl Provider for OpenRouterProvider {
 
         let mut sent_reasoning_config = false;
         if let Some(effort) = reasoning_effort.as_deref() {
-            if self.supports_deepseek_reasoning_effort() {
+            if self.supports_kimi_reasoning_effort() {
+                request["reasoning_effort"] =
+                    serde_json::json!(Self::normalize_kimi_request_effort(effort));
+                sent_reasoning_config = true;
+            } else if self.supports_deepseek_reasoning_effort() {
                 let effort = Self::normalize_deepseek_request_effort(effort);
                 if direct_deepseek_model {
                     request["thinking"] = serde_json::json!({
@@ -472,7 +476,9 @@ impl Provider for OpenRouterProvider {
     }
 
     fn available_efforts(&self) -> Vec<&'static str> {
-        if self.supports_deepseek_reasoning_effort() {
+        if self.supports_kimi_reasoning_effort() {
+            vec!["low", "high", "max", "swarm", "swarm-deep"]
+        } else if self.supports_deepseek_reasoning_effort() {
             vec![
                 "none",
                 "low",

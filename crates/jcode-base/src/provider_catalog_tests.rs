@@ -994,6 +994,19 @@ fn minimax_static_catalog_includes_m3_before_legacy_models() {
 }
 
 #[test]
+fn kimi_static_catalog_includes_current_code_models() {
+    let models = openai_compatible_profile_static_models(KIMI_PROFILE);
+    for expected in ["k3", "k3-256k", "kimi-for-coding-highspeed"] {
+        assert!(
+            models.iter().any(|model| model == expected),
+            "missing {expected}"
+        );
+    }
+    assert!(models.iter().any(|model| model == "kimi-for-coding"));
+    assert!(models.iter().any(|model| model == "kimi-k2.5"));
+}
+
+#[test]
 fn quality_tier_ranks_flagship_above_bare_above_cheap() {
     // Flagship-marked ids (max/pro/opus/coder/large/huge-param) -> tier 2.
     assert_eq!(openai_compatible_model_quality_tier("qwen3-max"), 2);

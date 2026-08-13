@@ -1099,6 +1099,23 @@ impl OpenRouterProvider {
         model.trim().to_ascii_lowercase().contains("deepseek")
     }
 
+    fn model_is_kimi_k3_family(model: &str) -> bool {
+        let model = model.trim().to_ascii_lowercase();
+        model == "k3"
+            || model.ends_with("/k3")
+            || model.contains("kimi-k3")
+            || model.ends_with("k3-256k")
+    }
+
+    pub(crate) fn supports_kimi_reasoning_effort(&self) -> bool {
+        self.reasoning_effort_support != Some(false)
+            && !Self::profile_supports_unified_reasoning(
+                self.profile_id.as_deref(),
+                self.send_openrouter_headers,
+            )
+            && Self::model_is_kimi_k3_family(&self.model_snapshot())
+    }
+
     /// Does this runtime accept the DeepSeek-style `reasoning_effort` field?
     /// Priority: explicit named-profile config override, then the dedicated
     /// deepseek profile, then the active model family for direct compat
@@ -1153,7 +1170,8 @@ impl OpenRouterProvider {
     }
 
     pub(crate) fn supports_any_reasoning_effort(&self) -> bool {
-        self.supports_deepseek_reasoning_effort()
+        self.supports_kimi_reasoning_effort()
+            || self.supports_deepseek_reasoning_effort()
             || self.supports_openai_reasoning_effort()
             || Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
@@ -1162,7 +1180,9 @@ impl OpenRouterProvider {
     }
 
     pub(crate) fn normalize_reasoning_effort_for_self(&self, effort: &str) -> Option<String> {
-        if self.supports_deepseek_reasoning_effort() {
+        if self.supports_kimi_reasoning_effort() {
+            Self::normalize_kimi_reasoning_effort(effort)
+        } else if self.supports_deepseek_reasoning_effort() {
             Self::normalize_reasoning_effort(effort)
         } else {
             Self::normalize_unified_reasoning_effort(effort)
@@ -1238,6 +1258,35 @@ impl OpenRouterProvider {
     fn normalize_zai_request_effort(effort: &str) -> &str {
         match effort {
             "none" => "none",
+            "low" => "low",
+            "medium" | "high" => "high",
+            "xhigh" | "max" | "swarm" | "swarm-deep" => "max",
+            _ => "max",
+        }
+    }
+
+    fn normalize_kimi_reasoning_effort(raw: &str) -> Option<String> {
+        let value = raw.trim().to_ascii_lowercase();
+        match value.as_str() {
+            "" | "none" => None,
+            "low" => Some("low".to_string()),
+            "medium" | "high" => Some("high".to_string()),
+            "xhigh" | "max" => Some("max".to_string()),
+            "swarm" | "swarm-deep" => Some(value),
+            other => {
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openrouter.kimi_reasoning_effort",
+                    other,
+                    "max",
+                    "low|medium|high|xhigh|max|swarm|swarm-deep",
+                );
+                Some("max".to_string())
+            }
+        }
+    }
+
+    fn normalize_kimi_request_effort(effort: &str) -> &str {
+        match effort {
             "low" => "low",
             "medium" | "high" => "high",
             "xhigh" | "max" | "swarm" | "swarm-deep" => "max",

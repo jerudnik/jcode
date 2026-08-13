@@ -439,7 +439,10 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("Llama-3.3-70B-Instruct");
         }
         "kimi" => {
+            push("k3");
+            push("k3-256k");
             push("kimi-for-coding");
+            push("kimi-for-coding-highspeed");
             push("kimi-k2.5");
             push("kimi-k2.6");
             push("kimi-k2-thinking");

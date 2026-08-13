@@ -577,6 +577,14 @@ pub(super) fn inferred_reasoning_efforts(
         ];
     }
 
+    let is_kimi_k3 = model == "k3"
+        || model.ends_with("/k3")
+        || model.contains("kimi-k3")
+        || model.ends_with("k3-256k");
+    if is_kimi_k3 {
+        return vec!["low", "high", "max", "swarm", "swarm-deep"];
+    }
+
     let is_openai = provider.contains("openai")
         || provider.contains("codex")
         || model.starts_with("gpt-")
