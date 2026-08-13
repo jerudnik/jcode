@@ -1,6 +1,26 @@
 # Provider confusion: unknown model names silently fall back to the default provider
 
-Status: proposal, evidence gathered 2026-08-12/13 (test-remediation pipeline session)
+Status: implemented-path-A, 2026-08-13
+
+## Implemented Path A
+
+Swarm spawn selection now enforces the first provider-router invariant: a
+concrete model request must resolve to a provider or explicit route, match the
+coordinator's exact model, or fail before a visible or headless session is
+created. The error names the requested model and directs the coordinator to
+`swarm list_models` or an explicit prefix such as `openai-oauth:`.
+
+Successful spawn responses and the corresponding server log now include the
+resolved `model`, `provider_key`, and `route`. The response fields are optional
+for wire and persisted-mutation compatibility. Tests cover unknown per-spawn
+and configured models, `inherit`, exact coordinator-model inheritance, and the
+explicit OpenAI and Claude API/OAuth prefixes. The earlier test that accepted
+an unknown prefix with `provider_key=None` was deliberately replaced.
+
+Path A does not infer live catalog routes. A bare name already classified by a
+static heuristic remains on that heuristic route even if a different live
+provider catalog advertises the same name. Resolving those names requires the
+deferred unique live-route lookup below.
 
 ## Symptom
 
@@ -27,8 +47,9 @@ Probes run during the incident:
   routes to Cursor, but Cursor itself rejects the name.
 - `spawn model="openai-oauth:gpt-5.6-sol"` → verified `Provider: OpenAI / gpt-5.6-sol`.
   Explicit auth-route prefixes work.
-- Provider identity is only visible *after* spawn, via `swarm status` /
-  `swarm list` (`Provider:` line), and only once the session has begun running.
+- Before Path A, provider identity was only visible *after* spawn, via
+  `swarm status` / `swarm list` (`Provider:` line), and only once the session
+  had begun running.
 
 ## Root cause
 
@@ -40,42 +61,45 @@ Two catalogs disagree, and resolution fails open.
    `crates/jcode-base/src/provider/cursor.rs::is_known_model`, whose
    `AVAILABLE_MODELS` is 11 entries (`composer-2.5`, `gpt-5.4-high`,
    `sonnet-4.6`, ...). None of the live-catalog names above are in it.
-3. `resolve_model_spec` (`crates/jcode-base/src/provider/models.rs`) therefore
-   returns `provider_key: None` for these names, and
-   `selection_for_concrete_model` (`crates/jcode-app-core/src/server/comm_session.rs`)
-   produces a selection with no provider key. Downstream, the spawned session
-   falls back to the server default identity — in this deployment, the
-   Anthropic coordinator model.
+3. `resolve_model_spec` (`crates/jcode-base/src/provider/models.rs`) does not use
+   the live Cursor catalog. Some names therefore return `provider_key: None`;
+   broad built-in heuristics can classify others as a different provider, such
+   as OpenAI for a `gpt-*` name. Before Path A, a `None` selection proceeded and
+   downstream session creation fell back to the server default identity.
 
-So the failure chain is: list_models advertises a name → bare-name resolution
-does not recognize it → spawn proceeds anyway on the default provider → the
-operator's model choice is silently discarded. The cost is real: this burned a
-constrained Anthropic usage budget while the operator believed work was running
-on OpenAI/Cursor capacity.
+So the failure chain is: `list_models` advertises a name → static bare-name
+resolution returns no provider or a different provider → spawn proceeds without
+checking the live route identity → the operator's provider choice is silently
+discarded. In the unresolved incident path, downstream session creation fell
+back to the Anthropic coordinator/default identity. The cost is real: this
+burned a constrained Anthropic usage budget while the operator believed work
+was running on OpenAI/Cursor capacity.
 
-Note the same fail-open shape exists for typos: `model: "gpt-5.6-slo"` would
-spawn happily on the default provider.
+The same fail-open shape existed for any typo or arbitrary name that resolved
+to no provider. Names captured by a broad family heuristic are a separate live
+route disambiguation problem deferred below.
 
 ## Why it is hard to catch
 
-- The spawn result contains only the session id, not the resolved
-  model/provider.
+- Before Path A, the spawn result contained only the session id, not the
+  resolved model/provider.
 - Headless workers do not announce their identity in reports.
 - `swarm list_models` presents one flat namespace with no marker for "this
   name is spawnable as-is" vs "this name needs a route prefix".
 
 ## Stepwise remediation plan
 
-1. **Echo resolved identity at spawn time.** The `spawn` (and `assign_task`,
-   `run_plan`) result should include `model=<bare> provider=<key> route=<api
-   method>` as resolved, so a mismatch is visible in the same tool result that
-   returns the session id. Cheap, no behavior change.
-2. **Fail closed on unresolved concrete models.** In
+1. **Implemented in Path A: echo resolved identity at spawn time.** The direct
+   `spawn` result includes the resolved model, provider key, and route beside
+   the session id. Every successful internal swarm spawn writes the same
+   identity to the server log.
+2. **Implemented in Path A: fail closed on unresolved concrete models.** In
    `resolve_swarm_spawn_selection`, when a concrete requested model resolves
    with `provider_key: None` and does not match the coordinator's model, reject
-   the spawn with an error listing near-miss route names, instead of falling
-   back to inheritance. An explicit `inherit` sentinel already exists for the
-   inherit case, so nothing legitimate is lost.
+   the spawn with an error directing the coordinator to `swarm list_models` or
+   an explicit route prefix, instead of falling back to inheritance. An
+   explicit `inherit` sentinel already exists for the inherit case, so nothing
+   legitimate is lost.
 3. **Reconcile the catalogs.** Either (a) make `swarm list_models` print the
    route-prefixed spawnable form for every entry (e.g.
    `cursor:gpt-5.6-sol-high-fast`), or (b) feed the live Cursor catalog into
@@ -85,10 +109,19 @@ spawn happily on the default provider.
 4. **Surface identity in completion reports.** Append the resolved
    model/provider to the worker's report header so post-hoc audits do not
    require `swarm list` before sessions are cleaned up.
-5. **Tests.** Unit: `resolve_model_spec` returns `None` provider for a
-   live-catalog-only Cursor name (pin the regression). Integration: spawn with
-   an unknown model errors; spawn with `openai-oauth:` prefix resolves to
-   OpenAI; `list_models` output round-trips through spawn.
+5. **Partly implemented in Path A: tests.** Selection tests cover unknown
+   per-spawn and configured models, inheritance, exact coordinator-model
+   matching, and explicit OpenAI/Claude auth prefixes. Live-catalog unique-match
+   and `list_models` round-trip coverage belongs with the deferred live router.
+
+## Deferred follow-ups
+
+- Audit and narrow the fail-open branch in `MultiProvider::set_model` without
+  breaking explicitly provider-local custom model IDs.
+- Resolve bare models against the daemon's live route catalog, accepting only a
+  unique match and returning an ambiguity error otherwise.
+- Apply the same resolver contract to the standalone `subagent` path, which
+  currently reconstructs selection from inherited parent route state.
 
 ## References
 
