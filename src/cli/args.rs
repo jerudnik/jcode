@@ -127,13 +127,13 @@ pub(crate) enum Command {
     /// Run as an Agent Client Protocol (ACP) adapter backed by the Jcode daemon
     Acp,
 
-    /// Re-publish the running daemon's tool registry (including `swarm`) over the
-    /// Model Context Protocol as a stdio JSON-RPC server. Add to an MCP client via
-    /// `~/.jcode/mcp.json`: {"servers":{"jcode":{"command":"jcode","args":["mcp-serve"]}}}
+    /// Expose a running daemon's session-filtered tools to an external MCP client
+    /// over stdio JSON-RPC. Configure this command in that external client, not in
+    /// Jcode's own `~/.jcode/mcp.json`.
     #[command(name = "mcp-serve")]
     McpServe {
-        /// Pin a target session id for session-scoped tools (e.g. the swarm
-        /// coordinator). If omitted, a coordinator session is created on first use.
+        /// Pin an existing daemon session for tool discovery and calls. If omitted,
+        /// an independent, unlinked headless session is created on first use.
         #[arg(long)]
         session: Option<String>,
     },
