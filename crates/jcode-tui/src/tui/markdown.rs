@@ -6,7 +6,7 @@ pub use jcode_tui_markdown::{
     mermaid_rendering_enabled, progress_bar, progress_line, recenter_structured_blocks_for_display,
     render_markdown, render_markdown_lazy, render_markdown_with_width, render_table_with_width,
     reset_debug_stats, set_center_code_blocks, thread_render_count,
-    with_mermaid_rendering_override, wrap_line, wrap_lines,
+    with_center_code_blocks_override, with_mermaid_rendering_override, wrap_line, wrap_lines,
 };
 
 fn to_markdown_diagram_mode(

@@ -1892,27 +1892,30 @@ fn render_side_panel_markdown_lines_cached(
         debug.stats.markdown_cache_misses += 1;
     });
 
-    let saved_centered = markdown::center_code_blocks();
-    markdown::set_center_code_blocks(centered);
-    // Pin the diagram mode for this render only (thread-local scope): the
-    // side panel always renders diagrams inline. Using the process-global
-    // override here would race concurrent renders/tests that read or set it.
-    let rendered_lines =
-        markdown::with_diagram_mode_scope(crate::config::DiagramDisplayMode::None, || {
-            mermaid::with_preferred_aspect_ratio(mermaid_aspect_ratio, || {
-                markdown::render_markdown_with_width(&page.content, Some(inner_width as usize))
-            })
-        });
-    let rendered_lines = if has_protocol {
-        rendered_lines
-            .into_iter()
-            .map(|line| markdown_image_line_to_placeholder(page, line).unwrap_or_else(|line| line))
-            .collect()
-    } else {
-        rendered_lines
-    };
-    let lines = wrap_side_panel_markdown_lines(rendered_lines, inner_width as usize);
-    markdown::set_center_code_blocks(saved_centered);
+    // Pin code-block centering for this render only, same thread-local scoping
+    // rationale as the diagram mode below.
+    let lines = markdown::with_center_code_blocks_override(centered, || {
+        // Pin the diagram mode for this render only (thread-local scope): the
+        // side panel always renders diagrams inline. Using the process-global
+        // override here would race concurrent renders/tests that read or set it.
+        let rendered_lines =
+            markdown::with_diagram_mode_scope(crate::config::DiagramDisplayMode::None, || {
+                mermaid::with_preferred_aspect_ratio(mermaid_aspect_ratio, || {
+                    markdown::render_markdown_with_width(&page.content, Some(inner_width as usize))
+                })
+            });
+        let rendered_lines = if has_protocol {
+            rendered_lines
+                .into_iter()
+                .map(|line| {
+                    markdown_image_line_to_placeholder(page, line).unwrap_or_else(|line| line)
+                })
+                .collect()
+        } else {
+            rendered_lines
+        };
+        wrap_side_panel_markdown_lines(rendered_lines, inner_width as usize)
+    });
 
     let placeholder_hashes: Vec<Option<u64>> = if has_protocol {
         lines

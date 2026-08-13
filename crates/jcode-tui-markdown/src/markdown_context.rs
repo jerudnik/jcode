@@ -131,6 +131,13 @@ pub fn set_center_code_blocks(centered: bool) {
     CENTER_CODE_BLOCKS.with(|ctx| ctx.set(centered));
 }
 
+/// Run `f` with code-block centering pinned on the current thread, restoring
+/// the previous value on the way out — including on panic, which a trailing
+/// `set_center_code_blocks` restore does not.
+pub fn with_center_code_blocks_override<R>(value: bool, f: impl FnOnce() -> R) -> R {
+    CENTER_CODE_BLOCKS.with(|cell| with_scoped_cell_value(cell, value, f))
+}
+
 pub fn center_code_blocks() -> bool {
     CENTER_CODE_BLOCKS.with(|ctx| ctx.get())
 }

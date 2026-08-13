@@ -1087,30 +1087,31 @@ fn test_render_tool_message_batch_subcall_lines_alignment_unset() {
     };
 
     // In non-centered mode, lines have no alignment set
-    crate::tui::markdown::set_center_code_blocks(false);
-    let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    for line in &lines {
-        assert_eq!(
-            line.alignment, None,
-            "non-centered tool lines should have no alignment set"
-        );
-    }
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        for line in &lines {
+            assert_eq!(
+                line.alignment, None,
+                "non-centered tool lines should have no alignment set"
+            );
+        }
+    });
 
     // In centered mode, lines are left-aligned with padding prepended
-    crate::tui::markdown::set_center_code_blocks(true);
-    let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    for line in &lines {
-        assert_eq!(
-            line.alignment,
-            Some(Alignment::Left),
-            "centered tool lines should be left-aligned with padding"
-        );
-        assert!(
-            line.spans[0].content.starts_with(' '),
-            "first span should be padding spaces"
-        );
-    }
-    crate::tui::markdown::set_center_code_blocks(false);
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        for line in &lines {
+            assert_eq!(
+                line.alignment,
+                Some(Alignment::Left),
+                "centered tool lines should be left-aligned with padding"
+            );
+            assert!(
+                line.spans[0].content.starts_with(' '),
+                "first span should be padding spaces"
+            );
+        }
+    });
 }
 
 #[test]
