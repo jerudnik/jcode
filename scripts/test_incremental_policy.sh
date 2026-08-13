@@ -258,6 +258,47 @@ exit 0
 EOF
 chmod +x "$fake_bin/ssh" "$fake_bin/rsync"
 
+stateful_bin="$tmp/stateful-bin"
+mkdir -p "$stateful_bin"
+cp "$fake_bin/cargo" "$stateful_bin/cargo"
+printf '#!%s\n' "$BASH" >"$stateful_bin/sh"
+cat >>"$stateful_bin/sh" <<'EOF'
+if [[ "${1:-}" == "-lc" ]]; then
+  shift
+  exec /bin/bash -c "$1"
+fi
+exec /bin/sh "$@"
+EOF
+printf '#!%s\n' "$BASH" >"$stateful_bin/ssh"
+cat >>"$stateful_bin/ssh" <<'EOF'
+command="${!#}"
+if [[ -n "${FAKE_SSH_LOG:-}" ]]; then
+  printf '%s\n' "$command" >>"$FAKE_SSH_LOG"
+fi
+PATH="$FAKE_REMOTE_PATH:$PATH" /bin/bash -c "$command"
+EOF
+printf '#!%s\n' "$BASH" >"$stateful_bin/rsync"
+cat >>"$stateful_bin/rsync" <<'EOF'
+args=("$@")
+source_path="${args[$((${#args[@]} - 2))]}"
+destination="${args[$((${#args[@]} - 1))]}"
+if [[ -n "${FAKE_RSYNC_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_RSYNC_LOG"
+fi
+if [[ "$*" == *"--files-from=-"* ]]; then
+  cat >/dev/null
+fi
+if [[ -f "$source_path" && "$destination" == *:* ]]; then
+  destination_path="${destination#*:}"
+  if [[ "$destination_path" == */ ]]; then
+    destination_path+="$(basename "$source_path")"
+  fi
+  mkdir -p "$(dirname "$destination_path")"
+  cp "$source_path" "$destination_path"
+fi
+EOF
+chmod +x "$stateful_bin/cargo" "$stateful_bin/sh" "$stateful_bin/ssh" "$stateful_bin/rsync"
+
 ssh_log="$tmp/ssh.log"
 FAKE_SSH_LOG="$ssh_log" \
 JCODE_REMOTE_CONFIG="$tmp/missing-remote-config" \
@@ -301,6 +342,75 @@ grep -Fq 'JCODE_BUILD_GIT_DIRTY=0' "$ssh_log" || fail 'synced remote build did n
 grep -Eq -- '--delete .* fake-builder:/tmp/jcode-policy-test/.jcode/' "$rsync_log" || fail 'remote build did not clear stale .jcode inputs'
 grep -Fq -- '--from0 --files-from=-' "$rsync_log" || fail 'remote build did not use a tracked-only .jcode sync'
 tr '\0' '\n' <"$jcode_rsync_stdin_log" | grep -Fxq '.jcode/prompt-overlay.md' || fail 'remote build omitted tracked .jcode inputs'
+
+fingerprint_remote="$tmp/fingerprint-remote"
+fingerprint_cargo_sentinel="$tmp/fingerprint-cargo-started"
+stateful_output=$(
+  FAKE_CARGO_SENTINEL="$fingerprint_cargo_sentinel" \
+  FAKE_REMOTE_PATH="$stateful_bin" \
+  JCODE_REMOTE_CONFIG="$tmp/missing-remote-config" \
+  JCODE_REMOTE_SSH_BIN="$stateful_bin/ssh" \
+  JCODE_REMOTE_RSYNC_BIN="$stateful_bin/rsync" \
+    bash "$metadata_repo/scripts/remote_build.sh" \
+      --host fake-builder --remote-dir "$fingerprint_remote" \
+      --no-sync-back check 2>&1
+)
+assert_contains "$stateful_output" 'remote_build: verified source fingerprint'
+[[ -e "$fingerprint_cargo_sentinel" ]] || fail 'fresh fingerprint verification did not reach Cargo'
+
+rm -f "$fingerprint_cargo_sentinel"
+stateful_output=$(
+  FAKE_CARGO_SENTINEL="$fingerprint_cargo_sentinel" \
+  FAKE_REMOTE_PATH="$stateful_bin" \
+  JCODE_REMOTE_CONFIG="$tmp/missing-remote-config" \
+  JCODE_REMOTE_SSH_BIN="$stateful_bin/ssh" \
+  JCODE_REMOTE_RSYNC_BIN="$stateful_bin/rsync" \
+    bash "$metadata_repo/scripts/remote_build.sh" \
+      --host fake-builder --remote-dir "$fingerprint_remote" \
+      --no-sync --no-sync-back check 2>&1
+)
+assert_contains "$stateful_output" 'remote_build: reusing source fingerprint'
+assert_contains "$stateful_output" 'age '
+[[ -e "$fingerprint_cargo_sentinel" ]] || fail 'matching retained fingerprint did not reach Cargo'
+
+printf '# local dirty change\n' >>"$metadata_repo/.jcode/prompt-overlay.md"
+rm -f "$fingerprint_cargo_sentinel"
+set +e
+stateful_output=$(
+  FAKE_CARGO_SENTINEL="$fingerprint_cargo_sentinel" \
+  FAKE_REMOTE_PATH="$stateful_bin" \
+  JCODE_REMOTE_CONFIG="$tmp/missing-remote-config" \
+  JCODE_REMOTE_SSH_BIN="$stateful_bin/ssh" \
+  JCODE_REMOTE_RSYNC_BIN="$stateful_bin/rsync" \
+    bash "$metadata_repo/scripts/remote_build.sh" \
+      --host fake-builder --remote-dir "$fingerprint_remote" \
+      --no-sync --no-sync-back check 2>&1
+)
+status=$?
+set -e
+[[ "$status" -eq 86 ]] || fail "fingerprint mismatch did not fail closed: status=$status output=$stateful_output"
+assert_contains "$stateful_output" 'remote_build: source fingerprint mismatch'
+assert_contains "$stateful_output" 'refusing to run Cargo'
+[[ ! -e "$fingerprint_cargo_sentinel" ]] || fail 'Cargo ran after a source fingerprint mismatch'
+
+set +e
+fmt_output=$(
+  env \
+    PATH="$fake_bin:$PATH" \
+    JCODE_REMOTE_CARGO=1 \
+    JCODE_REMOTE_HOST=fake-builder \
+    JCODE_REMOTE_CONFIG="$tmp/missing-remote-config" \
+    JCODE_DEV_SCCACHE=0 \
+    JCODE_ENABLE_PARALLEL_FRONTEND=0 \
+    JCODE_INCREMENTAL_PRUNE=off \
+    JCODE_BUILD_JOBS=1 \
+    bash "$repo_root/scripts/dev_cargo.sh" fmt 2>&1
+)
+status=$?
+set -e
+[[ "$status" -eq 2 ]] || fail "remote fmt was not refused: status=$status output=$fmt_output"
+assert_contains "$fmt_output" 'refusing to run cargo fmt remotely'
+assert_contains "$fmt_output" 'JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt'
 
 : >"$ssh_log"
 FAKE_SSH_LOG="$ssh_log" \
@@ -356,6 +466,11 @@ remote_test_repo="$tmp/remote-test-repo"
 mkdir -p "$remote_test_repo/scripts"
 remote_test_repo=$(cd "$remote_test_repo" && pwd)
 cp "$repo_root/scripts/remote_build.sh" "$repo_root/scripts/remote_config.sh" "$remote_test_repo/scripts/"
+git -C "$remote_test_repo" init -q
+git -C "$remote_test_repo" add scripts
+git -C "$remote_test_repo" \
+  -c user.name=Jcode -c user.email=jcode@example.invalid -c commit.gpgsign=false \
+  commit -qm initial
 target_dir_arg="$tmp/remote-absolute-target"
 repo_test_target="$remote_test_repo/target"
 : >"$ssh_log"
