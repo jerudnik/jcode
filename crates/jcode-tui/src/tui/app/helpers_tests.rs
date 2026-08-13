@@ -109,9 +109,9 @@ fn inferred_reasoning_efforts_use_provider_specific_order_and_max_semantics() {
         "DeepSeek direct keeps max as a real provider level"
     );
     assert_eq!(
-        inferred_reasoning_efforts(Some("kimi"), Some("k3")),
+        inferred_reasoning_efforts(Some("openrouter"), Some("k3")),
         vec!["low", "high", "max", "swarm", "swarm-deep"],
-        "Kimi K3 exposes only the documented effort levels"
+        "Kimi K3 model capability must win over the shared runtime name"
     );
     assert!(inferred_reasoning_efforts(Some("ollama"), Some("llama3")).is_empty());
 }

@@ -530,6 +530,14 @@ pub(super) fn inferred_reasoning_efforts(
     let provider = provider_name.unwrap_or_default().to_ascii_lowercase();
     let model = model_name.unwrap_or_default().to_ascii_lowercase();
 
+    let is_kimi_k3 = model == "k3"
+        || model.ends_with("/k3")
+        || model.contains("kimi-k3")
+        || model.ends_with("k3-256k");
+    if is_kimi_k3 {
+        return vec!["low", "high", "max", "swarm", "swarm-deep"];
+    }
+
     if provider.contains("openrouter") {
         return vec![
             "none",
@@ -575,14 +583,6 @@ pub(super) fn inferred_reasoning_efforts(
             "swarm",
             "swarm-deep",
         ];
-    }
-
-    let is_kimi_k3 = model == "k3"
-        || model.ends_with("/k3")
-        || model.contains("kimi-k3")
-        || model.ends_with("k3-256k");
-    if is_kimi_k3 {
-        return vec!["low", "high", "max", "swarm", "swarm-deep"];
     }
 
     let is_openai = provider.contains("openai")
