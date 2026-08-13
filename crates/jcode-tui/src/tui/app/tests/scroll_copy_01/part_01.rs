@@ -225,24 +225,6 @@ fn scroll_down_key(app: &App) -> (KeyCode, KeyModifiers) {
     )
 }
 
-/// Get the configured scroll up fallback key, or primary scroll up key.
-fn scroll_up_fallback_key(app: &App) -> (KeyCode, KeyModifiers) {
-    app.scroll_keys
-        .up_fallback
-        .as_ref()
-        .map(|binding| (binding.code.clone(), binding.modifiers))
-        .unwrap_or_else(|| scroll_up_key(app))
-}
-
-/// Get the configured scroll down fallback key, or primary scroll down key.
-fn scroll_down_fallback_key(app: &App) -> (KeyCode, KeyModifiers) {
-    app.scroll_keys
-        .down_fallback
-        .as_ref()
-        .map(|binding| (binding.code.clone(), binding.modifiers))
-        .unwrap_or_else(|| scroll_down_key(app))
-}
-
 /// Get the configured prompt-up key binding (code, modifiers).
 fn prompt_up_key(app: &App) -> (KeyCode, KeyModifiers) {
     (
@@ -891,10 +873,18 @@ fn test_prompt_jump_ctrl_brackets() {
     assert!(app.auto_scroll_paused);
     assert!(app.scroll_offset > 0);
 
+    // The fixture holds a single user prompt, so Ctrl+] has no later prompt to
+    // jump to and falls through to follow_chat_bottom(): offset 0, follow mode
+    // back on. Asserted exactly, because `<= after_up` also passes for a key
+    // that does nothing at all.
     let after_up = app.scroll_offset;
     app.handle_key(KeyCode::Char(']'), KeyModifiers::CONTROL)
         .unwrap();
-    assert!(app.scroll_offset <= after_up);
+    assert_eq!(
+        app.scroll_offset, 0,
+        "Ctrl+] past the last prompt returns to the bottom (was {after_up})"
+    );
+    assert!(!app.auto_scroll_paused);
 }
 
 // NOTE: test_prompt_jump_ctrl_digits_by_recency was removed because it relied on

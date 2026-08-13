@@ -305,6 +305,13 @@ fn slash_provider_test_coverage_overlay_scrolls_with_mouse_wheel() {
 
     assert_eq!(app.model_status_scroll, Some(0));
 
+    // One wheel notch enqueues App::scroll_intent_lines(multiplier) lines and
+    // drains up to MOUSE_SCROLL_INTENT_LINES of them, so the offset moves by the
+    // base intent, not by 1. Derived from the constant rather than a literal.
+    // The first notch is deterministic: last_mouse_scroll is None before it, so
+    // the acceleration multiplier is unconditionally 1.
+    let step = App::scroll_intent_lines(1) as usize;
+
     let scroll_only = app.handle_mouse_event(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollDown,
         column: 10,
@@ -312,9 +319,11 @@ fn slash_provider_test_coverage_overlay_scrolls_with_mouse_wheel() {
         modifiers: crossterm::event::KeyModifiers::empty(),
     });
     assert!(scroll_only);
-    assert!(app.model_status_scroll.unwrap_or(0) > 0);
+    assert_eq!(app.model_status_scroll, Some(step));
 
-    let before = app.model_status_scroll.unwrap_or(0);
+    // The second notch may land inside the 30ms acceleration window, so its
+    // intent is 3 or 5 depending on machine speed. Both saturate `step` back to
+    // 0, so the exact-value assertion holds either way.
     let scroll_only = app.handle_mouse_event(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollUp,
         column: 10,
@@ -322,7 +331,11 @@ fn slash_provider_test_coverage_overlay_scrolls_with_mouse_wheel() {
         modifiers: crossterm::event::KeyModifiers::empty(),
     });
     assert!(scroll_only);
-    assert!(app.model_status_scroll.unwrap_or(usize::MAX) < before);
+    assert_eq!(
+        app.model_status_scroll,
+        Some(0),
+        "scrolling up from the first notch returns to the top"
+    );
 }
 
 #[test]

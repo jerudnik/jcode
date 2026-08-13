@@ -209,10 +209,18 @@ fn test_remote_prompt_jump_ctrl_brackets() {
     assert!(app.auto_scroll_paused);
     assert!(app.scroll_offset > 0);
 
+    // The fixture holds a single user prompt, so Ctrl+] has no later prompt to
+    // jump to and falls through to follow_chat_bottom(): offset 0, follow mode
+    // back on. Asserted exactly, because `<= after_up` also passes for a key
+    // that does nothing at all.
     let after_up = app.scroll_offset;
     rt.block_on(app.handle_remote_key(KeyCode::Char(']'), KeyModifiers::CONTROL, &mut remote))
         .unwrap();
-    assert!(app.scroll_offset <= after_up);
+    assert_eq!(
+        app.scroll_offset, 0,
+        "Ctrl+] past the last prompt returns to the bottom (was {after_up})"
+    );
+    assert!(!app.auto_scroll_paused);
 }
 
 #[cfg(target_os = "macos")]

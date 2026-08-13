@@ -235,30 +235,13 @@ fn test_disconnected_key_handler_ctrl_c_arms_quit() {
     );
 }
 
-#[test]
-fn test_remote_scroll_cmd_j_k_fallback() {
-    let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    // Seed max scroll estimates before key handling.
-    render_and_snap(&app, &mut terminal);
-
-    let (up_code, up_mods) = scroll_up_fallback_key(&app);
-    let (down_code, down_mods) = scroll_down_fallback_key(&app);
-
-    rt.block_on(app.handle_remote_key(up_code, up_mods, &mut remote))
-        .unwrap();
-    assert!(app.auto_scroll_paused);
-    assert!(app.scroll_offset > 0);
-    let after_up = app.scroll_offset;
-
-    rt.block_on(app.handle_remote_key(down_code, down_mods, &mut remote))
-        .unwrap();
-    assert!(app.scroll_offset <= after_up);
-}
+// NOTE: test_remote_scroll_cmd_j_k_fallback was removed. The scroll fallback
+// bindings ship unbound on every platform (see PlatformDefault::unbound in
+// jcode-config-types/src/keybindings.rs), so scroll_up_fallback_key falls back to
+// the primary binding and the test only re-covered the primary-key path.
+// Covering the fallback path needs a test that configures a non-empty
+// scroll_up_fallback and asserts the distinct key scrolls; that is new coverage,
+// not a repair of this one.
 
 #[test]
 fn test_remote_shift_enter_inserts_newline() {
