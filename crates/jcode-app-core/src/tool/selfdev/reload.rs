@@ -289,8 +289,8 @@ impl Drop for ReloadEnvironmentGuard {
 fn test_session_reload_environment(
     resolved_repo_dir: Option<std::path::PathBuf>,
 ) -> ReloadEnvironment {
-    let repo_dir = resolved_repo_dir
-        .unwrap_or_else(|| std::env::temp_dir().join("jcode-test-session-repo"));
+    let repo_dir =
+        resolved_repo_dir.unwrap_or_else(|| std::env::temp_dir().join("jcode-test-session-repo"));
     let target_binary =
         build::find_dev_binary(&repo_dir).unwrap_or_else(|| build::release_binary_path(&repo_dir));
     let source = build::SourceState {

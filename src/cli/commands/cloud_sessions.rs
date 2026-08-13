@@ -462,7 +462,9 @@ pub(in crate::cli) fn load_cloud_sessions_sync_state() -> Result<CloudSessionsSy
         .map_err(|err| anyhow::anyhow!("failed to parse {}: {err}", path.display()))
 }
 
-pub(in crate::cli) fn save_cloud_sessions_sync_state(state: &CloudSessionsSyncState) -> Result<PathBuf> {
+pub(in crate::cli) fn save_cloud_sessions_sync_state(
+    state: &CloudSessionsSyncState,
+) -> Result<PathBuf> {
     let path = cloud_sessions_sync_state_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -800,7 +802,9 @@ pub(in crate::cli) use dashboard::{
 pub(super) mod dashboard;
 
 use dashboard::{CloudSessionsDashboardRequest, run_cloud_sessions_dashboard};
-pub(in crate::cli) fn cloud_sessions_helper_env(config: &CloudSessionsConfig) -> Vec<(&'static str, String)> {
+pub(in crate::cli) fn cloud_sessions_helper_env(
+    config: &CloudSessionsConfig,
+) -> Vec<(&'static str, String)> {
     let mut env = Vec::new();
     if let Some(api_base) = non_empty(config.api_base.clone()) {
         env.push(("JADE_API_BASE", api_base));
