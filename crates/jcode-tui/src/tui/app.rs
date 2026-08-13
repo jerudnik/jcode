@@ -869,6 +869,9 @@ pub struct App {
     // complete, bounded by MAX_AUTO_POKE_FOLLOWUPS follow-ups per arming.
     auto_poke_incomplete_todos: bool,
     pub(crate) auto_poke_followups_sent: u16,
+    // Full outstanding todo state that last produced an automatic poke. Repeating
+    // an unchanged list cannot make progress and must not consume another turn.
+    last_auto_poke_fingerprint: Option<String>,
     // Todo list the completion-confidence gate has already fired for. Re-firing
     // against unchanged state would re-queue the identical reminder forever; see
     // `settle_completed_todo_list` and BLANK_CONTINUATION_TURN.md.

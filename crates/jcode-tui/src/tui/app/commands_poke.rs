@@ -174,6 +174,17 @@ pub(super) fn schedule_auto_poke_followup_if_needed(app: &mut App) -> bool {
         } => (actionable, blocked),
     };
 
+    let poke_message = build_poke_message_with_blocked(&actionable, &blocked);
+    let fingerprint = serde_json::to_string(&(actionable.as_slice(), blocked.as_slice()))
+        .unwrap_or_else(|_| poke_message.clone());
+    if app.last_auto_poke_fingerprint.as_ref() == Some(&fingerprint) {
+        crate::logging::info(&format!(
+            "AUTO_POKE_DECISION action=idle reason=unchanged_todos outstanding={}",
+            actionable.len() + blocked.len()
+        ));
+        return false;
+    }
+
     // Backstop for a list that never terminates. After the completion check so
     // a finished list still settles, and after the partition so declined pokes
     // are not charged.
@@ -184,8 +195,8 @@ pub(super) fn schedule_auto_poke_followup_if_needed(app: &mut App) -> bool {
     app.push_display_message(crate::tui::DisplayMessage::system(
         super::commands::auto_poking_banner(actionable.len()),
     ));
-    app.queued_messages
-        .push(build_poke_message_with_blocked(&actionable, &blocked));
+    app.last_auto_poke_fingerprint = Some(fingerprint);
+    app.queued_messages.push(poke_message);
     app.pending_queued_dispatch = true;
     true
 }
