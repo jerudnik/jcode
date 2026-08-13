@@ -1,6 +1,6 @@
 # Remote build staleness: remote runs can test a tree that is not your tree
 
-Status: root cause pinned; remediation in progress
+Status: implemented and verified 2026-08-13
 
 ## Symptom
 
@@ -26,6 +26,8 @@ Checked at 2026-08-13 ~04:46 UTC, local HEAD `d85916421` (remediation series
 - The in-flight SSH command (captured from `ps`) carried
   `JCODE_BUILD_GIT_HASH=dbe279c87 JCODE_BUILD_GIT_DIRTY=0` — stamped hours
   stale, at a moment when the local repo was at `d85916421`.
+
+## Root cause
 
 The stale checkout was not an rsync failure. A detached local worktree existed
 at `/private/tmp/jcode-base-check` on the exact stale commit
@@ -71,25 +73,37 @@ operator is working on, with no divergence check.
 - Independent reviewers are the most likely victims: they run gates without
   having built local context about which tree artifacts should reflect.
 
-## Stepwise remediation plan
+## Implemented remediation
 
-1. **Reproduce and pin the root cause.** Instrument `remote_build.sh` to log
-   `SYNC_SOURCE`, `REMOTE_DIR`, `LOCAL_DIR`, and the computed git hash per
-   invocation; identify which path produced a no-sync run against
-   `jcode-base-check`.
-2. **Verify, don't trust: hash check on the remote.** The script already
-   computes `local_git_hash`. After sync (or when skipping sync), compare an
-   equivalent content fingerprint on the remote (e.g. hash of the rsync file
-   list, or a `.jcode-sync-fingerprint` written during sync) and **fail
-   loudly on mismatch** instead of running the command.
-3. **Make sync-skipping explicit and visible.** Any branch that runs without
-   a fresh sync must print the fingerprint it is reusing and its age.
-4. **Fix fmt sync-back** (or refuse to run fmt remotely): mutating commands
-   whose value is their local side effect must either sync results back or
-   force local execution.
-5. **Tests/guards.** A CI-side or script self-test: create a throwaway commit
-   locally, invoke the wrapper, assert the remote fingerprint matches; assert
-   fmt either changes local files or exits nonzero with guidance.
+1. `remote_build.sh` computes a source fingerprint from the full local commit
+   hash plus a digest of tracked changes and untracked files. Every invocation
+   prints `LOCAL_DIR`, `REMOTE_DIR`, the fingerprint, and whether the source is
+   freshly synced or reused.
+2. A fresh sync writes `.jcode-sync-fingerprint` after the source and build
+   metadata transfers finish. The remote shell compares that marker with the
+   expected local fingerprint immediately before Cargo and exits 86 on a
+   missing, malformed, or mismatched marker.
+3. `--no-sync` is now conditional reuse rather than blind reuse. A matching
+   marker is required, and successful reuse prints the fingerprint and marker
+   age. Any local commit or dirty-content change makes the command fail closed.
+4. Both `dev_cargo.sh` and direct `remote_build.sh` invocations refuse remote
+   `cargo fmt` with guidance to run
+   `JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt`.
+5. `test_incremental_policy.sh` now uses stateful SSH/rsync stubs to prove a
+   fresh fingerprint reaches Cargo, matching reuse reports its age, a dirty
+   mismatch exits before Cargo, and remote fmt exits nonzero with guidance.
+   No CI wiring was added.
+
+## Verification
+
+- `bash -n scripts/remote_build.sh scripts/dev_cargo.sh scripts/test_incremental_policy.sh`
+- `bash scripts/test_incremental_policy.sh`
+- `shellcheck -x -e SC2016 scripts/dev_cargo.sh scripts/remote_build.sh scripts/test_incremental_policy.sh`
+  through an ephemeral Nix shell
+- A real run on the configured builder used an isolated
+  `jcode-fingerprint-check` remote directory. The fresh `cargo metadata`
+  invocation printed `verified source fingerprint`; the following `--no-sync`
+  invocation printed the identical fingerprint and `age 20s`.
 
 ## References
 
