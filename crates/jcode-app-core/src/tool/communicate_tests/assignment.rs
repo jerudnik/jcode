@@ -169,6 +169,9 @@ async fn communicate_assign_next_assigns_next_runnable_task() {
         .expect("worker spawn should succeed");
     let worker_session = spawn_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()
@@ -274,6 +277,9 @@ async fn communicate_assign_next_can_prefer_fresh_spawn_server_side() {
         .expect("existing worker spawn should succeed");
     let existing_worker = existing_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()
@@ -567,6 +573,9 @@ async fn communicate_assign_task_can_prefer_fresh_spawn_over_reuse() {
         .expect("existing reusable worker should spawn");
     let existing_worker = existing_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()

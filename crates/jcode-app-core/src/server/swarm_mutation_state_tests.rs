@@ -59,6 +59,9 @@ async fn swarm_mutation_replays_persisted_spawn_response() {
         PersistedSwarmMutationResponse::Spawn {
             new_session_id: "child-1".to_string(),
             initial_prompt_delivered: true,
+            model: Some("gpt-5.6-sol".to_string()),
+            provider_key: Some("openai-oauth".to_string()),
+            route_api_method: Some("openai-oauth".to_string()),
         },
     )
     .await;
@@ -71,10 +74,16 @@ async fn swarm_mutation_replays_persisted_spawn_response() {
         ServerEvent::CommSpawnResponse {
             new_session_id,
             initial_prompt_delivered,
+            model,
+            provider_key,
+            route_api_method,
             ..
         } => {
             assert_eq!(new_session_id, "child-1");
             assert!(initial_prompt_delivered);
+            assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
+            assert_eq!(provider_key.as_deref(), Some("openai-oauth"));
+            assert_eq!(route_api_method.as_deref(), Some("openai-oauth"));
         }
         other => panic!("expected spawn response, got {other:?}"),
     }
@@ -84,11 +93,17 @@ async fn swarm_mutation_replays_persisted_spawn_response() {
             id,
             new_session_id,
             initial_prompt_delivered,
+            model,
+            provider_key,
+            route_api_method,
             ..
         } => {
             assert_eq!(id, 2);
             assert_eq!(new_session_id, "child-1");
             assert!(initial_prompt_delivered);
+            assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
+            assert_eq!(provider_key.as_deref(), Some("openai-oauth"));
+            assert_eq!(route_api_method.as_deref(), Some("openai-oauth"));
         }
         other => panic!("expected spawn replay, got {other:?}"),
     }

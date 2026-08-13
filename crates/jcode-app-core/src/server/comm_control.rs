@@ -2058,11 +2058,11 @@ pub(super) async fn handle_comm_assign_next(
             )
             .await
             {
-                Ok(spawned_session_id) => {
+                Ok(spawned) => {
                     handle_comm_assign_task(
                         id,
                         req_session_id,
-                        Some(spawned_session_id),
+                        Some(spawned.session_id),
                         Some(selected_task_id),
                         message,
                         client_event_tx,

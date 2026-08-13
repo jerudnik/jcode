@@ -611,6 +611,9 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
         .expect("spawn with prompt should succeed");
     let spawned_session = spawn_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()
@@ -693,6 +696,9 @@ async fn communicate_spawn_with_prompt_and_summary_work_end_to_end() {
         .expect("spawn with prompt should succeed");
     let spawned_session = spawn_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()

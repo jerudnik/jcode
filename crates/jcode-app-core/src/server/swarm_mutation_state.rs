@@ -28,6 +28,12 @@ pub(crate) enum PersistedSwarmMutationResponse {
         new_session_id: String,
         #[serde(default)]
         initial_prompt_delivered: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_key: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        route_api_method: Option<String>,
     },
 }
 
@@ -54,11 +60,17 @@ impl PersistedSwarmMutationResponse {
             Self::Spawn {
                 new_session_id,
                 initial_prompt_delivered,
+                model,
+                provider_key,
+                route_api_method,
             } => ServerEvent::CommSpawnResponse {
                 id,
                 session_id: session_id.to_string(),
                 new_session_id,
                 initial_prompt_delivered,
+                model,
+                provider_key,
+                route_api_method,
             },
         }
     }
