@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::app::test_support::with_temp_jcode_home;
 
 fn extract_line_text(line: &Line<'_>) -> String {
     line.spans
@@ -970,64 +971,66 @@ fn render_system_message_uses_scheduled_task_card() {
     // Holds the shared env lock so a concurrent test mutating TERM_PROGRAM/TERM
     // (render_system_message_uses_width_stable_titles_on_kitty) cannot flip the
     // width-stable-glyph branch between this test's render and assert reads.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let msg = DisplayMessage::system(
-        "[Scheduled task]\nA scheduled task for this session is now due.\n\nTask: Follow up on the scheduler test\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nBranch: master\n\nBackground: Verify the scheduled task card styling\nSuccess criteria: The due task renders clearly\nScheduled by session: session_test",
-    );
+    with_temp_jcode_home(|| {
+        let msg = DisplayMessage::system(
+            "[Scheduled task]\nA scheduled task for this session is now due.\n\nTask: Follow up on the scheduler test\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nBranch: master\n\nBackground: Verify the scheduled task card styling\nSuccess criteria: The due task renders clearly\nScheduled by session: session_test",
+        );
 
-    let lines = render_system_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_system_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains(width_stable_system_title(
-        "⏰ scheduled task due",
-        "scheduled task due"
-    )));
-    assert!(plain.contains("This scheduled task is now active in this session."));
-    assert!(plain.contains("Follow up on the scheduler test"));
-    assert!(plain.contains("Verify the scheduled task card styling"));
-    assert!(!plain.contains("[Scheduled task]"));
-    assert!(!plain.contains("A scheduled task for this session is now due."));
+        assert!(plain.contains(width_stable_system_title(
+            "⏰ scheduled task due",
+            "scheduled task due"
+        )));
+        assert!(plain.contains("This scheduled task is now active in this session."));
+        assert!(plain.contains("Follow up on the scheduler test"));
+        assert!(plain.contains("Verify the scheduled task card styling"));
+        assert!(!plain.contains("[Scheduled task]"));
+        assert!(!plain.contains("A scheduled task for this session is now due."));
+    });
 }
 
 #[test]
 fn render_tool_message_uses_scheduled_card() {
     // Same width-stable-glyph race as render_system_message_uses_scheduled_task_card:
     // hold the env lock so a concurrent TERM_PROGRAM/TERM writer cannot flip the branch.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let msg = DisplayMessage {
-        role: "tool".to_string(),
-        content: "Scheduled task 'Follow up on the scheduler test' for in 1m (id: sched_abc123)\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nTarget: resume session session_test".to_string(),
-        tool_calls: Vec::new(),
-        duration_secs: None,
-        title: Some("scheduled: Follow up on the scheduler test".to_string()),
-        tool_data: Some(crate::message::ToolCall {
-            id: "call_schedule_card".to_string(),
-            name: "schedule".to_string(),
-            input: serde_json::json!({
-                "task": "Follow up on the scheduler test",
-                "wake_in_minutes": 1,
-                "target": "resume"
-            }),
-            intent: None, thought_signature: None, }),
-    };
+    with_temp_jcode_home(|| {
+        let msg = DisplayMessage {
+            role: "tool".to_string(),
+            content: "Scheduled task 'Follow up on the scheduler test' for in 1m (id: sched_abc123)\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nTarget: resume session session_test".to_string(),
+            tool_calls: Vec::new(),
+            duration_secs: None,
+            title: Some("scheduled: Follow up on the scheduler test".to_string()),
+            tool_data: Some(crate::message::ToolCall {
+                id: "call_schedule_card".to_string(),
+                name: "schedule".to_string(),
+                input: serde_json::json!({
+                    "task": "Follow up on the scheduler test",
+                    "wake_in_minutes": 1,
+                    "target": "resume"
+                }),
+                intent: None, thought_signature: None, }),
+        };
 
-    let lines = render_tool_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_tool_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains(width_stable_system_title("⏰ scheduled", "scheduled")));
-    assert!(plain.contains("Will run in 1m."));
-    assert!(plain.contains("Follow up on the scheduler test"));
-    assert!(plain.contains("session session_test"));
-    assert!(plain.contains("sched_abc123"));
-    assert!(!plain.contains("✓ schedule"));
+        assert!(plain.contains(width_stable_system_title("⏰ scheduled", "scheduled")));
+        assert!(plain.contains("Will run in 1m."));
+        assert!(plain.contains("Follow up on the scheduler test"));
+        assert!(plain.contains("session session_test"));
+        assert!(plain.contains("sched_abc123"));
+        assert!(!plain.contains("✓ schedule"));
+    });
 }
 
 #[test]

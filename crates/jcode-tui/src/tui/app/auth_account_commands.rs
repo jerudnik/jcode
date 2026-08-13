@@ -1150,11 +1150,17 @@ mod tests {
 
     #[test]
     fn render_auth_doctor_markdown_includes_recovery_steps() {
-        let _guard = crate::tui::app::test_support::lock_test_env();
-        let markdown = render_auth_doctor_markdown(Some("openai"));
-        assert!(markdown.contains("OpenAI (openai)"));
-        assert!(markdown.contains("Next steps"));
-        assert!(markdown.contains("jcode login --provider openai"));
-        assert!(markdown.contains("Review current state: jcode auth status --json"));
+        crate::tui::app::test_support::with_temp_jcode_home(|| {
+            let markdown = render_auth_doctor_markdown(Some("openai"));
+            assert!(markdown.contains("OpenAI (openai)"));
+            assert!(markdown.contains("Next steps"));
+            assert!(markdown.contains("jcode login --provider openai"));
+            assert!(markdown.contains("Review current state: jcode auth status --json"));
+            // The temp home pins openai to `AuthState::NotConfigured`, so these
+            // two strings depend on the isolated state rather than holding in
+            // every auth state the way the four above do.
+            assert!(markdown.contains("  - Status: setup needed"));
+            assert!(markdown.contains("Connect it: jcode login --provider openai"));
+        });
     }
 }

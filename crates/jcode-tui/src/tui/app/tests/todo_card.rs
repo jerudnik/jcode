@@ -77,93 +77,95 @@ fn todo_alias_shows_card() {
 
 #[test]
 fn refresh_todo_card_updates_content_when_todos_change() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let mut app = create_test_app();
-    let session_id = app.session.id.clone();
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        let session_id = app.session.id.clone();
 
-    let todo = |content: &str, status: &str| crate::todo::TodoItem {
-        id: "t1".to_string(),
-        content: content.to_string(),
-        status: status.to_string(),
-        priority: "high".to_string(),
-        group: None,
-        confidence: Some(70),
-        completion_confidence: None,
-        confidence_history: Vec::new(),
-        blocked_by: Vec::new(),
-        assigned_to: None,
-    };
+        let todo = |content: &str, status: &str| crate::todo::TodoItem {
+            id: "t1".to_string(),
+            content: content.to_string(),
+            status: status.to_string(),
+            priority: "high".to_string(),
+            group: None,
+            confidence: Some(70),
+            completion_confidence: None,
+            confidence_history: Vec::new(),
+            blocked_by: Vec::new(),
+            assigned_to: None,
+        };
 
-    crate::todo::save_todos(&session_id, &[todo("write the card", "pending")]).unwrap();
-    app.toggle_todo_card();
-    let card = app
-        .display_messages
-        .iter()
-        .find(|m| m.role == "todos")
-        .expect("todo card pushed");
-    assert!(card.content.contains("write the card"));
-    assert!(card.content.contains("\"goals\""));
+        crate::todo::save_todos(&session_id, &[todo("write the card", "pending")]).unwrap();
+        app.toggle_todo_card();
+        let card = app
+            .display_messages
+            .iter()
+            .find(|m| m.role == "todos")
+            .expect("todo card pushed");
+        assert!(card.content.contains("write the card"));
+        assert!(card.content.contains("\"goals\""));
 
-    // Unchanged todos: refresh is a no-op.
-    assert!(!app.refresh_todo_card_if_needed());
+        // Unchanged todos: refresh is a no-op.
+        assert!(!app.refresh_todo_card_if_needed());
 
-    crate::todo::save_todos(&session_id, &[todo("write the card", "completed")]).unwrap();
-    assert!(app.refresh_todo_card_if_needed());
-    let card = app
-        .display_messages
-        .iter()
-        .find(|m| m.role == "todos")
-        .expect("todo card still present");
-    assert!(card.content.contains("completed"));
+        crate::todo::save_todos(&session_id, &[todo("write the card", "completed")]).unwrap();
+        assert!(app.refresh_todo_card_if_needed());
+        let card = app
+            .display_messages
+            .iter()
+            .find(|m| m.role == "todos")
+            .expect("todo card still present");
+        assert!(card.content.contains("completed"));
 
-    // Cleanup the persisted todo file for this throwaway session.
-    let _ = crate::todo::save_todos(&session_id, &[]);
+        // Cleanup the persisted todo file for this throwaway session.
+        let _ = crate::todo::save_todos(&session_id, &[]);
+    });
 }
 
 #[test]
 fn refresh_todo_card_updates_content_when_goal_scores_change() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let mut app = create_test_app();
-    let session_id = app.session.id.clone();
-    let todos = [crate::todo::TodoItem {
-        id: "t1".to_string(),
-        content: "render scores".to_string(),
-        status: "in_progress".to_string(),
-        priority: "high".to_string(),
-        group: None,
-        confidence: Some(80),
-        completion_confidence: None,
-        confidence_history: Vec::new(),
-        blocked_by: Vec::new(),
-        assigned_to: None,
-    }];
-    let goal = |score| crate::todo::TodoGoal {
-        group: None,
-        hill_climbability: Some(score),
-        objective: Some("readable card".to_string()),
-        feedback_loop: Some("inspect the frame".to_string()),
-        end_to_end_ownership: Some(90),
-    };
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        let session_id = app.session.id.clone();
+        let todos = [crate::todo::TodoItem {
+            id: "t1".to_string(),
+            content: "render scores".to_string(),
+            status: "in_progress".to_string(),
+            priority: "high".to_string(),
+            group: None,
+            confidence: Some(80),
+            completion_confidence: None,
+            confidence_history: Vec::new(),
+            blocked_by: Vec::new(),
+            assigned_to: None,
+        }];
+        let goal = |score| crate::todo::TodoGoal {
+            group: None,
+            hill_climbability: Some(score),
+            objective: Some("readable card".to_string()),
+            feedback_loop: Some("inspect the frame".to_string()),
+            end_to_end_ownership: Some(90),
+        };
 
-    crate::todo::save_todos(&session_id, &todos).unwrap();
-    crate::todo::save_goals(&session_id, &[goal(70)]).unwrap();
-    app.toggle_todo_card();
-    let card = app
-        .display_messages
-        .iter()
-        .find(|message| message.role == "todos")
-        .expect("todo card pushed");
-    assert!(card.content.contains("\"hill_climbability\":70"));
+        crate::todo::save_todos(&session_id, &todos).unwrap();
+        crate::todo::save_goals(&session_id, &[goal(70)]).unwrap();
+        app.toggle_todo_card();
+        let card = app
+            .display_messages
+            .iter()
+            .find(|message| message.role == "todos")
+            .expect("todo card pushed");
+        assert!(card.content.contains("\"hill_climbability\":70"));
 
-    crate::todo::save_goals(&session_id, &[goal(95)]).unwrap();
-    assert!(app.refresh_todo_card_if_needed());
-    let card = app
-        .display_messages
-        .iter()
-        .find(|message| message.role == "todos")
-        .expect("todo card still present");
-    assert!(card.content.contains("\"hill_climbability\":95"));
+        crate::todo::save_goals(&session_id, &[goal(95)]).unwrap();
+        assert!(app.refresh_todo_card_if_needed());
+        let card = app
+            .display_messages
+            .iter()
+            .find(|message| message.role == "todos")
+            .expect("todo card still present");
+        assert!(card.content.contains("\"hill_climbability\":95"));
 
-    let _ = crate::todo::save_todos(&session_id, &[]);
-    let _ = crate::todo::save_goals(&session_id, &[]);
+        let _ = crate::todo::save_todos(&session_id, &[]);
+        let _ = crate::todo::save_goals(&session_id, &[]);
+    });
 }

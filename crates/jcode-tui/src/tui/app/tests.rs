@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::clone_on_copy))]
 
-use super::test_support::{lock_test_env, with_temp_jcode_home};
+use super::test_support::with_temp_jcode_home;
 
 include!("tests/support_failover/part_01.rs");
 include!("tests/support_failover/part_02.rs");
@@ -346,115 +346,117 @@ fn idle_cold_cache_warning_waits_for_ttl_and_rearms_after_new_cache_write() {
 
 #[test]
 fn harness_caused_kv_cache_miss_pushes_in_chat_alarm() {
-    let _env = lock_test_env();
-    // A warm session whose system prompt hash silently changes between turns is
-    // the exact failure mode of the skill-ordering bug: the conversation only
-    // grew, yet the cached prefix is invalidated. We must surface that loudly.
-    let mut app = create_test_app();
-    crate::provider::anthropic::set_cache_ttl_1h(true);
-    // No documented invalidation may explain this miss, or the alarm downgrades
-    // to the informational attribution notice.
-    crate::cache_invalidation::clear_for_tests();
+    with_temp_jcode_home(|| {
+        // A warm session whose system prompt hash silently changes between turns is
+        // the exact failure mode of the skill-ordering bug: the conversation only
+        // grew, yet the cached prefix is invalidated. We must surface that loudly.
+        let mut app = create_test_app();
+        crate::provider::anthropic::set_cache_ttl_1h(true);
+        // No documented invalidation may explain this miss, or the alarm downgrades
+        // to the informational attribution notice.
+        crate::cache_invalidation::clear_for_tests();
 
-    let messages = vec![
-        Message::user("first prompt"),
-        Message::assistant_text("first answer"),
-        Message::user("second prompt"),
-    ];
+        let messages = vec![
+            Message::user("first prompt"),
+            Message::assistant_text("first answer"),
+            Message::user("second prompt"),
+        ];
 
-    // Baseline captured last turn with a *different* system static hash.
-    let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
-    let session_id = app.kv_cache_session_id();
-    // Match the live provider/model exactly so the miss is classified as a
-    // harness system change rather than a provider/model switch.
-    let provider = app.kv_cache_provider_name();
-    let model = app.kv_cache_provider_model();
-    app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
-        session_id,
-        input_tokens: 50_000,
-        completed_at: Instant::now(),
-        provider,
-        model,
-        upstream_provider: None,
-        signature: Some(baseline_signature),
+        // Baseline captured last turn with a *different* system static hash.
+        let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
+        let session_id = app.kv_cache_session_id();
+        // Match the live provider/model exactly so the miss is classified as a
+        // harness system change rather than a provider/model switch.
+        let provider = app.kv_cache_provider_name();
+        let model = app.kv_cache_provider_model();
+        app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+            session_id,
+            input_tokens: 50_000,
+            completed_at: Instant::now(),
+            provider,
+            model,
+            upstream_provider: None,
+            signature: Some(baseline_signature),
+        });
+
+        // This turn: same provider/model, conversation grew, but the system prompt
+        // changed (hash differs). Register the pending request, then complete the
+        // stream with a near-zero cache read to model the bust.
+        app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
+        app.streaming.streaming_input_tokens = 50_000;
+        app.streaming.streaming_cache_read_tokens = Some(0);
+        app.streaming.streaming_cache_creation_tokens = Some(50_000);
+        app.kv_cache.current_api_usage_recorded = false;
+        app.record_completed_stream_cache_usage();
+
+        let alarm = app
+            .display_messages()
+            .iter()
+            .find(|message| message.role == "system" && message.content.contains("KV cache miss"))
+            .expect("harness-caused cache miss should push an in-chat alarm");
+        assert!(
+            alarm.content.contains("harness: system changed"),
+            "{alarm:?}"
+        );
+        assert!(alarm.content.contains("50K"), "{alarm:?}");
     });
-
-    // This turn: same provider/model, conversation grew, but the system prompt
-    // changed (hash differs). Register the pending request, then complete the
-    // stream with a near-zero cache read to model the bust.
-    app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
-    app.streaming.streaming_input_tokens = 50_000;
-    app.streaming.streaming_cache_read_tokens = Some(0);
-    app.streaming.streaming_cache_creation_tokens = Some(50_000);
-    app.kv_cache.current_api_usage_recorded = false;
-    app.record_completed_stream_cache_usage();
-
-    let alarm = app
-        .display_messages()
-        .iter()
-        .find(|message| message.role == "system" && message.content.contains("KV cache miss"))
-        .expect("harness-caused cache miss should push an in-chat alarm");
-    assert!(
-        alarm.content.contains("harness: system changed"),
-        "{alarm:?}"
-    );
-    assert!(alarm.content.contains("50K"), "{alarm:?}");
 }
 
 #[test]
 fn documented_invalidation_downgrades_kv_cache_alarm_to_attribution() {
-    let _env = lock_test_env();
-    // Config/skill reloads legitimately change the system prompt mid-session.
-    // Those sites document the invalidation; a harness-attributed miss that
-    // follows must be surfaced as an informational "refresh" with the cause,
-    // not as the unexplained harness-bust alarm.
-    let mut app = create_test_app();
-    crate::provider::anthropic::set_cache_ttl_1h(true);
-    crate::cache_invalidation::clear_for_tests();
+    with_temp_jcode_home(|| {
+        // Config/skill reloads legitimately change the system prompt mid-session.
+        // Those sites document the invalidation; a harness-attributed miss that
+        // follows must be surfaced as an informational "refresh" with the cause,
+        // not as the unexplained harness-bust alarm.
+        let mut app = create_test_app();
+        crate::provider::anthropic::set_cache_ttl_1h(true);
+        crate::cache_invalidation::clear_for_tests();
 
-    let messages = vec![
-        Message::user("first prompt"),
-        Message::assistant_text("first answer"),
-        Message::user("second prompt"),
-    ];
-    let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
-    let session_id = app.kv_cache_session_id();
-    let provider = app.kv_cache_provider_name();
-    let model = app.kv_cache_provider_model();
-    app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
-        session_id,
-        input_tokens: 50_000,
-        completed_at: Instant::now(),
-        provider,
-        model,
-        upstream_provider: None,
-        signature: Some(baseline_signature),
-    });
+        let messages = vec![
+            Message::user("first prompt"),
+            Message::assistant_text("first answer"),
+            Message::user("second prompt"),
+        ];
+        let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
+        let session_id = app.kv_cache_session_id();
+        let provider = app.kv_cache_provider_name();
+        let model = app.kv_cache_provider_model();
+        app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+            session_id,
+            input_tokens: 50_000,
+            completed_at: Instant::now(),
+            provider,
+            model,
+            upstream_provider: None,
+            signature: Some(baseline_signature),
+        });
 
-    // The documented cause lands between the baseline and the busted request.
-    crate::cache_invalidation::record("config reload", "modified_changed=true");
+        // The documented cause lands between the baseline and the busted request.
+        crate::cache_invalidation::record("config reload", "modified_changed=true");
 
-    app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
-    app.streaming.streaming_input_tokens = 50_000;
-    app.streaming.streaming_cache_read_tokens = Some(0);
-    app.streaming.streaming_cache_creation_tokens = Some(50_000);
-    app.kv_cache.current_api_usage_recorded = false;
-    app.record_completed_stream_cache_usage();
+        app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
+        app.streaming.streaming_input_tokens = 50_000;
+        app.streaming.streaming_cache_read_tokens = Some(0);
+        app.streaming.streaming_cache_creation_tokens = Some(50_000);
+        app.kv_cache.current_api_usage_recorded = false;
+        app.record_completed_stream_cache_usage();
 
-    let notice = app
-        .display_messages()
-        .iter()
-        .find(|message| message.role == "system" && message.content.contains("KV cache refresh"))
-        .expect("documented invalidation should push an attribution notice");
-    assert!(notice.content.contains("config reload"), "{notice:?}");
-    assert!(
-        !app.display_messages()
+        let notice = app
+            .display_messages()
             .iter()
-            .any(|message| message.role == "system" && message.content.contains("KV cache miss")),
-        "documented invalidation must not also raise the harness alarm"
-    );
+            .find(|message| message.role == "system" && message.content.contains("KV cache refresh"))
+            .expect("documented invalidation should push an attribution notice");
+        assert!(notice.content.contains("config reload"), "{notice:?}");
+        assert!(
+            !app.display_messages()
+                .iter()
+                .any(|message| message.role == "system" && message.content.contains("KV cache miss")),
+            "documented invalidation must not also raise the harness alarm"
+        );
 
-    crate::cache_invalidation::clear_for_tests();
+        crate::cache_invalidation::clear_for_tests();
+    });
 }
 
 #[test]

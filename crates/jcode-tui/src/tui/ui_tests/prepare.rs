@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::app::test_support::with_temp_jcode_home;
 
 /// Renders every prepared line as plain text.
 fn rendered_text(prepared: &jcode_tui_messages::PreparedChatFrame) -> Vec<String> {
@@ -602,60 +603,61 @@ fn test_prepare_messages_shows_live_batch_progress_in_chat_history() {
 
 #[test]
 fn test_prepare_messages_places_live_batch_after_committed_assistant_text() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    clear_test_render_state_for_tests();
-    let state = TestState {
-        display_messages: vec![
-            DisplayMessage::user("build it"),
-            DisplayMessage::assistant("Let me inspect the relevant files first."),
-        ],
-        status: ProcessingStatus::RunningTool("batch".to_string()),
-        anim_elapsed: 0.0,
-        batch_progress: Some(crate::bus::BatchProgress {
-            session_id: "s".to_string(),
-            tool_call_id: "tc".to_string(),
-            total: 1,
-            completed: 0,
-            last_completed: None,
-            running: vec![ToolCall {
-                id: "batch-1-read".to_string(),
-                name: "read".to_string(),
-                input: serde_json::json!({"file_path": "src/main.rs"}),
-                intent: None,
-                thought_signature: None,
-            }],
-            subcalls: vec![crate::bus::BatchSubcallProgress {
-                index: 1,
-                tool_call: ToolCall {
+    with_temp_jcode_home(|| {
+        clear_test_render_state_for_tests();
+        let state = TestState {
+            display_messages: vec![
+                DisplayMessage::user("build it"),
+                DisplayMessage::assistant("Let me inspect the relevant files first."),
+            ],
+            status: ProcessingStatus::RunningTool("batch".to_string()),
+            anim_elapsed: 0.0,
+            batch_progress: Some(crate::bus::BatchProgress {
+                session_id: "s".to_string(),
+                tool_call_id: "tc".to_string(),
+                total: 1,
+                completed: 0,
+                last_completed: None,
+                running: vec![ToolCall {
                     id: "batch-1-read".to_string(),
                     name: "read".to_string(),
                     input: serde_json::json!({"file_path": "src/main.rs"}),
                     intent: None,
                     thought_signature: None,
-                },
-                state: crate::bus::BatchSubcallState::Running,
-            }],
-        }),
-        ..Default::default()
-    };
+                }],
+                subcalls: vec![crate::bus::BatchSubcallProgress {
+                    index: 1,
+                    tool_call: ToolCall {
+                        id: "batch-1-read".to_string(),
+                        name: "read".to_string(),
+                        input: serde_json::json!({"file_path": "src/main.rs"}),
+                        intent: None,
+                        thought_signature: None,
+                    },
+                    state: crate::bus::BatchSubcallState::Running,
+                }],
+            }),
+            ..Default::default()
+        };
 
-    let prepared = prepare::prepare_messages(&state, 100, 30);
-    let rendered = rendered_text(&prepared);
+        let prepared = prepare::prepare_messages(&state, 100, 30);
+        let rendered = rendered_text(&prepared);
 
-    let assistant_idx = rendered
-        .iter()
-        .position(|line| line.contains("Let me inspect the relevant files first."))
-        .expect("missing assistant text");
-    let batch_idx = rendered
-        .iter()
-        .position(|line| line.contains("batch · 0/1 done"))
-        .expect("missing live batch progress");
+        let assistant_idx = rendered
+            .iter()
+            .position(|line| line.contains("Let me inspect the relevant files first."))
+            .expect("missing assistant text");
+        let batch_idx = rendered
+            .iter()
+            .position(|line| line.contains("batch · 0/1 done"))
+            .expect("missing live batch progress");
 
-    assert!(
-        assistant_idx < batch_idx,
-        "assistant text should render before live batch block in {:?}",
-        rendered
-    );
+        assert!(
+            assistant_idx < batch_idx,
+            "assistant text should render before live batch block in {:?}",
+            rendered
+        );
+    });
 }
 
 #[test]
@@ -1116,109 +1118,111 @@ fn test_render_tool_message_batch_subcall_lines_alignment_unset() {
 
 #[test]
 fn test_prepare_messages_renders_reasoning_role_dim_italic_without_sentinel() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    clear_test_render_state_for_tests();
+    with_temp_jcode_home(|| {
+        clear_test_render_state_for_tests();
 
-    // A collapsing reasoning message carries sentinel-wrapped dim/italic markup.
-    let mut content = String::new();
-    content.push_str(&jcode_tui_markdown::reasoning_line_markup(
-        "weighing the options",
-    ));
-    content.push_str(&jcode_tui_markdown::reasoning_line_markup(
-        "▸ thought for 3s",
-    ));
+        // A collapsing reasoning message carries sentinel-wrapped dim/italic markup.
+        let mut content = String::new();
+        content.push_str(&jcode_tui_markdown::reasoning_line_markup(
+            "weighing the options",
+        ));
+        content.push_str(&jcode_tui_markdown::reasoning_line_markup(
+            "▸ thought for 3s",
+        ));
 
-    let state = TestState {
-        display_messages: vec![
-            DisplayMessage::user("hi"),
-            DisplayMessage::reasoning(content),
-        ],
-        ..Default::default()
-    };
+        let state = TestState {
+            display_messages: vec![
+                DisplayMessage::user("hi"),
+                DisplayMessage::reasoning(content),
+            ],
+            ..Default::default()
+        };
 
-    let prepared = prepare::prepare_messages(&state, 100, 30);
-    let lines = prepared.materialize_all_lines();
+        let prepared = prepare::prepare_messages(&state, 100, 30);
+        let lines = prepared.materialize_all_lines();
 
-    // The visible reasoning body is present, dim+italic, and sentinel-free.
-    let body = lines
-        .iter()
-        .find(|l| {
-            let joined: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-            joined.contains("weighing the options")
-        })
-        .expect("reasoning body line present");
-    let rendered: String = body.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert!(
-        !rendered.contains(jcode_tui_markdown::REASONING_SENTINEL),
-        "sentinel must be stripped from visible reasoning: {rendered:?}"
-    );
-    let span = body
-        .spans
-        .iter()
-        .find(|s| s.content.as_ref().contains("weighing"))
-        .expect("body span");
-    assert!(
-        span.style
-            .add_modifier
-            .contains(ratatui::style::Modifier::ITALIC),
-        "reasoning body should be italic: {:?}",
-        span.style
-    );
+        // The visible reasoning body is present, dim+italic, and sentinel-free.
+        let body = lines
+            .iter()
+            .find(|l| {
+                let joined: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+                joined.contains("weighing the options")
+            })
+            .expect("reasoning body line present");
+        let rendered: String = body.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(
+            !rendered.contains(jcode_tui_markdown::REASONING_SENTINEL),
+            "sentinel must be stripped from visible reasoning: {rendered:?}"
+        );
+        let span = body
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref().contains("weighing"))
+            .expect("body span");
+        assert!(
+            span.style
+                .add_modifier
+                .contains(ratatui::style::Modifier::ITALIC),
+            "reasoning body should be italic: {:?}",
+            span.style
+        );
 
-    // The summary line is present too.
-    assert!(
-        lines.iter().any(|l| {
-            let joined: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
-            joined.contains("thought for 3s")
-        }),
-        "summary line should render"
-    );
+        // The summary line is present too.
+        assert!(
+            lines.iter().any(|l| {
+                let joined: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+                joined.contains("thought for 3s")
+            }),
+            "summary line should render"
+        );
+    });
 }
 
 #[test]
 fn test_prepare_messages_renders_anchored_reasoning_message_in_flow() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    clear_test_render_state_for_tests();
+    with_temp_jcode_home(|| {
+        clear_test_render_state_for_tests();
 
-    // Anchored reasoning traces are ordinary display messages in the body:
-    // they render dim+italic (sentinel stripped) between surrounding entries.
-    let mut trace = String::new();
-    trace.push_str(&jcode_tui_markdown::reasoning_line_markup(
-        "anchored thinking",
-    ));
+        // Anchored reasoning traces are ordinary display messages in the body:
+        // they render dim+italic (sentinel stripped) between surrounding entries.
+        let mut trace = String::new();
+        trace.push_str(&jcode_tui_markdown::reasoning_line_markup(
+            "anchored thinking",
+        ));
 
-    let state = TestState {
-        display_messages: vec![
-            DisplayMessage::user("hi"),
-            DisplayMessage::reasoning(trace),
-            DisplayMessage::assistant("Answer body"),
-        ],
-        ..Default::default()
-    };
+        let state = TestState {
+            display_messages: vec![
+                DisplayMessage::user("hi"),
+                DisplayMessage::reasoning(trace),
+                DisplayMessage::assistant("Answer body"),
+            ],
+            ..Default::default()
+        };
 
-    let prepared = prepare::prepare_messages(&state, 100, 30);
-    let lines = prepared.materialize_all_lines();
-    let joined: Vec<String> = lines
-        .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect();
+        let prepared = prepare::prepare_messages(&state, 100, 30);
+        let lines = prepared.materialize_all_lines();
+        let joined: Vec<String> = lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect();
 
-    let reasoning_idx = joined
-        .iter()
-        .position(|l| l.contains("anchored thinking"))
-        .expect("anchored reasoning rendered");
-    let answer_idx = joined
-        .iter()
-        .position(|l| l.contains("Answer body"))
-        .expect("answer rendered");
-    assert!(
-        reasoning_idx < answer_idx,
-        "anchored reasoning renders in transcript order: {joined:?}"
-    );
-    // Sentinel is stripped from the visible reasoning text.
-    assert!(
-        !joined[reasoning_idx].contains(jcode_tui_markdown::REASONING_SENTINEL),
-        "sentinel must be stripped: {:?}",
-        joined[reasoning_idx]
-    );
+        let reasoning_idx = joined
+            .iter()
+            .position(|l| l.contains("anchored thinking"))
+            .expect("anchored reasoning rendered");
+        let answer_idx = joined
+            .iter()
+            .position(|l| l.contains("Answer body"))
+            .expect("answer rendered");
+        assert!(
+            reasoning_idx < answer_idx,
+            "anchored reasoning renders in transcript order: {joined:?}"
+        );
+        // Sentinel is stripped from the visible reasoning text.
+        assert!(
+            !joined[reasoning_idx].contains(jcode_tui_markdown::REASONING_SENTINEL),
+            "sentinel must be stripped: {:?}",
+            joined[reasoning_idx]
+        );
+    });
 }

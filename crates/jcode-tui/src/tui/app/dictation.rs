@@ -521,7 +521,9 @@ mod tests {
 
     #[tokio::test]
     async fn dictation_command_trims_trailing_newlines() {
-        let _env_lease = crate::tui::app::test_support::lock_test_env_read();
+        // Guard form rather than `with_temp_jcode_home`: the body awaits, so it
+        // cannot run inside the helper's synchronous closure.
+        let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
         let text = run_dictation_command("printf 'hello from test\\n'", 5)
             .await
             .expect("dictation command should succeed");

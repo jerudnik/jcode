@@ -9,6 +9,7 @@ use crate::tui::session_picker::ResumeTarget;
 use chrono::{Duration as ChronoDuration, Utc};
 
 use crate::storage::EnvVarGuard;
+use crate::tui::app::test_support::with_temp_jcode_home;
 
 #[test]
 fn extract_bracketed_system_message_strips_wrapper() {
@@ -126,9 +127,10 @@ fn swarm_effort_display_labels_are_marked_beta() {
 #[cfg(unix)]
 #[test]
 fn detected_resume_terminal_recognizes_handterm_term_program() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let _guard = EnvVarGuard::set("TERM_PROGRAM", "handterm");
-    assert_eq!(detected_resume_terminal().as_deref(), Some("handterm"));
+    with_temp_jcode_home(|| {
+        let _guard = EnvVarGuard::set("TERM_PROGRAM", "handterm");
+        assert_eq!(detected_resume_terminal().as_deref(), Some("handterm"));
+    });
 }
 
 #[cfg(unix)]
