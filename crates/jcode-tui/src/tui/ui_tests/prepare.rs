@@ -825,7 +825,7 @@ fn test_prepare_messages_centers_meta_footer_in_centered_mode() {
 }
 
 #[test]
-fn test_prepare_messages_tool_row_refreshes_after_message_version_bump() {
+fn test_prepare_messages_tool_row_token_badge_scales_with_content_size() {
     let tool_call = ToolCall {
         id: "tool-1".to_string(),
         name: "read".to_string(),
@@ -853,12 +853,10 @@ fn test_prepare_messages_tool_row_refreshes_after_message_version_bump() {
 
     let first = TestState {
         display_messages: vec![placeholder],
-        messages_version: 0,
         ..Default::default()
     };
     let refreshed = TestState {
         display_messages: vec![final_message],
-        messages_version: 1,
         ..Default::default()
     };
 

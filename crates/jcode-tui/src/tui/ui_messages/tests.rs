@@ -674,23 +674,17 @@ fn parse_todo_tool_output_accepts_timestamp_only_header() {
 
 #[test]
 fn unbiased_visual_prompt_retry_renders_complete_feedback_change() {
-    const PROMPT: &str = "can you make a pelican riding a bike animation in html and vanillia js ";
+    // The eval input for this fixture is deliberately neutral:
+    //   "can you make a pelican riding a bike animation in html and vanillia js "
+    // The visual verification strategy must come from the model's todo
+    // refinement, not from criteria planted in the prompt, so that text stays
+    // free of "feedback loop", "browser", "console", "viewport", "screenshot",
+    // and "visual quality". A loop asserting exactly that used to live here; it
+    // compared a file-local constant against itself and could not fail, so the
+    // requirement is recorded as a comment instead.
     const INITIAL_FEEDBACK: &str = "Open the page in a browser, inspect runtime errors, and verify animation state changes over time.";
     const REVISED_FEEDBACK: &str = "Serve the files locally, load them in a real browser at desktop and mobile viewport sizes, assert zero console/page errors, sample wheel and scenery transforms at two timestamps to prove motion, and exercise pause plus speed controls to confirm state changes.";
     const REVISED_OBJECTIVE: &str = "Deliver a responsive standalone animation whose pelican visibly pedals a moving bicycle through a layered seaside scene at 60fps where supported, with working pause/resume and three-speed controls, accessible labels, no external runtime dependencies, and zero browser console errors.";
-
-    // Keep the eval input neutral. The visual verification strategy must come
-    // from the model's todo refinement, not from criteria planted in the prompt.
-    for biased_term in [
-        "feedback loop",
-        "browser",
-        "console",
-        "viewport",
-        "screenshot",
-        "visual quality",
-    ] {
-        assert!(!PROMPT.to_ascii_lowercase().contains(biased_term));
-    }
 
     let todos = vec![crate::todo::TodoItem {
         id: "implement".to_string(),

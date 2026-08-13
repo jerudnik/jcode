@@ -245,6 +245,14 @@ fn test_estimate_pinned_diagram_pane_height_tall_image() {
 
 #[test]
 fn test_is_diagram_poor_fit_wide_in_side_pane() {
+    // The math below is written against the (8, 16) fallback; if a picker is
+    // ever initialised in this binary the expected values change.
+    assert_eq!(
+        crate::tui::mermaid::get_font_size(),
+        None,
+        "test assumes the (8,16) cell fallback"
+    );
+
     // A very wide diagram in a side pane (narrow+tall) should be a poor fit
     let diagram = info_widget::DiagramInfo {
         hash: 40,
@@ -262,6 +270,36 @@ fn test_is_diagram_poor_fit_wide_in_side_pane() {
     assert!(
         poor,
         "very wide diagram in narrow side pane should be poor fit"
+    );
+
+    // This case must clear the scale < 0.3 early return so the Side branch is
+    // what decides the result. With the pinned (8, 16) cells:
+    // inner = 1584x128, scale = min(1584/1200, 128/400) = 0.32,
+    // utilization = 384/1584 = 0.2424.
+    let diagram = info_widget::DiagramInfo {
+        hash: 41,
+        width: 1200,
+        height: 400,
+        label: None,
+    };
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 200,
+        height: 10,
+    };
+    let scale = (1584.0f64 / 1200.0).min(128.0 / 400.0);
+    assert!(
+        scale >= 0.3,
+        "fixture must clear the early return, got {scale}"
+    );
+    assert!(
+        is_diagram_poor_fit(&diagram, area, crate::config::DiagramPanePosition::Side),
+        "wide image wastes a wide short pane"
+    );
+    assert!(
+        !is_diagram_poor_fit(&diagram, area, crate::config::DiagramPanePosition::Top),
+        "same geometry is not a Top-pane poor fit"
     );
 }
 
