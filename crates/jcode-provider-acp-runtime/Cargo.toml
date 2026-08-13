@@ -1,0 +1,31 @@
+[package]
+name = "jcode-provider-acp-runtime"
+version = "0.1.0"
+publish = false
+edition = "2024"
+description = "Shared ACP stdio subprocess runtime for jcode providers"
+
+[lib]
+name = "jcode_provider_acp_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jcode-fake-acp"
+path = "src/bin/fake_acp.rs"
+test = false
+bench = false
+
+[dependencies]
+agent-client-protocol = { version = "=0.10.4", features = ["unstable_session_model", "unstable_session_resume", "unstable_session_usage"] }
+anyhow = "1"
+async-trait = "0.1"
+futures = "0.3"
+jcode-message-types = { path = "../jcode-message-types" }
+jcode-provider-core = { path = "../jcode-provider-core" }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[dev-dependencies]
+tempfile = "3"
