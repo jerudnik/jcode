@@ -822,113 +822,86 @@ fn test_info_widget_data_includes_connection_type() {
 
 #[test]
 fn test_remote_tui_state_prefers_cached_model_during_brief_connecting_phase() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_otter_123";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote cached model".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.save().expect("save remote session");
 
-    let session_id = "session_otter_123";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote cached model".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.save().expect("save remote session");
+        let app = App::new_for_remote(Some(session_id.to_string()));
 
-    let app = App::new_for_remote(Some(session_id.to_string()));
-
-    assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-    assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
-    assert_eq!(
-        crate::tui::TuiState::session_display_name(&app).as_deref(),
-        Some("otter")
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
+        assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
+        assert_eq!(
+            crate::tui::TuiState::session_display_name(&app).as_deref(),
+            Some("otter")
+        );
+    });
 }
 
 #[test]
 fn test_remote_tui_state_falls_back_to_cached_model_after_startup_phase_clears() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_otter_124";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote cached model".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.save().expect("save remote session");
 
-    let session_id = "session_otter_124";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote cached model".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.save().expect("save remote session");
+        let mut app = App::new_for_remote(Some(session_id.to_string()));
+        app.clear_remote_startup_phase();
 
-    let mut app = App::new_for_remote(Some(session_id.to_string()));
-    app.clear_remote_startup_phase();
-
-    assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-    assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
+        assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
+    });
 }
 
 #[test]
 fn test_new_for_remote_uses_startup_stub_without_loading_full_transcript() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_otter_stub_125";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote cached model".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.append_stored_message(crate::session::StoredMessage {
+            id: "msg-startup-stub".to_string(),
+            role: crate::message::Role::User,
+            content: vec![crate::message::ContentBlock::Text {
+                text: "hello from persisted history".to_string(),
+                cache_control: None,
+            }],
+            display_role: None,
+            timestamp: None,
+            tool_duration_ms: None,
+            token_usage: None,
+        });
+        session.save().expect("save remote session");
 
-    let session_id = "session_otter_stub_125";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote cached model".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg-startup-stub".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "hello from persisted history".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
+        let app = App::new_for_remote(Some(session_id.to_string()));
+        assert_eq!(app.session_id(), session_id);
+        assert_eq!(app.display_messages().len(), 1);
+        assert_eq!(
+            app.display_messages()[0].content,
+            "hello from persisted history"
+        );
+        // The remote client renders persisted history into `display_messages`,
+        // then calls `strip_transcript_for_remote_client()` to release the backing
+        // transcript (the server is the source of truth for the live transcript).
+        // So the stripped `session.messages` is expected to be empty here.
+        assert_eq!(app.session.messages.len(), 0);
+        assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
+        assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
     });
-    session.save().expect("save remote session");
-
-    let app = App::new_for_remote(Some(session_id.to_string()));
-    assert_eq!(app.session_id(), session_id);
-    assert_eq!(app.display_messages().len(), 1);
-    assert_eq!(
-        app.display_messages()[0].content,
-        "hello from persisted history"
-    );
-    // The remote client renders persisted history into `display_messages`,
-    // then calls `strip_transcript_for_remote_client()` to release the backing
-    // transcript (the server is the source of truth for the live transcript).
-    // So the stripped `session.messages` is expected to be empty here.
-    assert_eq!(app.session.messages.len(), 0);
-    assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
-    assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
@@ -1853,41 +1826,33 @@ fn test_remote_fast_mode_tier_bills_premium_rates_and_reprices_on_toggle() {
 
 #[test]
 fn test_info_widget_local_gemini_shows_oauth_auth_method() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let path = crate::auth::gemini::tokens_path().expect("gemini tokens path");
+        crate::storage::write_json_secret(
+            &path,
+            &serde_json::json!({
+                "access_token": "at-123",
+                "refresh_token": "rt-456",
+                "expires_at": 4102444800000i64,
+                "email": "user@example.com"
+            }),
+        )
+        .expect("write gemini tokens");
+        crate::auth::AuthStatus::invalidate_cache();
 
-    let path = crate::auth::gemini::tokens_path().expect("gemini tokens path");
-    crate::storage::write_json_secret(
-        &path,
-        &serde_json::json!({
-            "access_token": "at-123",
-            "refresh_token": "rt-456",
-            "expires_at": 4102444800000i64,
-            "email": "user@example.com"
-        }),
-    )
-    .expect("write gemini tokens");
-    crate::auth::AuthStatus::invalidate_cache();
+        let app = create_gemini_test_app();
+        let data = crate::tui::TuiState::info_widget_data(&app);
 
-    let app = create_gemini_test_app();
-    let data = crate::tui::TuiState::info_widget_data(&app);
+        assert_eq!(data.provider_name.as_deref(), Some("gemini"));
+        assert_eq!(data.model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(
+            data.auth_method,
+            crate::tui::info_widget::AuthMethod::GeminiOAuth
+        );
+        assert!(data.usage_info.is_none());
 
-    assert_eq!(data.provider_name.as_deref(), Some("gemini"));
-    assert_eq!(data.model.as_deref(), Some("gemini-2.5-pro"));
-    assert_eq!(
-        data.auth_method,
-        crate::tui::info_widget::AuthMethod::GeminiOAuth
-    );
-    assert!(data.usage_info.is_none());
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-    crate::auth::AuthStatus::invalidate_cache();
+        crate::auth::AuthStatus::invalidate_cache();
+    });
 }
 
 #[test]

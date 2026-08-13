@@ -804,72 +804,63 @@ fn test_handle_server_event_side_panel_state_updates_snapshot() {
 
 #[test]
 fn test_remote_swarm_status_does_not_clobber_newer_session_history_on_disk() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_remote_preserve_history";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote preserve history".to_string()),
+        );
+        session.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "older on-disk message".to_string(),
+                cache_control: None,
+            }],
+        );
+        session.save().expect("save initial session");
 
-    let session_id = "session_remote_preserve_history";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote preserve history".to_string()),
-    );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "older on-disk message".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.save().expect("save initial session");
+        let mut app = App::new_for_remote(Some(session_id.to_string()));
+        app.remote_session_id = Some(session_id.to_string());
+        app.swarm_enabled = true;
 
-    let mut app = App::new_for_remote(Some(session_id.to_string()));
-    app.remote_session_id = Some(session_id.to_string());
-    app.swarm_enabled = true;
+        // Simulate the shared server advancing the authoritative session file after the
+        // remote client already loaded its shadow copy.
+        let mut fresher = crate::session::Session::load(session_id).expect("load fresher session");
+        fresher.add_message(
+            Role::Assistant,
+            vec![ContentBlock::Text {
+                text: "newer server-side message".to_string(),
+                cache_control: None,
+            }],
+        );
+        fresher.save().expect("save fresher session");
 
-    // Simulate the shared server advancing the authoritative session file after the
-    // remote client already loaded its shadow copy.
-    let mut fresher = crate::session::Session::load(session_id).expect("load fresher session");
-    fresher.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "newer server-side message".to_string(),
-            cache_control: None,
-        }],
-    );
-    fresher.save().expect("save fresher session");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        app.handle_server_event(
+            crate::protocol::ServerEvent::SwarmStatus { members: vec![] },
+            &mut remote,
+        );
 
-    app.handle_server_event(
-        crate::protocol::ServerEvent::SwarmStatus { members: vec![] },
-        &mut remote,
-    );
-
-    let persisted = crate::session::Session::load(session_id).expect("reload persisted session");
-    assert_eq!(
-        persisted.messages.len(),
-        2,
-        "remote UI persistence should not roll back newer server-written messages"
-    );
-    let last_text = persisted
-        .messages
-        .last()
-        .and_then(|msg| {
-            msg.content.iter().find_map(|block| match block {
-                ContentBlock::Text { text, .. } => Some(text.as_str()),
-                _ => None,
+        let persisted = crate::session::Session::load(session_id).expect("reload persisted session");
+        assert_eq!(
+            persisted.messages.len(),
+            2,
+            "remote UI persistence should not roll back newer server-written messages"
+        );
+        let last_text = persisted
+            .messages
+            .last()
+            .and_then(|msg| {
+                msg.content.iter().find_map(|block| match block {
+                    ContentBlock::Text { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
             })
-        })
-        .expect("last message text");
-    assert_eq!(last_text, "newer server-side message");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+            .expect("last message text");
+        assert_eq!(last_text, "newer server-side message");
+    });
 }

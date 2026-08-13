@@ -1,93 +1,84 @@
 #[test]
 fn test_metadata_only_history_preserves_fast_restored_startup_state() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_fast_resume_meta_42";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("resume me".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.append_stored_message(crate::session::StoredMessage {
+            id: "msg-fast-resume".to_string(),
+            role: crate::message::Role::Assistant,
+            content: vec![crate::message::ContentBlock::Text {
+                text: "restored locally before connect".to_string(),
+                cache_control: None,
+            }],
+            display_role: None,
+            timestamp: None,
+            tool_duration_ms: None,
+            token_usage: None,
+        });
+        session.save().expect("save fast resume session");
 
-    let session_id = "session_fast_resume_meta_42";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("resume me".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg-fast-resume".to_string(),
-        role: crate::message::Role::Assistant,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "restored locally before connect".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
+        let mut app = App::new_for_remote(Some(session_id.to_string()));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard_rt = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+        app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: session_id.to_string(),
+                messages: vec![],
+                images: vec![],
+                provider_name: Some("openai".to_string()),
+                provider_model: Some("gpt-5.4".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec![],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec![session_id.to_string()],
+                client_count: Some(1),
+                is_canary: Some(false),
+                server_version: None,
+                server_name: None,
+                server_icon: None,
+                server_has_update: None,
+                was_interrupted: None,
+                reload_recovery: None,
+                connection_type: Some("https".to_string()),
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
+
+        let assistant_messages: Vec<_> = app
+            .display_messages()
+            .iter()
+            .filter(|m| m.role == "assistant")
+            .collect();
+        assert_eq!(assistant_messages.len(), 1);
+        assert_eq!(
+            assistant_messages[0].content,
+            "restored locally before connect"
+        );
+        assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
+        assert_eq!(app.connection_type.as_deref(), Some("https"));
     });
-    session.save().expect("save fast resume session");
-
-    let mut app = App::new_for_remote(Some(session_id.to_string()));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard_rt = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: session_id.to_string(),
-            messages: vec![],
-            images: vec![],
-            provider_name: Some("openai".to_string()),
-            provider_model: Some("gpt-5.4".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec![],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec![session_id.to_string()],
-            client_count: Some(1),
-            is_canary: Some(false),
-            server_version: None,
-            server_name: None,
-            server_icon: None,
-            server_has_update: None,
-            was_interrupted: None,
-            reload_recovery: None,
-            connection_type: Some("https".to_string()),
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
-
-    let assistant_messages: Vec<_> = app
-        .display_messages()
-        .iter()
-        .filter(|m| m.role == "assistant")
-        .collect();
-    assert_eq!(assistant_messages.len(), 1);
-    assert_eq!(
-        assistant_messages[0].content,
-        "restored locally before connect"
-    );
-    assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
-    assert_eq!(app.connection_type.as_deref(), Some("https"));
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]

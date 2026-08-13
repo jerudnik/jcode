@@ -751,231 +751,198 @@ fn test_handle_server_event_history_session_change_clears_pending_interleaves() 
 
 #[test]
 fn test_handle_post_connect_marker_without_reload_context_does_not_queue_selfdev_continuation() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _enter = rt.enter();
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        remote.mark_history_loaded();
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _enter = rt.enter();
-    let backend = ratatui::backend::TestBackend::new(80, 24);
-    let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    remote.mark_history_loaded();
+        let session_id = "session_marker_only";
+        let jcode_dir = crate::storage::jcode_dir().expect("jcode dir");
+        std::fs::write(
+            jcode_dir.join(format!("client-reload-pending-{}", session_id)),
+            "Reloaded with build test123\n",
+        )
+        .expect("write client reload marker");
 
-    let session_id = "session_marker_only";
-    let jcode_dir = crate::storage::jcode_dir().expect("jcode dir");
-    std::fs::write(
-        jcode_dir.join(format!("client-reload-pending-{}", session_id)),
-        "Reloaded with build test123\n",
-    )
-    .expect("write client reload marker");
+        let mut state = super::remote::RemoteRunState {
+            reconnect_attempts: 1,
+            ..Default::default()
+        };
 
-    let mut state = super::remote::RemoteRunState {
-        reconnect_attempts: 1,
-        ..Default::default()
-    };
+        rt.block_on(super::remote::handle_post_connect(
+            &mut app,
+            &mut terminal,
+            &mut remote,
+            &mut state,
+            Some(session_id),
+        ))
+        .expect("post connect should succeed");
 
-    rt.block_on(super::remote::handle_post_connect(
-        &mut app,
-        &mut terminal,
-        &mut remote,
-        &mut state,
-        Some(session_id),
-    ))
-    .expect("post connect should succeed");
-
-    assert!(app.hidden_queued_system_messages.is_empty());
-    assert!(
-        !app.display_messages()
-            .iter()
-            .any(|m| m.content.starts_with("Reload complete - continuing")),
-        "marker-only reconnect should not queue selfdev continuation"
-    );
-    assert!(app.reload_info.is_empty());
-    assert!(
-        app.display_messages()
-            .iter()
-            .any(|m| m.content.contains("✓ Reconnected successfully.")),
-        "reconnect success message should still be shown"
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert!(app.hidden_queued_system_messages.is_empty());
+        assert!(
+            !app.display_messages()
+                .iter()
+                .any(|m| m.content.starts_with("Reload complete - continuing")),
+            "marker-only reconnect should not queue selfdev continuation"
+        );
+        assert!(app.reload_info.is_empty());
+        assert!(
+            app.display_messages()
+                .iter()
+                .any(|m| m.content.contains("✓ Reconnected successfully.")),
+            "reconnect success message should still be shown"
+        );
+    });
 }
 
 #[test]
 fn test_handle_post_connect_defers_reload_followup_to_server_history_payload() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_hidden_reload_followup";
+        crate::tool::selfdev::ReloadContext {
+            task_context: Some("Investigate queued prompt delivery after reload".to_string()),
+            version_before: "old-build".to_string(),
+            version_after: "new-build".to_string(),
+            session_id: session_id.to_string(),
+            timestamp: "2026-03-26T00:00:00Z".to_string(),
+        }
+        .save()
+        .expect("save reload context");
 
-    let session_id = "session_hidden_reload_followup";
-    crate::tool::selfdev::ReloadContext {
-        task_context: Some("Investigate queued prompt delivery after reload".to_string()),
-        version_before: "old-build".to_string(),
-        version_after: "new-build".to_string(),
-        session_id: session_id.to_string(),
-        timestamp: "2026-03-26T00:00:00Z".to_string(),
-    }
-    .save()
-    .expect("save reload context");
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _enter = rt.enter();
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _enter = rt.enter();
-    let backend = ratatui::backend::TestBackend::new(80, 24);
-    let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let mut state = super::remote::RemoteRunState {
+            reconnect_attempts: 1,
+            ..Default::default()
+        };
 
-    let mut state = super::remote::RemoteRunState {
-        reconnect_attempts: 1,
-        ..Default::default()
-    };
+        let outcome = rt
+            .block_on(super::remote::handle_post_connect(
+                &mut app,
+                &mut terminal,
+                &mut remote,
+                &mut state,
+                Some(session_id),
+            ))
+            .expect("post connect should succeed");
 
-    let outcome = rt
-        .block_on(super::remote::handle_post_connect(
-            &mut app,
-            &mut terminal,
-            &mut remote,
-            &mut state,
-            Some(session_id),
-        ))
-        .expect("post connect should succeed");
+        assert!(matches!(outcome, super::remote::PostConnectOutcome::Ready));
+        assert!(app.hidden_queued_system_messages.is_empty());
+        assert!(!app.is_processing);
+        assert!(matches!(app.status, ProcessingStatus::Idle));
+        assert!(app.current_message_id.is_none());
+        assert!(app.rate_limit_pending_message.is_none());
+        assert!(app.reload_info.is_empty());
 
-    assert!(matches!(outcome, super::remote::PostConnectOutcome::Ready));
-    assert!(app.hidden_queued_system_messages.is_empty());
-    assert!(!app.is_processing);
-    assert!(matches!(app.status, ProcessingStatus::Idle));
-    assert!(app.current_message_id.is_none());
-    assert!(app.rate_limit_pending_message.is_none());
-    assert!(app.reload_info.is_empty());
-
-    cleanup_reload_context_file(session_id);
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        cleanup_reload_context_file(session_id);
+    });
 }
 
 #[test]
 fn test_handle_post_connect_clears_deferred_dispatch_before_reload_followup() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_reload_deferred_dispatch";
+        crate::tool::selfdev::ReloadContext {
+            task_context: Some(
+                "Verify deferred dispatch does not block reload continuation".to_string(),
+            ),
+            version_before: "old-build".to_string(),
+            version_after: "new-build".to_string(),
+            session_id: session_id.to_string(),
+            timestamp: "2026-04-15T00:00:00Z".to_string(),
+        }
+        .save()
+        .expect("save reload context");
 
-    let session_id = "session_reload_deferred_dispatch";
-    crate::tool::selfdev::ReloadContext {
-        task_context: Some(
-            "Verify deferred dispatch does not block reload continuation".to_string(),
-        ),
-        version_before: "old-build".to_string(),
-        version_after: "new-build".to_string(),
-        session_id: session_id.to_string(),
-        timestamp: "2026-04-15T00:00:00Z".to_string(),
-    }
-    .save()
-    .expect("save reload context");
+        let mut app = create_test_app();
+        app.pending_queued_dispatch = true;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _enter = rt.enter();
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        remote.mark_history_loaded();
 
-    let mut app = create_test_app();
-    app.pending_queued_dispatch = true;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _enter = rt.enter();
-    let backend = ratatui::backend::TestBackend::new(80, 24);
-    let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    remote.mark_history_loaded();
+        let mut state = super::remote::RemoteRunState {
+            reconnect_attempts: 1,
+            ..Default::default()
+        };
 
-    let mut state = super::remote::RemoteRunState {
-        reconnect_attempts: 1,
-        ..Default::default()
-    };
+        let outcome = rt
+            .block_on(super::remote::handle_post_connect(
+                &mut app,
+                &mut terminal,
+                &mut remote,
+                &mut state,
+                Some(session_id),
+            ))
+            .expect("post connect should succeed");
 
-    let outcome = rt
-        .block_on(super::remote::handle_post_connect(
-            &mut app,
-            &mut terminal,
-            &mut remote,
-            &mut state,
-            Some(session_id),
-        ))
-        .expect("post connect should succeed");
+        assert!(matches!(outcome, super::remote::PostConnectOutcome::Ready));
+        assert!(
+            !app.pending_queued_dispatch,
+            "post-connect should clear deferred dispatch before sending reload continuation"
+        );
+        assert!(app.hidden_queued_system_messages.is_empty());
+        assert!(
+            app.is_processing,
+            "reload continuation should still dispatch"
+        );
+        assert!(matches!(app.status, ProcessingStatus::Sending));
+        assert!(app.current_message_id.is_some());
 
-    assert!(matches!(outcome, super::remote::PostConnectOutcome::Ready));
-    assert!(
-        !app.pending_queued_dispatch,
-        "post-connect should clear deferred dispatch before sending reload continuation"
-    );
-    assert!(app.hidden_queued_system_messages.is_empty());
-    assert!(
-        app.is_processing,
-        "reload continuation should still dispatch"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Sending));
-    assert!(app.current_message_id.is_some());
-
-    cleanup_reload_context_file(session_id);
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        cleanup_reload_context_file(session_id);
+    });
 }
 
 #[test]
 fn test_handle_post_connect_requests_client_reload_after_server_reload_even_without_newer_binary() {
-    use std::time::{Duration, SystemTime};
+    with_temp_jcode_home(|| {
+        use std::time::{Duration, SystemTime};
 
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
 
-    let mut app = create_test_app();
-    app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _enter = rt.enter();
-    let backend = ratatui::backend::TestBackend::new(80, 24);
-    let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    remote.mark_history_loaded();
-    app.remote_session_id = Some("session_reload_after_reconnect".to_string());
+        let mut app = create_test_app();
+        app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _enter = rt.enter();
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).expect("failed to create terminal");
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        remote.mark_history_loaded();
+        app.remote_session_id = Some("session_reload_after_reconnect".to_string());
 
-    let mut state = super::remote::RemoteRunState {
-        reconnect_attempts: 1,
-        server_reload_in_progress: true,
-        ..Default::default()
-    };
+        let mut state = super::remote::RemoteRunState {
+            reconnect_attempts: 1,
+            server_reload_in_progress: true,
+            ..Default::default()
+        };
 
-    let outcome = rt
-        .block_on(super::remote::handle_post_connect(
-            &mut app,
-            &mut terminal,
-            &mut remote,
-            &mut state,
-            Some("session_reload_after_reconnect"),
-        ))
-        .expect("post connect should succeed");
+        let outcome = rt
+            .block_on(super::remote::handle_post_connect(
+                &mut app,
+                &mut terminal,
+                &mut remote,
+                &mut state,
+                Some("session_reload_after_reconnect"),
+            ))
+            .expect("post connect should succeed");
 
-    assert!(matches!(outcome, super::remote::PostConnectOutcome::Quit));
-    assert_eq!(
-        app.reload_requested.as_deref(),
-        Some("session_reload_after_reconnect")
-    );
-    assert!(app.should_quit);
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert!(matches!(outcome, super::remote::PostConnectOutcome::Quit));
+        assert_eq!(
+            app.reload_requested.as_deref(),
+            Some("session_reload_after_reconnect")
+        );
+        assert!(app.should_quit);
+    });
 }
 
 #[test]

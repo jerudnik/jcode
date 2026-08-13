@@ -1084,38 +1084,31 @@ fn test_autocomplete_adds_space_for_nested_argument_commands() {
 
 #[test]
 fn test_goals_show_suggestions_include_goal_ids() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("repo");
-    std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project = temp.path().join("repo");
+        std::fs::create_dir_all(&project).expect("project dir");
 
-    let goal = crate::goal::create_goal(
-        crate::goal::GoalCreateInput {
-            title: "Ship mobile MVP".to_string(),
-            scope: crate::goal::GoalScope::Project,
-            ..crate::goal::GoalCreateInput::default()
-        },
-        Some(&project),
-    )
-    .expect("create goal");
+        let goal = crate::goal::create_goal(
+            crate::goal::GoalCreateInput {
+                title: "Ship mobile MVP".to_string(),
+                scope: crate::goal::GoalScope::Project,
+                ..crate::goal::GoalCreateInput::default()
+            },
+            Some(&project),
+        )
+        .expect("create goal");
 
-    let mut app = create_test_app();
-    app.session.working_dir = Some(project.display().to_string());
+        let mut app = create_test_app();
+        app.session.working_dir = Some(project.display().to_string());
 
-    let suggestions = app.get_suggestions_for("/goals show ");
-    assert!(
-        suggestions
-            .iter()
-            .any(|(cmd, _)| cmd == &format!("/goals show {}", goal.id))
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let suggestions = app.get_suggestions_for("/goals show ");
+        assert!(
+            suggestions
+                .iter()
+                .any(|(cmd, _)| cmd == &format!("/goals show {}", goal.id))
+        );
+    });
 }
 
 fn configure_test_remote_models(app: &mut App) {

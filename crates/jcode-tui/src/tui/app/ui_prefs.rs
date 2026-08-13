@@ -59,28 +59,19 @@ pub(crate) fn save_inline_images_visible(visible: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::test_support::with_temp_jcode_home;
 
     #[test]
     fn inline_images_visibility_round_trips_through_disk() {
-        let _guard = crate::tui::app::test_support::lock_test_env();
-        let temp = tempfile::tempdir().expect("tempdir");
-        let prev_home = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
+        with_temp_jcode_home(|| {
+            // Default before any toggle: visible.
+            assert!(inline_images_visible());
 
-        // Default before any toggle: visible.
-        assert!(inline_images_visible());
+            save_inline_images_visible(false);
+            assert!(!inline_images_visible(), "hidden state should persist");
 
-        save_inline_images_visible(false);
-        assert!(!inline_images_visible(), "hidden state should persist");
-
-        save_inline_images_visible(true);
-        assert!(inline_images_visible(), "visible state should persist");
-
-        if let Some(prev_home) = prev_home {
-            crate::env::set_var("JCODE_HOME", prev_home);
-        } else {
-            crate::env::remove_var("JCODE_HOME");
-        }
+            save_inline_images_visible(true);
+            assert!(inline_images_visible(), "visible state should persist");
+        });
     }
-
 }

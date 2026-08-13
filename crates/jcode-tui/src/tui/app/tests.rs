@@ -1361,85 +1361,75 @@ fn older_server_history_queues_a_forced_reload_end_to_end() {
     // also assert: with one fixed publish target there is no stale channel left
     // to repoint, so the queued reload is the whole remedy.
     use std::time::{Duration, SystemTime};
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
-    crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
-    let temp = tempfile::TempDir::new().expect("temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
+        crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
 
-    // Field state: a newer binary has already been published to the single
-    // fixed target, so a reload has somewhere strictly newer to go.
-    let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let published = crate::build::current_fixed_binary_path().expect("fixed path");
-    std::fs::create_dir_all(published.parent().expect("fixed dir")).expect("create fixed dir");
-    std::fs::write(&published, "bin 0.22.0").expect("write published binary");
-    std::fs::File::open(&published)
-        .expect("open published binary")
-        .set_modified(base + Duration::from_secs(60))
-        .expect("set mtime");
+        // Field state: a newer binary has already been published to the single
+        // fixed target, so a reload has somewhere strictly newer to go.
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let published = crate::build::current_fixed_binary_path().expect("fixed path");
+        std::fs::create_dir_all(published.parent().expect("fixed dir")).expect("create fixed dir");
+        std::fs::write(&published, "bin 0.22.0").expect("write published binary");
+        std::fs::File::open(&published)
+            .expect("open published binary")
+            .set_modified(base + Duration::from_secs(60))
+            .expect("set mtime");
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    app.is_remote = true;
-    app.remote_session_id = Some("session_existing".to_string());
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        app.is_remote = true;
+        app.remote_session_id = Some("session_existing".to_string());
 
-    let _redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_from_old_server".to_string(),
-            messages: vec![],
-            images: vec![],
-            provider_name: Some("p".to_string()),
-            provider_model: Some("m".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec!["m".to_string()],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec![],
-            client_count: Some(1),
-            is_canary: Some(false),
-            reload_recovery: None,
-            server_version: Some("v0.14.6 (deadbeef)".to_string()),
-            server_name: Some("old-server".to_string()),
-            server_icon: Some("🕰".to_string()),
-            server_has_update: Some(false),
-            was_interrupted: None,
-            connection_type: Some("websocket".to_string()),
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let _redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_from_old_server".to_string(),
+                messages: vec![],
+                images: vec![],
+                provider_name: Some("p".to_string()),
+                provider_model: Some("m".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec!["m".to_string()],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec![],
+                client_count: Some(1),
+                is_canary: Some(false),
+                reload_recovery: None,
+                server_version: Some("v0.14.6 (deadbeef)".to_string()),
+                server_name: Some("old-server".to_string()),
+                server_icon: Some("🕰".to_string()),
+                server_has_update: Some(false),
+                was_interrupted: None,
+                connection_type: Some("websocket".to_string()),
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    let pending = app.pending_server_reload;
+        let pending = app.pending_server_reload;
 
-    // Restore env before asserting so a panic cannot leak global state.
-    crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-
-    assert!(
-        pending,
-        "a server self-reporting an older release must be force-reloaded even when it claims \
+        assert!(
+            pending,
+            "a server self-reporting an older release must be force-reloaded even when it claims \
          server_has_update: false"
-    );
+        );
+    });
 }
 
 #[test]

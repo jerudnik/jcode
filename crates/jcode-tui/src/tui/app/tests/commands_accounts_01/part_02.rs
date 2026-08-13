@@ -1,56 +1,39 @@
 #[test]
 fn test_fast_default_on_saves_config_and_updates_session() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_fast_test_app();
+        app.input = "/fast default on".to_string();
 
-    let mut app = create_fast_test_app();
-    app.input = "/fast default on".to_string();
+        app.submit_input();
 
-    app.submit_input();
-
-    let cfg = crate::config::Config::load();
-    assert_eq!(
-        cfg.provider.openai_service_tier.as_deref(),
-        Some("priority")
-    );
-    assert_eq!(app.provider.service_tier().as_deref(), Some("priority"));
-    assert_eq!(app.status_notice(), Some("Fast mode: on".to_string()));
-    let last = app.display_messages().last().expect("missing response");
-    assert_eq!(last.content, "Saved OpenAI fast mode: on.");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let cfg = crate::config::Config::load();
+        assert_eq!(
+            cfg.provider.openai_service_tier.as_deref(),
+            Some("priority")
+        );
+        assert_eq!(app.provider.service_tier().as_deref(), Some("priority"));
+        assert_eq!(app.status_notice(), Some("Fast mode: on".to_string()));
+        let last = app.display_messages().last().expect("missing response");
+        assert_eq!(last.content, "Saved OpenAI fast mode: on.");
+    });
 }
 
 #[test]
 fn test_fast_status_shows_saved_default() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
-    crate::config::Config::set_openai_service_tier(Some("priority")).expect("save fast default");
+    with_temp_jcode_home(|| {
+        crate::config::Config::set_openai_service_tier(Some("priority")).expect("save fast default");
 
-    let mut app = create_fast_test_app();
-    app.input = "/fast status".to_string();
+        let mut app = create_fast_test_app();
+        app.input = "/fast status".to_string();
 
-    app.submit_input();
+        app.submit_input();
 
-    let last = app.display_messages().last().expect("missing response");
-    assert_eq!(
-        last.content,
-        "Fast mode is off.\nCurrent tier: Standard\nSaved default: on (Fast)\nUse /fast on, /fast off, or /fast default on|off."
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let last = app.display_messages().last().expect("missing response");
+        assert_eq!(
+            last.content,
+            "Fast mode is off.\nCurrent tier: Standard\nSaved default: on (Fast)\nUse /fast on, /fast off, or /fast default on|off."
+        );
+    });
 }
 
 #[test]

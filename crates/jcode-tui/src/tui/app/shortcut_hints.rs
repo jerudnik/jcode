@@ -287,6 +287,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::test_support::with_temp_jcode_home;
 
     fn stat(fast: u32, slow: u32, hints: u32, last: u64) -> ActionStat {
         ActionStat {
@@ -347,24 +348,15 @@ mod tests {
 
     #[test]
     fn fast_and_slow_counters_persist_independently() {
-        let _guard = crate::tui::app::test_support::lock_test_env();
-        let temp = tempfile::tempdir().expect("tempdir");
-        let prev = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
+        with_temp_jcode_home(|| {
+            record_slow(LearnableAction::Resume);
+            record_slow(LearnableAction::Resume);
+            record_fast(LearnableAction::Resume);
 
-        record_slow(LearnableAction::Resume);
-        record_slow(LearnableAction::Resume);
-        record_fast(LearnableAction::Resume);
-
-        let state = load_state();
-        let stat = state.actions.get("resume").expect("stat present");
-        assert_eq!(stat.slow_uses, 2);
-        assert_eq!(stat.fast_uses, 1);
-
-        if let Some(prev) = prev {
-            crate::env::set_var("JCODE_HOME", prev);
-        } else {
-            crate::env::remove_var("JCODE_HOME");
-        }
+            let state = load_state();
+            let stat = state.actions.get("resume").expect("stat present");
+            assert_eq!(stat.slow_uses, 2);
+            assert_eq!(stat.fast_uses, 1);
+        });
     }
 }
