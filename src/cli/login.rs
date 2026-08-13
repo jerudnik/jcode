@@ -821,6 +821,30 @@ fn login_openai_compatible_flow(
     let mut resolved = resolve_openai_compatible_profile(*profile);
 
     eprintln!("Setting up {}...", resolved.display_name);
+    if profile.id == crate::provider_catalog::MINIMAX_PROFILE.id {
+        let default_region = std::env::var(crate::provider_catalog::MINIMAX_REGION_ENV)
+            .ok()
+            .and_then(|value| canonical_minimax_region(&value).ok())
+            .unwrap_or("international");
+        let input = if io::stdin().is_terminal() {
+            read_line_trimmed(&format!(
+                "MiniMax platform region (international/china) [{default_region}]: "
+            ))?
+        } else {
+            String::new()
+        };
+        let region = if input.is_empty() {
+            default_region
+        } else {
+            canonical_minimax_region(&input)?
+        };
+        crate::provider_catalog::save_env_value_to_env_file(
+            crate::provider_catalog::MINIMAX_REGION_ENV,
+            &resolved.env_file,
+            Some(region),
+        )?;
+        resolved = resolve_openai_compatible_profile(*profile);
+    }
     let setup_url_depends_on_key = profile.id == crate::provider_catalog::MINIMAX_PROFILE.id;
     if !setup_url_depends_on_key {
         eprintln!("See setup details: {}\n", resolved.setup_url);
@@ -903,7 +927,13 @@ fn login_openai_compatible_flow(
         let key = match options.openai_compatible_api_key.as_deref() {
             Some(value) => value.trim().to_string(),
             None => {
-                eprint!("Paste your {} API key: ", resolved.display_name);
+                let credential_label = if profile.id == crate::provider_catalog::MINIMAX_PROFILE.id
+                {
+                    crate::provider_catalog::MINIMAX_CREDENTIAL_LABEL
+                } else {
+                    resolved.display_name.as_str()
+                };
+                eprint!("Paste your {credential_label}: ");
                 io::stdout().flush()?;
                 read_secret_line()?
             }
@@ -929,7 +959,14 @@ fn login_openai_compatible_flow(
         if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
             auth::kimi::set_auth_mode(Some(auth::kimi::KimiAuthMode::ApiKey))?;
         }
-        eprintln!("\nSuccessfully saved {} API key!", resolved.display_name);
+        if profile.id == crate::provider_catalog::MINIMAX_PROFILE.id {
+            eprintln!(
+                "\nSuccessfully saved {}!",
+                crate::provider_catalog::MINIMAX_CREDENTIAL_LABEL
+            );
+        } else {
+            eprintln!("\nSuccessfully saved {} API key!", resolved.display_name);
+        }
         "api_key"
     } else {
         eprintln!("Endpoint: {}", resolved.api_base);
@@ -1007,6 +1044,14 @@ fn login_openai_compatible_flow(
     }
     crate::telemetry::record_auth_success(&resolved.id, auth_method);
     Ok(())
+}
+
+fn canonical_minimax_region(raw: &str) -> Result<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "international" | "global" | "io" => Ok("international"),
+        "china" | "cn" => Ok("china"),
+        _ => anyhow::bail!("Invalid MiniMax region. Choose `international` or `china`."),
+    }
 }
 
 pub use crate::secret_input::read_secret_line;

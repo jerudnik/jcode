@@ -343,6 +343,9 @@ pub const MINIMAX_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     requires_api_key: true,
 };
 
+pub const MINIMAX_CREDENTIAL_LABEL: &str =
+    "MiniMax Token Plan Subscription Key or pay-as-you-go API key";
+
 pub const XAI_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     id: "xai",
     display_name: "xAI",
@@ -952,9 +955,9 @@ pub const MINIMAX_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescrip
     display_name: "MiniMax",
     auth_kind: LoginProviderAuthKind::ApiKey,
     auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
-    auth_status_method: "API key",
+    auth_status_method: MINIMAX_CREDENTIAL_LABEL,
     aliases: &["minimaxi", "minimax-ai"],
-    menu_detail: "API key",
+    menu_detail: MINIMAX_CREDENTIAL_LABEL,
     recommended: false,
     target: LoginProviderTarget::OpenAiCompatible(MINIMAX_PROFILE),
     order: LoginProviderSurfaceOrder::new(Some(38), Some(38), Some(38), Some(38), Some(38)),

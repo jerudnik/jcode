@@ -194,14 +194,12 @@ fn resolved_named_profile_skips_non_chat_models_when_picking_newest_default() {
 }
 
 #[test]
-fn minimax_token_plan_keys_resolve_to_china_endpoint_without_changing_international_default() {
+fn minimax_token_plan_keys_default_to_international_endpoint() {
     let _lock = crate::storage::lock_test_env();
     let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION", "JCODE_HOME"]);
     crate::env::remove_var("OPENAI_API_KEY");
     crate::env::remove_var("JCODE_MINIMAX_REGION");
-    // Region resolution falls back to the *stored* credential when no key hint
-    // or env var is given. Without an isolated home this reads the developer's
-    // real auth file, so the result depends on whose machine runs the suite.
+    // Without an isolated home this can read the developer's real auth file.
     let temp = tempfile::tempdir().expect("tempdir");
     crate::env::set_var("JCODE_HOME", temp.path());
 
@@ -212,19 +210,24 @@ fn minimax_token_plan_keys_resolve_to_china_endpoint_without_changing_internatio
         "https://platform.minimax.io/docs/guides/text-generation"
     );
 
-    let china = resolve_openai_compatible_profile_with_api_key_hint(
+    let prefixed = resolve_openai_compatible_profile_with_api_key_hint(
         MINIMAX_PROFILE,
         Some("sk-cp-test-token"),
     );
-    assert_eq!(china.api_base, MINIMAX_CHINA_API_BASE);
-    assert_eq!(china.setup_url, MINIMAX_CHINA_SETUP_URL);
+    assert_eq!(prefixed.api_base, "https://api.minimax.io/v1");
+    assert_eq!(
+        prefixed.setup_url,
+        "https://platform.minimax.io/docs/guides/text-generation"
+    );
 }
 
 #[test]
 fn minimax_region_override_wins_over_key_prefix() {
     let _lock = crate::storage::lock_test_env();
-    let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION"]);
+    let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION", "JCODE_HOME"]);
     crate::env::remove_var("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().expect("tempdir");
+    crate::env::set_var("JCODE_HOME", temp.path());
 
     // `sk-cp-` keys are also issued for the international platform; an explicit
     // region override must keep the global endpoint instead of the China host.
@@ -240,6 +243,17 @@ fn minimax_region_override_wins_over_key_prefix() {
     let china =
         resolve_openai_compatible_profile_with_api_key_hint(MINIMAX_PROFILE, Some("plain-token"));
     assert_eq!(china.api_base, MINIMAX_CHINA_API_BASE);
+
+    // The explicit login choice is stored in minimax.env and must survive a
+    // fresh process where the region is no longer present in the environment.
+    save_env_value_to_env_file(MINIMAX_REGION_ENV, MINIMAX_PROFILE.env_file, Some("china"))
+        .expect("save MiniMax region");
+    crate::env::remove_var(MINIMAX_REGION_ENV);
+    let stored = resolve_openai_compatible_profile_with_api_key_hint(
+        MINIMAX_PROFILE,
+        Some("sk-cp-international-prefix"),
+    );
+    assert_eq!(stored.api_base, MINIMAX_CHINA_API_BASE);
 }
 
 #[test]
@@ -970,6 +984,13 @@ fn zai_coding_plan_static_catalog_prioritizes_current_models() {
         openai_compatible_profile_context_limit("zai", "glm-5.2"),
         Some(1_000_000)
     );
+}
+
+#[test]
+fn minimax_static_catalog_includes_m3_before_legacy_models() {
+    let models = openai_compatible_profile_static_models(MINIMAX_PROFILE);
+    assert_eq!(models.first().map(String::as_str), Some("MiniMax-M3"));
+    assert!(models.iter().any(|model| model == "MiniMax-M2.7"));
 }
 
 #[test]

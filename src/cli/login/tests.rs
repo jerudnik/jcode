@@ -138,3 +138,16 @@ fn auto_scriptable_flow_reason_skips_when_scriptable_input_already_explicit() {
     );
     assert_eq!(reason, None);
 }
+
+#[test]
+fn minimax_region_choices_are_canonicalized() {
+    assert_eq!(
+        canonical_minimax_region("international").unwrap(),
+        "international"
+    );
+    assert_eq!(canonical_minimax_region("global").unwrap(), "international");
+    assert_eq!(canonical_minimax_region("io").unwrap(), "international");
+    assert_eq!(canonical_minimax_region("china").unwrap(), "china");
+    assert_eq!(canonical_minimax_region("cn").unwrap(), "china");
+    assert!(canonical_minimax_region("auto").is_err());
+}

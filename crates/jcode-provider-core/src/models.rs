@@ -289,7 +289,10 @@ pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
         return Some(262_144);
     }
 
-    // --- MiniMax M2 family: 204,800 context ---
+    // --- MiniMax M3: 1M context; legacy M2.x remains 204,800 ---
+    if m == "minimax-m3" {
+        return Some(1_000_000);
+    }
     if m.contains("minimax") {
         return Some(204_800);
     }
@@ -435,6 +438,19 @@ mod tests {
         assert_eq!(
             context_limit_for_model_with_provider("claude-sonnet-4.6", Some("claude")),
             Some(200_000)
+        );
+    }
+
+    #[test]
+    fn minimax_m3_uses_one_million_context_without_changing_m2() {
+        assert_eq!(context_limit_for_model("MiniMax-M3"), Some(1_000_000));
+        assert_eq!(
+            open_weight_family_context_limit("minimax-m3"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            open_weight_family_context_limit("minimax-m2.7"),
+            Some(204_800)
         );
     }
 

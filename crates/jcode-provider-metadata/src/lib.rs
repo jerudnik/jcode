@@ -485,6 +485,12 @@ mod tests {
     fn minimax_profile_uses_official_openai_compatible_configuration() {
         assert_eq!(MINIMAX_PROFILE.api_base, "https://api.minimax.io/v1");
         assert_eq!(MINIMAX_PROFILE.api_key_env, "MINIMAX_API_KEY");
+        assert_eq!(MINIMAX_PROFILE.default_model, Some("MiniMax-M3"));
+        assert_eq!(MINIMAX_LOGIN_PROVIDER.menu_detail, MINIMAX_CREDENTIAL_LABEL);
+        assert_eq!(
+            MINIMAX_LOGIN_PROVIDER.auth_status_method,
+            MINIMAX_CREDENTIAL_LABEL
+        );
         assert_eq!(
             openai_compatible_profiles()
                 .iter()
