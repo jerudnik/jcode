@@ -1,6 +1,6 @@
 # Remote build staleness: remote runs can test a tree that is not your tree
 
-Status: proposal seed, evidence gathered 2026-08-13 (test-remediation session)
+Status: root cause pinned; remediation in progress
 
 ## Symptom
 
@@ -27,16 +27,31 @@ Checked at 2026-08-13 ~04:46 UTC, local HEAD `d85916421` (remediation series
   `JCODE_BUILD_GIT_HASH=dbe279c87 JCODE_BUILD_GIT_DIRTY=0` — stamped hours
   stale, at a moment when the local repo was at `d85916421`.
 
-The puzzle: `remote_build.sh` rsyncs `$LOCAL_DIR/` to the remote with
-`--delete` on every synced run (`[1/3] Syncing source files...`), and computes
-the metadata stamp from `$LOCAL_DIR` at invocation time. A straightforward
-invocation from this repo at that moment could not have produced either the
-stale tree or the stale stamp. So some path skipped or reused state: candidate
-explanations include a `--no-sync`/`SYNC_SOURCE=0` branch, per-purpose remote
-dirs (`jcode-base-check` vs the main build dir) with different sync policies,
-a concurrent-run guard reusing a previous invocation, or `LOCAL_DIR` resolving
-somewhere unexpected for library-test invocations. Root cause not yet pinned;
-finding it is step 1 below.
+The stale checkout was not an rsync failure. A detached local worktree existed
+at `/private/tmp/jcode-base-check` on the exact stale commit
+`dbe279c872bf924c2192b2b120884bc6e355d6f5`. Both wrappers resolve their source
+from the script being executed, not from the caller's current checkout:
+
+- `dev_cargo.sh` sets `repo_root` from `${BASH_SOURCE[0]}` and executes that
+  checkout's `scripts/remote_build.sh`.
+- `remote_build.sh` sets `LOCAL_DIR` from `$0`, then derives the default remote
+  directory from `basename "$LOCAL_DIR"`.
+
+Running the wrapper from that detached worktree therefore performed a fresh,
+successful sync of the stale worktree into
+`~/.cache/remote-builds/jcode/jcode-base-check` and stamped it with
+`dbe279c87`. The remote output was internally consistent, but it did not name
+the source fingerprint prominently enough for an operator comparing it with a
+different checkout to notice.
+
+Code reading also found a separate unsafe path: `remote_build.sh --no-sync`
+sets `SYNC_SOURCE=0` and proceeds directly to the remote Cargo command without
+checking that the retained remote directory matches the current local source.
+`dev_cargo.sh` does not add `--no-sync`, there is no concurrent remote-run
+guard that reuses an invocation, and per-purpose remote directories are chosen
+only by `JCODE_REMOTE_DIR`, `--remote-dir`, or the source checkout's basename.
+The fingerprint remediation below closes that independent stale-reuse path and
+makes the source identity explicit on every run.
 
 ## Related, same wrapper, same shape
 
