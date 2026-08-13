@@ -292,41 +292,29 @@ fn test_remote_ctrl_h_does_not_insert_text() {
 }
 
 #[test]
-fn test_remote_ctrl_enter_queues_while_processing() {
+fn test_remote_modifier_enter_queues_while_processing() {
+    // Ctrl+Enter and Cmd+Enter are the same binding on the remote path; only
+    // the modifier differs, so both are cases of one test.
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
-    let mut app = create_test_app();
-    app.is_processing = true;
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    rt.block_on(app.handle_remote_key(KeyCode::Char('h'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Char('i'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::CONTROL, &mut remote))
-        .unwrap();
+    for (case, modifier) in [
+        ("ctrl+enter", KeyModifiers::CONTROL),
+        ("cmd+enter", KeyModifiers::SUPER),
+    ] {
+        let mut app = create_test_app();
+        app.is_processing = true;
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    assert!(app.input().is_empty());
-    assert_eq!(app.queued_messages().len(), 1);
-    assert_eq!(app.queued_messages()[0], "hi");
-}
+        rt.block_on(app.handle_remote_key(KeyCode::Char('h'), KeyModifiers::empty(), &mut remote))
+            .unwrap();
+        rt.block_on(app.handle_remote_key(KeyCode::Char('i'), KeyModifiers::empty(), &mut remote))
+            .unwrap();
+        rt.block_on(app.handle_remote_key(KeyCode::Enter, modifier, &mut remote))
+            .unwrap();
 
-#[test]
-fn test_remote_cmd_enter_queues_while_processing() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut app = create_test_app();
-    app.is_processing = true;
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    rt.block_on(app.handle_remote_key(KeyCode::Char('h'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Char('i'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::SUPER, &mut remote))
-        .unwrap();
-
-    assert!(app.input().is_empty());
-    assert_eq!(app.queued_messages().len(), 1);
-    assert_eq!(app.queued_messages()[0], "hi");
+        assert!(app.input().is_empty(), "{case}: input should be consumed");
+        assert_eq!(app.queued_messages().len(), 1, "{case}: one queued message");
+        assert_eq!(app.queued_messages()[0], "hi", "{case}: queued text");
+    }
 }

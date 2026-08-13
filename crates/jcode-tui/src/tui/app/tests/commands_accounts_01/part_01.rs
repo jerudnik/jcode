@@ -107,18 +107,32 @@ fn session_picker_enter_queues_current_terminal_resume_and_closes_overlay() {
 }
 
 #[test]
-fn slash_resume_opens_session_picker_overlay_locally() {
+fn slash_resume_aliases_open_session_picker_overlay_locally() {
+    // /resume and its aliases all open the same Resume-mode picker.
     let runtime = tokio::runtime::Runtime::new().expect("test runtime");
     let _guard = runtime.enter();
-    let mut app = create_test_app();
 
-    app.input = "/resume".to_string();
-    app.submit_input();
+    for alias in ["/resume", "/sessions", "/session"] {
+        let mut app = create_test_app();
 
-    assert!(app.session_picker_overlay.is_some());
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
-    assert!(app.pending_session_picker_load.is_some());
-    assert!(app.input.is_empty());
+        app.input = alias.to_string();
+        app.submit_input();
+
+        assert!(
+            app.session_picker_overlay.is_some(),
+            "{alias}: overlay opened"
+        );
+        assert_eq!(
+            app.session_picker_mode,
+            SessionPickerMode::Resume,
+            "{alias}: picker mode"
+        );
+        assert!(
+            app.pending_session_picker_load.is_some(),
+            "{alias}: load scheduled"
+        );
+        assert!(app.input.is_empty(), "{alias}: input consumed");
+    }
 }
 
 #[test]
@@ -136,36 +150,6 @@ fn slash_command_submit_retains_pending_images() {
     // the images stay pending and go out with the next real prompt submission.
     assert_eq!(app.pending_images.len(), 1);
     assert_eq!(app.pending_images[0].0, "image/png");
-    assert!(app.input.is_empty());
-}
-
-#[test]
-fn slash_sessions_alias_opens_session_picker_overlay_locally() {
-    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-    let _guard = runtime.enter();
-    let mut app = create_test_app();
-
-    app.input = "/sessions".to_string();
-    app.submit_input();
-
-    assert!(app.session_picker_overlay.is_some());
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
-    assert!(app.pending_session_picker_load.is_some());
-    assert!(app.input.is_empty());
-}
-
-#[test]
-fn slash_session_alias_opens_session_picker_overlay_locally() {
-    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-    let _guard = runtime.enter();
-    let mut app = create_test_app();
-
-    app.input = "/session".to_string();
-    app.submit_input();
-
-    assert!(app.session_picker_overlay.is_some());
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
-    assert!(app.pending_session_picker_load.is_some());
     assert!(app.input.is_empty());
 }
 

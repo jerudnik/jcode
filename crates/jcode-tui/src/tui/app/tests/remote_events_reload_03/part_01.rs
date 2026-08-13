@@ -57,47 +57,33 @@ fn test_reload_handoff_inactive_without_flag_or_marker() {
 }
 
 #[test]
-fn test_reload_handoff_active_when_reload_marker_present() {
-    crate::tui::app::test_support::with_temp_jcode_home(|| {
-        let temp = tempfile::TempDir::new().expect("create temp dir");
-        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+fn test_reload_handoff_active_when_marker_present() {
+    // Every in-flight reload phase keeps the handoff active.
+    for (case, phase) in [
+        ("starting", crate::server::ReloadPhase::Starting),
+        ("socket ready", crate::server::ReloadPhase::SocketReady),
+    ] {
+        crate::tui::app::test_support::with_temp_jcode_home(|| {
+            let temp = tempfile::TempDir::new().expect("create temp dir");
+            crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-        crate::server::write_reload_state(
-            "reload-marker-test",
-            "test-hash",
-            crate::server::ReloadPhase::Starting,
-            None,
-        );
+            crate::server::write_reload_state(
+                "reload-marker-test",
+                "test-hash",
+                phase,
+                None,
+            );
 
-        let state = remote::RemoteRunState {
-            ..Default::default()
-        };
+            let state = remote::RemoteRunState::default();
 
-        assert!(remote::reload_handoff_active(&state));
+            assert!(
+                remote::reload_handoff_active(&state),
+                "{case}: handoff should be active"
+            );
 
-        crate::server::clear_reload_marker();
-    });
-}
-
-#[test]
-fn test_reload_handoff_active_when_socket_ready_marker_present() {
-    crate::tui::app::test_support::with_temp_jcode_home(|| {
-        let temp = tempfile::TempDir::new().expect("create temp dir");
-        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
-
-        crate::server::write_reload_state(
-            "reload-marker-test",
-            "test-hash",
-            crate::server::ReloadPhase::SocketReady,
-            None,
-        );
-
-        let state = remote::RemoteRunState::default();
-
-        assert!(remote::reload_handoff_active(&state));
-
-        crate::server::clear_reload_marker();
-    });
+            crate::server::clear_reload_marker();
+        });
+    }
 }
 
 #[test]

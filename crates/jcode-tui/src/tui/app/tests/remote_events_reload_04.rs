@@ -2011,47 +2011,87 @@ fn test_remote_transcript_send_uses_remote_submission_path() {
 }
 
 #[test]
-fn test_remote_review_shows_processing_until_split_response() {
-    let mut app = create_test_app();
-    app.is_remote = true;
-    app.input = "/review".to_string();
-    app.cursor_pos = app.input.len();
-
+fn test_remote_split_command_shows_processing_until_split_response() {
+    // /review and /judge are the same split-launch path; only the command
+    // string, the status label, and the child session naming differ.
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-        .expect("/review should launch split request");
+    for (command, label, child_session_id, child_session_name) in [
+        ("/review", "Review", "session_review_child", "review_child"),
+        ("/judge", "Judge", "session_judge_child", "judge_child"),
+    ] {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.input = command.to_string();
+        app.cursor_pos = app.input.len();
 
-    assert!(
-        app.is_processing,
-        "review launch should show client processing state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Sending));
-    assert!(app.current_message_id.is_none());
-    assert_eq!(app.status_notice(), Some("Review launching".to_string()));
-    assert!(app.pending_split_startup_message.is_some());
-    assert_eq!(app.pending_split_label.as_deref(), Some("Review"));
-    assert!(!app.pending_split_request);
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.handle_server_event(
-        crate::protocol::ServerEvent::SplitResponse {
-            id: 1,
-            new_session_id: "session_review_child".to_string(),
-            new_session_name: "review_child".to_string(),
-        },
-        &mut remote,
-    );
+        rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
+            .unwrap_or_else(|e| panic!("{command} should launch split request: {e}"));
 
-    assert!(
-        !app.is_processing,
-        "split response should clear transient launch state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Idle));
-    assert!(app.processing_started.is_none());
-    assert!(app.pending_split_startup_message.is_none());
-    assert!(app.pending_split_label.is_none());
+        assert!(
+            app.is_processing,
+            "{command}: launch should show client processing state"
+        );
+        assert!(
+            matches!(app.status, ProcessingStatus::Sending),
+            "{command}: status is Sending"
+        );
+        assert!(
+            app.current_message_id.is_none(),
+            "{command}: no message id yet"
+        );
+        assert_eq!(
+            app.status_notice(),
+            Some(format!("{label} launching")),
+            "{command}: launch notice"
+        );
+        assert!(
+            app.pending_split_startup_message.is_some(),
+            "{command}: startup message pending"
+        );
+        assert_eq!(
+            app.pending_split_label.as_deref(),
+            Some(label),
+            "{command}: split label"
+        );
+        assert!(
+            !app.pending_split_request,
+            "{command}: request already dispatched"
+        );
+
+        app.handle_server_event(
+            crate::protocol::ServerEvent::SplitResponse {
+                id: 1,
+                new_session_id: child_session_id.to_string(),
+                new_session_name: child_session_name.to_string(),
+            },
+            &mut remote,
+        );
+
+        assert!(
+            !app.is_processing,
+            "{command}: split response should clear transient launch state"
+        );
+        assert!(
+            matches!(app.status, ProcessingStatus::Idle),
+            "{command}: status back to Idle"
+        );
+        assert!(
+            app.processing_started.is_none(),
+            "{command}: processing clock cleared"
+        );
+        assert!(
+            app.pending_split_startup_message.is_none(),
+            "{command}: startup message cleared"
+        );
+        assert!(
+            app.pending_split_label.is_none(),
+            "{command}: split label cleared"
+        );
+    }
 }
 
 #[test]
@@ -2104,50 +2144,6 @@ fn test_remote_super_space_routes_next_prompt_to_new_session() {
         assert!(app.pending_split_prompt.is_none());
         assert!(app.pending_split_label.is_none());
     });
-}
-
-#[test]
-fn test_remote_judge_shows_processing_until_split_response() {
-    let mut app = create_test_app();
-    app.is_remote = true;
-    app.input = "/judge".to_string();
-    app.cursor_pos = app.input.len();
-
-    let rt = tokio::runtime::Runtime::new().expect("runtime");
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-        .expect("/judge should launch split request");
-
-    assert!(
-        app.is_processing,
-        "judge launch should show client processing state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Sending));
-    assert!(app.current_message_id.is_none());
-    assert_eq!(app.status_notice(), Some("Judge launching".to_string()));
-    assert!(app.pending_split_startup_message.is_some());
-    assert_eq!(app.pending_split_label.as_deref(), Some("Judge"));
-    assert!(!app.pending_split_request);
-
-    app.handle_server_event(
-        crate::protocol::ServerEvent::SplitResponse {
-            id: 1,
-            new_session_id: "session_judge_child".to_string(),
-            new_session_name: "judge_child".to_string(),
-        },
-        &mut remote,
-    );
-
-    assert!(
-        !app.is_processing,
-        "split response should clear transient launch state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Idle));
-    assert!(app.processing_started.is_none());
-    assert!(app.pending_split_startup_message.is_none());
-    assert!(app.pending_split_label.is_none());
 }
 
 // ====================================================================

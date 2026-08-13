@@ -990,77 +990,51 @@ fn test_prepare_messages_centered_streaming_recenters_structured_markdown_like_f
 }
 
 #[test]
-fn test_render_tool_message_batch_nested_subcall_params_still_render() {
-    let msg = DisplayMessage {
-        role: "tool".to_string(),
-        content: "--- [1] grep ---\nok\n\nCompleted: 1 succeeded, 0 failed".to_string(),
-        tool_calls: vec![],
-        duration_secs: None,
-        title: None,
-        tool_data: Some(ToolCall {
-            id: "call_batch_2".to_string(),
-            name: "batch".to_string(),
-            input: serde_json::json!({
-                "tool_calls": [
-                    {"tool": "grep", "parameters": {"pattern": "TODO", "path": "src"}}
-                ]
+fn test_render_tool_message_batch_grep_subcall_params_render_in_either_shape() {
+    // Batch subcalls arrive either with their arguments nested under
+    // "parameters" or flattened alongside "tool"; both must render the same.
+    for (case, call_id, subcall) in [
+        (
+            "nested parameters",
+            "call_batch_2",
+            serde_json::json!({"tool": "grep", "parameters": {"pattern": "TODO", "path": "src"}}),
+        ),
+        (
+            "flat parameters",
+            "call_batch_3",
+            serde_json::json!({"tool": "grep", "pattern": "TODO", "path": "src"}),
+        ),
+    ] {
+        let msg = DisplayMessage {
+            role: "tool".to_string(),
+            content: "--- [1] grep ---\nok\n\nCompleted: 1 succeeded, 0 failed".to_string(),
+            tool_calls: vec![],
+            duration_secs: None,
+            title: None,
+            tool_data: Some(ToolCall {
+                id: call_id.to_string(),
+                name: "batch".to_string(),
+                input: serde_json::json!({ "tool_calls": [subcall] }),
+                intent: None,
+                thought_signature: None,
             }),
-            intent: None,
-            thought_signature: None,
-        }),
-    };
+        };
 
-    let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered.len(), 2, "rendered={rendered:?}");
-    assert!(
-        rendered[0].contains("✓ batch 1 call"),
-        "rendered={rendered:?}"
-    );
-    assert!(
-        rendered
-            .iter()
-            .any(|line| line.contains("✓ grep 'TODO' in src")),
-        "missing grep subtool in {rendered:?}"
-    );
-}
-
-#[test]
-fn test_render_tool_message_batch_flat_grep_subcall_uses_pattern_and_path() {
-    let msg = DisplayMessage {
-        role: "tool".to_string(),
-        content: "--- [1] grep ---\nok\n\nCompleted: 1 succeeded, 0 failed".to_string(),
-        tool_calls: vec![],
-        duration_secs: None,
-        title: None,
-        tool_data: Some(ToolCall {
-            id: "call_batch_3".to_string(),
-            name: "batch".to_string(),
-            input: serde_json::json!({
-                "tool_calls": [
-                    {"tool": "grep", "pattern": "TODO", "path": "src"}
-                ]
-            }),
-            intent: None,
-            thought_signature: None,
-        }),
-    };
-
-    let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
-
-    assert_eq!(rendered.len(), 2, "rendered={rendered:?}");
-    assert!(
-        rendered[0].contains("✓ batch 1 call"),
-        "rendered={rendered:?}"
-    );
-    assert!(
-        rendered
-            .iter()
-            .any(|line| line.contains("✓ grep 'TODO' in src")),
-        "missing grep subtool in {rendered:?}"
-    );
+        assert_eq!(rendered.len(), 2, "{case}: rendered={rendered:?}");
+        assert!(
+            rendered[0].contains("✓ batch 1 call"),
+            "{case}: rendered={rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("✓ grep 'TODO' in src")),
+            "{case}: missing grep subtool in {rendered:?}"
+        );
+    }
 }
 
 #[test]

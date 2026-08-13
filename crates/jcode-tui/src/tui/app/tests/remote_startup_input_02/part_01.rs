@@ -377,47 +377,32 @@ fn test_handle_key_ctrl_backspace_csi_u_char_fallback_deletes_word() {
 }
 
 #[test]
-fn test_handle_key_super_backspace_deletes_previous_word() {
-    let mut app = create_test_app();
-    app.set_input_for_test("hello world again");
-
-    app.handle_key(KeyCode::Left, KeyModifiers::CONTROL)
-        .unwrap();
-    app.handle_key(KeyCode::Backspace, KeyModifiers::SUPER)
-        .unwrap();
-
-    // Cmd+Backspace deletes the previous word, leaving the cursor at the new boundary.
-    assert_eq!(app.input(), "hello again");
-    assert_eq!(app.cursor_pos(), "hello ".len());
-}
-
-#[test]
-fn test_handle_key_super_delete_aliases_delete_previous_word() {
-    for code in [KeyCode::Delete, KeyCode::Char('\u{7f}')] {
+fn test_handle_key_word_delete_modifier_aliases() {
+    // Cmd and Alt both delete the previous word, across every key code each
+    // one accepts. Cmd+Backspace is spelled out separately in the table
+    // because it is the canonical macOS binding the others alias.
+    for (case, modifier, code) in [
+        ("cmd+backspace", KeyModifiers::SUPER, KeyCode::Backspace),
+        ("cmd+delete", KeyModifiers::SUPER, KeyCode::Delete),
+        ("cmd+del-char", KeyModifiers::SUPER, KeyCode::Char('\u{7f}')),
+        ("alt+backspace", KeyModifiers::ALT, KeyCode::Backspace),
+        ("alt+delete", KeyModifiers::ALT, KeyCode::Delete),
+        ("alt+del-char", KeyModifiers::ALT, KeyCode::Char('\u{7f}')),
+    ] {
         let mut app = create_test_app();
         app.set_input_for_test("hello world again");
 
         app.handle_key(KeyCode::Left, KeyModifiers::CONTROL)
             .unwrap();
-        app.handle_key(code, KeyModifiers::SUPER).unwrap();
+        app.handle_key(code, modifier).unwrap();
 
-        assert_eq!(app.input(), "hello again");
-        assert_eq!(app.cursor_pos(), "hello ".len());
-    }
-}
-
-#[test]
-fn test_handle_key_alt_delete_aliases_delete_previous_word() {
-    for code in [KeyCode::Backspace, KeyCode::Delete, KeyCode::Char('\u{7f}')] {
-        let mut app = create_test_app();
-        app.set_input_for_test("hello world again");
-
-        app.handle_key(KeyCode::Left, KeyModifiers::CONTROL)
-            .unwrap();
-        app.handle_key(code, KeyModifiers::ALT).unwrap();
-
-        assert_eq!(app.input(), "hello again");
-        assert_eq!(app.cursor_pos(), "hello ".len());
+        // Deletes the previous word, leaving the cursor at the new boundary.
+        assert_eq!(app.input(), "hello again", "{case}: input after delete");
+        assert_eq!(
+            app.cursor_pos(),
+            "hello ".len(),
+            "{case}: cursor at word boundary"
+        );
     }
 }
 
@@ -837,93 +822,75 @@ fn test_create_transfer_session_from_parent_copies_todos_and_uses_compacted_cont
 }
 
 #[test]
-fn test_shift_enter_inserts_newline() {
-    let mut app = create_test_app();
-    app.is_processing = true;
+fn test_modifier_enter_inserts_newline() {
+    // Shift+Enter and Alt+Enter both insert a newline rather than sending.
+    for (case, modifier) in [
+        ("shift+enter", KeyModifiers::SHIFT),
+        ("alt+enter", KeyModifiers::ALT),
+    ] {
+        let mut app = create_test_app();
+        app.is_processing = true;
 
-    app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Enter, KeyModifiers::SHIFT).unwrap();
-    app.handle_key(KeyCode::Char('i'), KeyModifiers::empty())
-        .unwrap();
+        app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
+            .unwrap();
+        app.handle_key(KeyCode::Enter, modifier).unwrap();
+        app.handle_key(KeyCode::Char('i'), KeyModifiers::empty())
+            .unwrap();
 
-    assert_eq!(app.input(), "h\ni");
-    assert_eq!(app.queued_count(), 0);
-    assert_eq!(app.interleave_message.as_deref(), None);
+        assert_eq!(app.input(), "h\ni", "{case}: newline inserted inline");
+        assert_eq!(app.queued_count(), 0, "{case}: nothing queued");
+        assert_eq!(
+            app.interleave_message.as_deref(),
+            None,
+            "{case}: nothing interleaved"
+        );
+    }
 }
 
 #[test]
-fn test_alt_enter_inserts_newline() {
-    let mut app = create_test_app();
-    app.is_processing = true;
+fn test_modifier_enter_opposite_send_mode() {
+    // Ctrl+Enter and Cmd+Enter are the same binding; only the modifier differs.
+    for (case, modifier) in [
+        ("ctrl+enter", KeyModifiers::CONTROL),
+        ("cmd+enter", KeyModifiers::SUPER),
+    ] {
+        let mut app = create_test_app();
+        app.is_processing = true;
 
-    app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Enter, KeyModifiers::ALT).unwrap();
-    app.handle_key(KeyCode::Char('i'), KeyModifiers::empty())
-        .unwrap();
+        // Default immediate mode: the modifier+Enter should queue.
+        app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
+            .unwrap();
+        app.handle_key(KeyCode::Char('i'), KeyModifiers::empty())
+            .unwrap();
+        app.handle_key(KeyCode::Enter, modifier).unwrap();
 
-    assert_eq!(app.input(), "h\ni");
-    assert_eq!(app.queued_count(), 0);
-    assert_eq!(app.interleave_message.as_deref(), None);
-}
-#[test]
-fn test_ctrl_enter_opposite_send_mode() {
-    let mut app = create_test_app();
-    app.is_processing = true;
+        assert_eq!(app.queued_count(), 1, "{case}: queued in immediate mode");
+        assert_eq!(
+            app.interleave_message.as_deref(),
+            None,
+            "{case}: no interleave in immediate mode"
+        );
+        assert!(app.input().is_empty(), "{case}: input consumed");
 
-    // Default immediate mode: Ctrl+Enter should queue
-    app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Char('i'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Enter, KeyModifiers::CONTROL)
-        .unwrap();
+        // Queue mode: it should interleave instead (sets interleave_message).
+        app.queue_mode = true;
+        app.handle_key(KeyCode::Char('y'), KeyModifiers::empty())
+            .unwrap();
+        app.handle_key(KeyCode::Char('o'), KeyModifiers::empty())
+            .unwrap();
+        app.handle_key(KeyCode::Enter, modifier).unwrap();
 
-    assert_eq!(app.queued_count(), 1);
-    assert_eq!(app.interleave_message.as_deref(), None);
-    assert!(app.input().is_empty());
-
-    // Queue mode: Ctrl+Enter should interleave (sets interleave_message, not queued)
-    app.queue_mode = true;
-    app.handle_key(KeyCode::Char('y'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Char('o'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Enter, KeyModifiers::CONTROL)
-        .unwrap();
-
-    // Interleave now sets interleave_message instead of adding to queue
-    assert_eq!(app.queued_count(), 1); // Still just "hi" in queue
-    assert_eq!(app.interleave_message.as_deref(), Some("yo")); // "yo" is for interleave
-}
-
-#[test]
-fn test_cmd_enter_opposite_send_mode() {
-    let mut app = create_test_app();
-    app.is_processing = true;
-
-    // Default immediate mode: Cmd+Enter should queue, matching Ctrl+Enter
-    app.handle_key(KeyCode::Char('h'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Char('i'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Enter, KeyModifiers::SUPER).unwrap();
-
-    assert_eq!(app.queued_count(), 1);
-    assert_eq!(app.interleave_message.as_deref(), None);
-    assert!(app.input().is_empty());
-
-    // Queue mode: Cmd+Enter should interleave (sets interleave_message, not queued)
-    app.queue_mode = true;
-    app.handle_key(KeyCode::Char('y'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Char('o'), KeyModifiers::empty())
-        .unwrap();
-    app.handle_key(KeyCode::Enter, KeyModifiers::SUPER).unwrap();
-
-    assert_eq!(app.queued_count(), 1); // Still just "hi" in queue
-    assert_eq!(app.interleave_message.as_deref(), Some("yo")); // "yo" is for interleave
+        assert_eq!(
+            app.queued_count(),
+            1,
+            "{case}: queue still holds only the first message"
+        );
+        assert_eq!(
+            app.interleave_message.as_deref(),
+            Some("yo"),
+            "{case}: second message interleaves"
+        );
+    }
 }
 
 #[test]
