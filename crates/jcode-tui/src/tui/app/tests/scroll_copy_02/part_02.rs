@@ -774,30 +774,11 @@ fn test_kitty_jitter_click_on_image_label_still_cycles_level() {
 /// dimensions and assigns a stable id, exactly like a `read`-tool screenshot.
 const REPRO_TINY_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-/// FULL end-to-end reproduction of the user's "clicking the image does
-/// nothing" report. Unlike `test_click_on_inline_image_label_line_cycles_level`
-/// (which records a synthetic `ChatFrame` snapshot directly), this drives the
-/// *real* draw: a local App whose session carries a `read`-tool result image,
-/// anchored into the transcript body, rendered through `terminal.draw()`, which
-/// is what records the live copy-viewport snapshot. We then locate the rendered
-/// image label line in the actual frame buffer and inject a real left click,
-/// asserting the image size cycles. This exercises the body-anchored image path
-/// (`render_images` -> `resolve_anchored_items` -> `anchored_image_lines`), the
-/// path actually used in production, not the isolated `build_section` helper.
-#[test]
-fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
+/// Build the local read-tool transcript shared by both real-draw image tests.
+fn make_read_tool_anchored_png_app(tool_id: &str) -> App {
     use crate::message::{ContentBlock, Role};
-    use crate::tui::ui::inline_image_ui::ImageExpandLevel;
 
-    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
-    assert!(!app.is_remote, "repro must use the local image render path");
-
-    const TOOL_ID: &str = "read-shot-1";
-
-    // Build a real transcript: user asks, assistant calls `read`, tool result
-    // carries the screenshot image. This is exactly what produces a
-    // body-anchored inline image with a `RenderedImageAnchor::ToolCall`.
     app.session.add_message(
         Role::User,
         vec![ContentBlock::Text {
@@ -808,7 +789,7 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
     app.session.add_message(
         Role::Assistant,
         vec![ContentBlock::ToolUse {
-            id: TOOL_ID.to_string(),
+            id: tool_id.to_string(),
             name: "read".to_string(),
             input: serde_json::json!({"file_path": "shot.png"}),
             thought_signature: None,
@@ -818,7 +799,7 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
         Role::User,
         vec![
             ContentBlock::ToolResult {
-                tool_use_id: TOOL_ID.to_string(),
+                tool_use_id: tool_id.to_string(),
                 content: "read image".to_string(),
                 is_error: None,
             },
@@ -829,13 +810,12 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
         ],
     );
 
-    // Mirror the session into the display transcript the body renderer walks.
     app.display_messages = vec![
         DisplayMessage::user("read the screenshot"),
         DisplayMessage::tool(
             "read shot.png",
             crate::message::ToolCall {
-                id: TOOL_ID.to_string(),
+                id: tool_id.to_string(),
                 name: "read".to_string(),
                 input: serde_json::json!({"file_path": "shot.png"}),
                 intent: None,
@@ -852,6 +832,26 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
     app.is_processing = false;
     app.status = ProcessingStatus::Idle;
     app.session.short_name = Some("test".to_string());
+    app
+}
+
+/// FULL end-to-end reproduction of the user's "clicking the image does
+/// nothing" report. Unlike `test_click_on_inline_image_label_line_cycles_level`
+/// (which records a synthetic `ChatFrame` snapshot directly), this drives the
+/// *real* draw: a local App whose session carries a `read`-tool result image,
+/// anchored into the transcript body, rendered through `terminal.draw()`, which
+/// is what records the live copy-viewport snapshot. We then locate the rendered
+/// image label line in the actual frame buffer and inject a real left click,
+/// asserting the image size cycles. This exercises the body-anchored image path
+/// (`render_images` -> `resolve_anchored_items` -> `anchored_image_lines`), the
+/// path actually used in production, not the isolated `build_section` helper.
+#[test]
+fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
+    use crate::tui::ui::inline_image_ui::ImageExpandLevel;
+
+    let _render_lock = scroll_render_test_lock();
+    let mut app = make_read_tool_anchored_png_app("read-shot-1");
+    assert!(!app.is_remote, "repro must use the local image render path");
 
     // Sanity: the local render path must actually surface the anchored image.
     let images = <App as crate::tui::TuiState>::side_pane_images(&app);
@@ -944,67 +944,9 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
 /// The draw path must blank marker rows instead.
 #[test]
 fn test_real_draw_never_emits_inline_image_marker_text() {
-    use crate::message::{ContentBlock, Role};
-
     let _render_lock = scroll_render_test_lock();
-    let mut app = create_test_app();
+    let app = make_read_tool_anchored_png_app("read-shot-marker");
     assert!(!app.is_remote, "repro must use the local image render path");
-
-    const TOOL_ID: &str = "read-shot-marker";
-
-    app.session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "read the screenshot".to_string(),
-            cache_control: None,
-        }],
-    );
-    app.session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::ToolUse {
-            id: TOOL_ID.to_string(),
-            name: "read".to_string(),
-            input: serde_json::json!({"file_path": "shot.png"}),
-            thought_signature: None,
-        }],
-    );
-    app.session.add_message(
-        Role::User,
-        vec![
-            ContentBlock::ToolResult {
-                tool_use_id: TOOL_ID.to_string(),
-                content: "read image".to_string(),
-                is_error: None,
-            },
-            ContentBlock::Image {
-                media_type: "image/png".to_string(),
-                data: REPRO_TINY_PNG_B64.to_string(),
-            },
-        ],
-    );
-
-    app.display_messages = vec![
-        DisplayMessage::user("read the screenshot"),
-        DisplayMessage::tool(
-            "read shot.png",
-            crate::message::ToolCall {
-                id: TOOL_ID.to_string(),
-                name: "read".to_string(),
-                input: serde_json::json!({"file_path": "shot.png"}),
-                intent: None,
-                thought_signature: None,
-            },
-        ),
-    ];
-    app.bump_display_messages_version();
-    app.invalidate_side_pane_images_signature();
-    app.pin_images = true;
-    app.inline_images_visible = true;
-    app.scroll_offset = 0;
-    app.auto_scroll_paused = false;
-    app.is_processing = false;
-    app.status = ProcessingStatus::Idle;
-    app.session.short_name = Some("test".to_string());
 
     let backend = ratatui::backend::TestBackend::new(80, 40);
     let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");

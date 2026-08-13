@@ -274,6 +274,10 @@ struct ScreenMetrics {
 fn render_phase_screen(label: &'static str, phase: OnboardingPhase) -> ScreenMetrics {
     let app = app_in_phase(phase);
     let text = render_onboarding_text(&app, 80, 30);
+    screen_metrics(label, &text)
+}
+
+fn screen_metrics(label: &'static str, text: &str) -> ScreenMetrics {
     let is_yesno = text.contains(CANONICAL_YESNO_PILL) || text.contains("Yes") && text.contains("No");
     // Reading load must be measured from the human body prose only, NOT the raw
     // buffer. The raw buffer also contains the decorative idle donut, whose lit
@@ -359,27 +363,11 @@ fn tier3_screen_score_w(m: &ScreenMetrics, w: &Tier3Weights) -> f64 {
 }
 
 /// Screens we score for Tier 3. Each is a real, user-visible welcome screen.
-fn tier3_screens() -> Vec<ScreenMetrics> {
-    use crate::external_auth::ExternalAuthReviewCandidate;
-    use crate::tui::app::onboarding_flow::ImportReview;
-    let now = std::time::Instant::now();
-    let review =
-        ImportReview::new(vec![ExternalAuthReviewCandidate::fixture("OpenAI/Codex", "Codex auth.json")])
-            .unwrap();
-    vec![
-        render_phase_screen("LoginOpenAi", OnboardingPhase::LoginOpenAi { yes_highlighted: true }),
-        render_phase_screen("Login{import}", OnboardingPhase::Login { import: Some(review) }),
-        render_phase_screen("Login{recovery}", OnboardingPhase::Login { import: None }),
-        render_phase_screen(
-            "ContinuePrompt",
-            OnboardingPhase::ContinuePrompt {
-                cli: ExternalCli::Codex,
-                yes_highlighted: true,
-                shown_at: now,
-            },
-        ),
-        render_phase_screen("Suggestions", OnboardingPhase::Suggestions),
-    ]
+fn tier3_screens(rendered_screens: &[(&'static str, String)]) -> Vec<ScreenMetrics> {
+    rendered_screens
+        .iter()
+        .map(|(label, text)| screen_metrics(label, text))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -460,12 +448,12 @@ fn terminology_is_consistent(screens: &[(&'static str, String)]) -> bool {
 
 /// Compute the four Tier 4 signals by reading the real screens and driving the
 /// real app. `with_temp_jcode_home` must already be active.
-fn tier4_metrics() -> Tier4Metrics {
+fn tier4_metrics(rendered_screens: &[(&'static str, String)]) -> Tier4Metrics {
     use crate::external_auth::ExternalAuthReviewCandidate;
     use crate::tui::app::onboarding_flow::ImportReview;
 
     // ---- terminology_consistency: scan every welcome screen's prose ----
-    let terminology_consistent = terminology_is_consistent(&all_welcome_screen_texts());
+    let terminology_consistent = terminology_is_consistent(rendered_screens);
 
     // ---- progress_visibility: the multi-login import is a multi-step context
     // and must set scope up front. The default summary screen does this by
@@ -1087,10 +1075,10 @@ fn screen_load(label: &'static str, text: &str) -> ScreenLoad {
 }
 
 /// The real screens analyzed for cognitive load (same set Tier 3 scores).
-fn tier6_screen_loads() -> Vec<ScreenLoad> {
-    all_welcome_screen_texts()
-        .into_iter()
-        .map(|(label, text)| screen_load(label, &text))
+fn tier6_screen_loads(rendered_screens: &[(&'static str, String)]) -> Vec<ScreenLoad> {
+    rendered_screens
+        .iter()
+        .map(|(label, text)| screen_load(label, text))
         .collect()
 }
 
@@ -1264,10 +1252,10 @@ fn screen_clarity(label: &'static str, text: &str) -> ScreenClarity {
     }
 }
 
-fn tier7_screen_clarities() -> Vec<ScreenClarity> {
-    all_welcome_screen_texts()
-        .into_iter()
-        .map(|(label, text)| screen_clarity(label, &text))
+fn tier7_screen_clarities(rendered_screens: &[(&'static str, String)]) -> Vec<ScreenClarity> {
+    rendered_screens
+        .iter()
+        .map(|(label, text)| screen_clarity(label, text))
         .collect()
 }
 
@@ -1721,13 +1709,13 @@ struct Tier10Metrics {
     logical_reading_order: bool,
 }
 
-fn tier10_metrics() -> Tier10Metrics {
+fn tier10_metrics(rendered_screens: &[(&'static str, String)]) -> Tier10Metrics {
     // ---- no_unicode_dependence: scan the readable prose of each welcome screen
     // for glyphs a basic terminal/font can't render. The concern (per the
     // taxonomy) is emoji / box-drawing / private-use symbols, NOT graceful
     // typographic punctuation: an ellipsis or curly quote degrades cleanly and
     // is universally available, so it is whitelisted.
-    let max_nonascii_prose_chars = all_welcome_screen_texts()
+    let max_nonascii_prose_chars = rendered_screens
         .iter()
         .map(|(_, text)| {
             body_prose_lines(text)
@@ -1902,7 +1890,11 @@ fn tier10_score_w(m: &Tier10Metrics, w: &Tier10Weights) -> f64 {
 fn onboarding_eval_scorecard() {
     with_temp_jcode_home(|| {
         let paths = entry_paths();
-        let screens = tier3_screens();
+        // Render the five welcome screens once. Tiers 3, 4, 6, 7, and 10 all
+        // inspect the same frame text, so re-rendering per tier only added work
+        // and exposed the scorecard to animation-time drift between consumers.
+        let rendered_screens = all_welcome_screen_texts();
+        let screens = tier3_screens(&rendered_screens);
 
         // ----- Tier 0: coverage -----
         let phases = all_onboarding_phases();
@@ -1983,7 +1975,7 @@ fn onboarding_eval_scorecard() {
         let tier3 = t3_sum / screens.len() as f64;
 
         // ----- Tier 4: content & robustness (cross-screen + behavioral) -----
-        let t4 = tier4_metrics();
+        let t4 = tier4_metrics(&rendered_screens);
         let tier4 = tier4_score(&t4);
         println!("\n-- Tier 4: content & robustness --");
         let yn = |b: bool| if b { "ok" } else { "FAIL" };
@@ -2003,7 +1995,7 @@ fn onboarding_eval_scorecard() {
         println!("acyclic (DAG)          : {}", yn(t5.acyclic));
 
         // ----- Tier 6: cognitive load per screen (from real prose) -----
-        let loads = tier6_screen_loads();
+        let loads = tier6_screen_loads(&rendered_screens);
         let mut t6_sum = 0.0;
         println!("\n-- Tier 6: cognitive load (per real screen) --");
         println!(
@@ -2021,7 +2013,7 @@ fn onboarding_eval_scorecard() {
         let tier6 = t6_sum / loads.len() as f64;
 
         // ----- Tier 7: clarity & guidance (per real screen) -----
-        let clarities = tier7_screen_clarities();
+        let clarities = tier7_screen_clarities(&rendered_screens);
         let mut t7_sum = 0.0;
         println!("\n-- Tier 7: clarity & guidance (per real screen) --");
         println!(
@@ -2062,7 +2054,7 @@ fn onboarding_eval_scorecard() {
         println!("max blocker dwell (s)  : {}", t9.max_blocker_secs);
 
         // ----- Tier 10: accessibility & robustness (real buffer) -----
-        let t10 = tier10_metrics();
+        let t10 = tier10_metrics(&rendered_screens);
         let tier10 = tier10_score(&t10);
         println!("\n-- Tier 10: accessibility & robustness --");
         println!("max non-ASCII prose ch : {}", t10.max_nonascii_prose_chars);
@@ -2373,24 +2365,6 @@ fn meta_tier1_is_monotonic_in_each_signal() {
     assert!(tier1_path_score(&pm(1, 1, 2, false)) <= base_s, "ready");
     // The perfect path (0/0/1/ready) is the unique maximum.
     assert!(tier1_path_score(&pm(0, 0, 1, true)) >= base_s, "best is best");
-}
-
-#[test]
-fn meta_tier3_is_monotonic_in_each_signal() {
-    let base = sm(60, true, true, true);
-    let base_s = tier3_screen_score(&base);
-    // More words -> not higher.
-    assert!(tier3_screen_score(&sm(120, true, true, true)) <= base_s, "words");
-    // Inconsistent key hint -> not higher.
-    assert!(
-        tier3_screen_score(&sm(60, true, false, true)) <= base_s,
-        "keyhint"
-    );
-    // Losing the escape hatch -> not higher.
-    assert!(
-        tier3_screen_score(&sm(60, true, true, false)) <= base_s,
-        "escape"
-    );
 }
 
 #[test]
@@ -3069,9 +3043,15 @@ fn signal_coverage_scored_signals_are_all_live() {
     assert_ne!(tier1_path_score(&pm(1, 1, 3, true)), p);
     assert_ne!(tier1_path_score(&pm(1, 1, 2, false)), p);
     let s = tier3_screen_score(&sm(60, true, true, true));
-    assert_ne!(tier3_screen_score(&sm(80, true, true, true)), s);
-    assert_ne!(tier3_screen_score(&sm(60, true, false, true)), s);
-    assert_ne!(tier3_screen_score(&sm(60, true, true, false)), s);
+    assert!(tier3_screen_score(&sm(80, true, true, true)) < s, "word_count");
+    assert!(
+        tier3_screen_score(&sm(60, true, false, true)) < s,
+        "keyhint_consistency"
+    );
+    assert!(
+        tier3_screen_score(&sm(60, true, true, false)) < s,
+        "escape_hatch"
+    );
 
     // Tier 4 liveness: flipping each content/robustness signal must move the
     // Tier 4 score. Proves none of the four new signals are decorative.
