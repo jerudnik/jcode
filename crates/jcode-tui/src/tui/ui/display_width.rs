@@ -30,9 +30,7 @@ pub(super) fn display_col_slice(text: &str, start_col: usize, end_col: usize) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        clamp_display_col, display_col_slice, display_col_to_byte_offset, line_display_width,
-    };
+    use super::{display_col_slice, display_col_to_byte_offset};
 
     #[test]
     fn display_col_to_byte_offset_stops_before_partial_wide_char() {

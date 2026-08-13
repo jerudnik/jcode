@@ -254,8 +254,9 @@ fn test_handterm_native_scroll_client_roundtrips_over_socket() {
         let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
         crate::env::set_var("HANDTERM_NATIVE_SCROLL_SOCKET", &socket_path);
 
-        let mut client = super::handterm_native_scroll::HandtermNativeScrollClient::connect_from_env()
-            .expect("native scroll client should connect from env");
+        let mut client =
+            super::handterm_native_scroll::HandtermNativeScrollClient::connect_from_env()
+                .expect("native scroll client should connect from env");
         let (mut server, _) = listener.accept().expect("accept client");
         server
             .set_read_timeout(Some(Duration::from_secs(1)))

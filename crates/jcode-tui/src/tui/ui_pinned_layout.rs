@@ -154,38 +154,6 @@ pub(super) fn scaled_image_rows(image_h_cells: u32, zoom_percent: u16) -> u16 {
         .min(u16::MAX as u32) as u16
 }
 
-#[cfg(test)]
-pub(super) fn estimate_side_panel_image_rows_with_font(
-    width: u32,
-    height: u32,
-    available_width: u16,
-    font_size: Option<(u16, u16)>,
-) -> u16 {
-    if width == 0 || height == 0 || available_width == 0 {
-        return 0;
-    }
-
-    let (cell_w, cell_h) = font_size.unwrap_or((8, 16));
-    let cell_w = cell_w.max(1) as u32;
-    let cell_h = cell_h.max(1) as u32;
-
-    let image_w_cells = super::diagram_pane::div_ceil_u32(width.max(1), cell_w).max(1);
-    let image_h_cells = super::diagram_pane::div_ceil_u32(height.max(1), cell_h).max(1);
-    let available_width = available_width.max(1) as u32;
-
-    let fitted_h_cells = if image_w_cells > available_width {
-        super::diagram_pane::div_ceil_u32(
-            image_h_cells.saturating_mul(available_width),
-            image_w_cells,
-        )
-    } else {
-        image_h_cells
-    }
-    .max(1);
-
-    fitted_h_cells.min(u16::MAX as u32) as u16
-}
-
 pub(super) fn side_panel_viewport_scroll_x(
     img_w_px: u32,
     area_width: u16,

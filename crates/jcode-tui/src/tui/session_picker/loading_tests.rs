@@ -1,5 +1,4 @@
 use super::*;
-use std::path::Path;
 
 struct EnvVarGuard {
     key: &'static str,
@@ -28,15 +27,6 @@ impl Drop for EnvVarGuard {
             crate::env::remove_var(self.key);
         }
     }
-}
-
-fn write_picker_snapshot(path: &Path, has_messages: bool) {
-    let body = if has_messages {
-        "{\"messages\":[{\"role\":\"user\"}]}"
-    } else {
-        "{\"messages\": []}"
-    };
-    std::fs::write(path, body).expect("write picker snapshot");
 }
 
 /// Append a one-text-block message to `session`.

@@ -1488,34 +1488,34 @@ fn test_azure_login_completion_switches_local_model_without_completion() {
             model: StdArc::clone(&model),
             auth_changed: StdArc::clone(&auth_changed),
             complete_calls: StdArc::clone(&complete_calls),
-    });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut app = create_test_app_with_provider(provider);
-    app.provider_session_id = Some("stale-upstream".to_string());
-    app.session.provider_session_id = Some("stale-upstream".to_string());
-    app.session.model = Some("old-model".to_string());
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut app = create_test_app_with_provider(provider);
+        app.provider_session_id = Some("stale-upstream".to_string());
+        app.session.provider_session_id = Some("stale-upstream".to_string());
+        app.session.model = Some("old-model".to_string());
 
-    app.handle_login_completed(crate::bus::LoginCompleted {
-        provider: "Azure OpenAI".to_string(),
-        success: true,
-        message: "Azure OpenAI ready".to_string(),
-    });
+        app.handle_login_completed(crate::bus::LoginCompleted {
+            provider: "Azure OpenAI".to_string(),
+            success: true,
+            message: "Azure OpenAI ready".to_string(),
+        });
 
-    assert_eq!(&*model.lock().unwrap(), "azure-deployment");
-    assert_eq!(app.session.model.as_deref(), Some("azure-deployment"));
-    assert_eq!(app.provider_session_id, None);
-    assert_eq!(app.session.provider_session_id, None);
-    assert_eq!(auth_changed.load(Ordering::SeqCst), 1);
-    assert_eq!(complete_calls.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        std::env::var("JCODE_RUNTIME_PROVIDER").as_deref(),
-        Ok("azure-openai")
-    );
-    assert_eq!(
-        app.status_notice(),
-        Some("Checking Azure Deployment...".to_string())
-    );
+        assert_eq!(&*model.lock().unwrap(), "azure-deployment");
+        assert_eq!(app.session.model.as_deref(), Some("azure-deployment"));
+        assert_eq!(app.provider_session_id, None);
+        assert_eq!(app.session.provider_session_id, None);
+        assert_eq!(auth_changed.load(Ordering::SeqCst), 1);
+        assert_eq!(complete_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            std::env::var("JCODE_RUNTIME_PROVIDER").as_deref(),
+            Ok("azure-openai")
+        );
+        assert_eq!(
+            app.status_notice(),
+            Some("Checking Azure Deployment...".to_string())
+        );
     });
 }
 

@@ -1,4 +1,3 @@
-
 #[test]
 fn test_calculate_input_lines_single_line() {
     assert_eq!(calculate_input_lines("hello", 80), 1);
@@ -273,7 +272,10 @@ fn test_copy_badge_truncation_marks_cut_content_with_ellipsis() {
         .iter()
         .map(|span| span.content.as_ref())
         .collect();
-    assert!(text.ends_with('…'), "cut content must show ellipsis: {text:?}");
+    assert!(
+        text.ends_with('…'),
+        "cut content must show ellipsis: {text:?}"
+    );
     assert!(line.width() <= 10);
 
     // Content that fits is left intact (trailing spaces trimmed only).

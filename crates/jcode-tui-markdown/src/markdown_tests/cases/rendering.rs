@@ -212,8 +212,14 @@ fn test_math_in_table_stays_within_constrained_width() {
         .map(line_to_string)
         .collect();
 
-    assert!(rendered.iter().any(|line| line.contains("x+1")), "{rendered:?}");
-    assert!(rendered.iter().any(|line| line.contains("α₂")), "{rendered:?}");
+    assert!(
+        rendered.iter().any(|line| line.contains("x+1")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("α₂")),
+        "{rendered:?}"
+    );
     assert!(
         rendered.iter().map(|line| line.width()).max().unwrap_or(0) <= 24,
         "table math exceeded width: {rendered:?}"
@@ -229,8 +235,14 @@ fn test_math_in_list_and_blockquote_wraps_without_losing_gutter() {
         .filter(|line| !line.is_empty())
         .collect();
 
-    assert!(rendered.iter().any(|line| line.contains("x+1")), "{rendered:?}");
-    assert!(rendered.iter().any(|line| line.contains("α₂")), "{rendered:?}");
+    assert!(
+        rendered.iter().any(|line| line.contains("x+1")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("α₂")),
+        "{rendered:?}"
+    );
     assert!(
         rendered.iter().any(|line| line.starts_with("│ ")),
         "blockquote gutter was not preserved: {rendered:?}"
@@ -450,9 +462,7 @@ fn test_structured_markdown_lines_force_left_alignment() {
         "<div>html</div>"
     );
 
-    let lines = with_center_code_blocks_override(true, || {
-        render_markdown_with_width(md, Some(40))
-    });
+    let lines = with_center_code_blocks_override(true, || render_markdown_with_width(md, Some(40)));
 
     let expected = [
         "• [x] done",
@@ -594,9 +604,7 @@ fn test_centered_mode_keeps_list_markers_flush_left() {
         "   - steps\n"
     );
 
-    let lines = with_center_code_blocks_override(true, || {
-        render_markdown_with_width(md, Some(80))
-    });
+    let lines = with_center_code_blocks_override(true, || render_markdown_with_width(md, Some(80)));
 
     let numbered_1 = lines
         .iter()
@@ -650,9 +658,7 @@ fn test_centered_mode_centers_other_structured_blocks_as_blocks() {
         "| A | B |\n| - | - |\n| 1 | 2 |\n"
     );
 
-    let lines = with_center_code_blocks_override(true, || {
-        render_markdown_with_width(md, Some(50))
-    });
+    let lines = with_center_code_blocks_override(true, || render_markdown_with_width(md, Some(50)));
 
     for snippet in ["│ quoted line", "[^a]: footnote body", "• Term", "A │ B"] {
         let line = lines

@@ -543,11 +543,6 @@ fn test_notification_file_activity_repaint_does_not_leave_trailing_digit_artifac
     );
 }
 
-/// Sentinel painted directly into the backend to stand in for stale cells the
-/// renderer failed to repaint. It must not appear in any real rendered text,
-/// including the randomly chosen client identity in the header.
-const GHOST_MARKER: &str = "ZZZZ";
-
 #[test]
 fn test_remote_typing_resumes_bottom_follow_mode() {
     let mut app = create_test_app();

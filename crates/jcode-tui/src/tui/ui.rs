@@ -114,10 +114,6 @@ use diagram_pane::{
 pub(crate) use diagram_pane::{pinned_diagram_debug_json, reset_pinned_diagram_debug_snapshot};
 use file_diff_ui::active_file_diff_context;
 use file_diff_ui::draw_file_diff_view;
-#[cfg(test)]
-use file_diff_ui::{
-    FileDiffCacheKey, FileDiffViewCacheEntry, file_content_signature, file_diff_cache,
-};
 pub(crate) use header::capitalize;
 use inline_ui::{draw_inline_ui, inline_ui_height};
 pub(crate) use memory_estimates::{debug_memory_profile, debug_side_panel_memory_profile};
@@ -147,8 +143,6 @@ use pinned_ui::{
 };
 #[cfg(test)]
 use transitions::extract_line_text;
-#[cfg(test)]
-use transitions::inline_ui_gap_height;
 #[cfg(test)]
 use viewport::compute_visible_margins;
 use viewport::draw_messages;
@@ -905,66 +899,6 @@ impl BodyCacheState {
     #[cfg(test)]
     fn get_exact(&mut self, key: &BodyCacheKey) -> Option<Arc<PreparedMessages>> {
         self.get_exact_with_kind(key).map(|(prepared, _)| prepared)
-    }
-
-    #[cfg(test)]
-    fn best_incremental_base(
-        &self,
-        key: &BodyCacheKey,
-        _msg_count: usize,
-    ) -> Option<(Arc<PreparedMessages>, usize)> {
-        let regular = self
-            .entries
-            .iter()
-            .filter(|entry| {
-                entry.msg_count > 0
-                    && entry.key.width == key.width
-                    && entry.key.diff_mode == key.diff_mode
-                    && entry.key.diagram_mode == key.diagram_mode
-                    && entry.key.centered == key.centered
-                    // Anchored inline images render inside the body, and a
-                    // late-arriving image may target an already-prepared
-                    // message; only reuse bases built with the same image set.
-                    && entry.key.pin_images == key.pin_images
-                    && entry.key.inline_images_visible == key.inline_images_visible
-                    && entry.key.images_signature == key.images_signature
-                    && entry.key.expanded_images_version == key.expanded_images_version
-                    && entry.key.swarm_members_signature == key.swarm_members_signature
-            })
-            .max_by_key(|entry| entry.msg_count)
-            .map(|entry| (entry.prepared.clone(), entry.msg_count));
-        let oversized = self
-            .oversized_entries
-            .iter()
-            .filter(|entry| {
-                entry.msg_count > 0
-                    && entry.key.width == key.width
-                    && entry.key.diff_mode == key.diff_mode
-                    && entry.key.diagram_mode == key.diagram_mode
-                    && entry.key.centered == key.centered
-                    // Anchored inline images render inside the body, and a
-                    // late-arriving image may target an already-prepared
-                    // message; only reuse bases built with the same image set.
-                    && entry.key.pin_images == key.pin_images
-                    && entry.key.inline_images_visible == key.inline_images_visible
-                    && entry.key.images_signature == key.images_signature
-                    && entry.key.expanded_images_version == key.expanded_images_version
-                    && entry.key.swarm_members_signature == key.swarm_members_signature
-            })
-            .max_by_key(|entry| entry.msg_count)
-            .map(|entry| (entry.prepared.clone(), entry.msg_count));
-
-        match (regular, oversized) {
-            (Some(left), Some(right)) => {
-                if left.1 >= right.1 {
-                    Some(left)
-                } else {
-                    Some(right)
-                }
-            }
-            (Some(entry), None) | (None, Some(entry)) => Some(entry),
-            (None, None) => None,
-        }
     }
 
     fn take_best_incremental_base(

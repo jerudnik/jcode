@@ -156,33 +156,27 @@ fn test_disconnected_key_handler_runs_model_picker_locally() {
 
 #[test]
 fn test_disconnected_key_handler_runs_reload_locally() {
-    use std::time::SystemTime;
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        use std::time::SystemTime;
 
-    let mut app = create_test_app();
-    let exe = crate::build::launcher_binary_path().expect("launcher binary path");
-    let mut created = false;
-    if !exe.exists() {
+        let mut app = create_test_app();
+        let exe = crate::build::launcher_binary_path().expect("launcher binary path");
         if let Some(parent) = exe.parent() {
             std::fs::create_dir_all(parent).expect("create launcher dir");
         }
         std::fs::write(&exe, "test").expect("write launcher binary fixture");
-        created = true;
-    }
 
-    app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
-    app.input = "/reload".to_string();
-    app.cursor_pos = app.input.len();
+        app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
+        app.input = "/reload".to_string();
+        app.cursor_pos = app.input.len();
 
-    remote::handle_disconnected_key(&mut app, KeyCode::Enter, KeyModifiers::empty()).unwrap();
+        remote::handle_disconnected_key(&mut app, KeyCode::Enter, KeyModifiers::empty()).unwrap();
 
-    assert!(app.input.is_empty());
-    assert!(app.queued_messages().is_empty());
-    assert!(app.reload_requested.is_some());
-    assert!(app.should_quit);
-
-    if created {
-        let _ = std::fs::remove_file(&exe);
-    }
+        assert!(app.input.is_empty());
+        assert!(app.queued_messages().is_empty());
+        assert!(app.reload_requested.is_some());
+        assert!(app.should_quit);
+    });
 }
 
 #[test]

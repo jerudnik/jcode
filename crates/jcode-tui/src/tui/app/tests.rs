@@ -363,7 +363,8 @@ fn harness_caused_kv_cache_miss_pushes_in_chat_alarm() {
         ];
 
         // Baseline captured last turn with a *different* system static hash.
-        let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
+        let baseline_signature =
+            App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
         let session_id = app.kv_cache_session_id();
         // Match the live provider/model exactly so the miss is classified as a
         // harness system change rather than a provider/model switch.
@@ -418,7 +419,8 @@ fn documented_invalidation_downgrades_kv_cache_alarm_to_attribution() {
             Message::assistant_text("first answer"),
             Message::user("second prompt"),
         ];
-        let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
+        let baseline_signature =
+            App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
         let session_id = app.kv_cache_session_id();
         let provider = app.kv_cache_provider_name();
         let model = app.kv_cache_provider_model();
@@ -445,13 +447,15 @@ fn documented_invalidation_downgrades_kv_cache_alarm_to_attribution() {
         let notice = app
             .display_messages()
             .iter()
-            .find(|message| message.role == "system" && message.content.contains("KV cache refresh"))
+            .find(|message| {
+                message.role == "system" && message.content.contains("KV cache refresh")
+            })
             .expect("documented invalidation should push an attribution notice");
         assert!(notice.content.contains("config reload"), "{notice:?}");
         assert!(
-            !app.display_messages()
-                .iter()
-                .any(|message| message.role == "system" && message.content.contains("KV cache miss")),
+            !app.display_messages().iter().any(
+                |message| message.role == "system" && message.content.contains("KV cache miss")
+            ),
             "documented invalidation must not also raise the harness alarm"
         );
 

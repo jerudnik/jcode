@@ -21,7 +21,8 @@ fn test_fast_default_on_saves_config_and_updates_session() {
 #[test]
 fn test_fast_status_shows_saved_default() {
     with_temp_jcode_home(|| {
-        crate::config::Config::set_openai_service_tier(Some("priority")).expect("save fast default");
+        crate::config::Config::set_openai_service_tier(Some("priority"))
+            .expect("save fast default");
 
         let mut app = create_fast_test_app();
         app.input = "/fast status".to_string();
@@ -52,10 +53,7 @@ fn test_alignment_command_persists_and_applies_immediately() {
 
         let last = app.display_messages().last().expect("missing response");
         assert_eq!(last.role, "system");
-        assert!(
-            last.content
-                .contains("Saved default alignment: centered")
-        );
+        assert!(last.content.contains("Saved default alignment: centered"));
     });
 }
 
@@ -72,10 +70,7 @@ fn test_alignment_status_shows_current_and_saved_defaults() {
 
         let last = app.display_messages().last().expect("missing response");
         assert_eq!(last.role, "system");
-        assert!(
-            last.content
-                .contains("Alignment is currently centered.")
-        );
+        assert!(last.content.contains("Alignment is currently centered."));
         assert!(last.content.contains("Saved default: left-aligned."));
         assert!(last.content.contains("/alignment centered"));
         assert!(last.content.contains("Alt+C"));

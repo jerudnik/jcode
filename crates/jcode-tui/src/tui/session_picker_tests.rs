@@ -1627,11 +1627,6 @@ fn benchmark_resume_op_construction_cost() {
     }
 }
 
-/// Any of the native scrollbar thumb glyphs (see `render_native_scrollbar`).
-fn contains_scrollbar_glyph(text: &str) -> bool {
-    text.contains('•') || text.contains('╷') || text.contains('╵') || text.contains('│')
-}
-
 #[test]
 fn test_preview_sticky_prompt_header_appears_after_scrolling() {
     let session = make_session_with_many_turns("sticky_header", 60);

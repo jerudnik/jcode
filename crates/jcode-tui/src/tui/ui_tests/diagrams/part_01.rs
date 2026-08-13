@@ -414,4 +414,3 @@ fn test_estimate_pinned_diagram_pane_width_various_fonts() {
     assert!(w_10x20 >= 24);
     assert!(w_16x32 >= 24);
 }
-

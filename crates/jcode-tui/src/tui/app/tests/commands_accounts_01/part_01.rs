@@ -813,8 +813,8 @@ fn test_btw_command_forks_session_with_question() {
             .expect("missing resume hint")
             .trim()
             .to_string();
-        let restored =
-            App::restore_input_for_reload(&session_id).expect("forked session should stage question");
+        let restored = App::restore_input_for_reload(&session_id)
+            .expect("forked session should stage question");
         assert_eq!(restored.input, "what did we decide about config?");
         assert!(restored.submit_on_restore);
         assert!(restored.pending_images.is_empty());

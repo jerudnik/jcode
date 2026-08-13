@@ -903,4 +903,3 @@ fn prewarm_focused_side_panel_reuses_markdown_cache_on_first_draw() {
         "expected first draw to reuse prewarmed markdown cache"
     );
 }
-

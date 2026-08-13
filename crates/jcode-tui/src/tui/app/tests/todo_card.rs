@@ -47,9 +47,7 @@ fn toggle_todo_card_moves_stale_card_to_bottom_instead_of_stacking() {
 fn todos_command_defaults_to_card_and_panel_subcommand_keeps_side_panel() {
     let mut app = create_test_app();
 
-    assert!(super::commands::handle_session_command(
-        &mut app, "/todos"
-    ));
+    assert!(super::commands::handle_session_command(&mut app, "/todos"));
     assert!(app.display_messages.iter().any(|m| m.role == "todos"));
     assert!(!app.todos_view_enabled());
 
@@ -69,9 +67,7 @@ fn todos_command_defaults_to_card_and_panel_subcommand_keeps_side_panel() {
 #[test]
 fn todo_alias_shows_card() {
     let mut app = create_test_app();
-    assert!(super::commands::handle_session_command(
-        &mut app, "/todo"
-    ));
+    assert!(super::commands::handle_session_command(&mut app, "/todo"));
     assert!(app.display_messages.iter().any(|m| m.role == "todos"));
 }
 

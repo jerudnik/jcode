@@ -875,20 +875,6 @@ fn snapshot_has_visible_conversation(path: &Path) -> Option<bool> {
 }
 
 #[cfg(test)]
-fn snapshot_bytes_look_trivial_hidden_only(bytes: &[u8]) -> bool {
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
-        return false;
-    };
-    let Some(messages) = value
-        .get("messages")
-        .and_then(|messages| messages.as_array())
-    else {
-        return false;
-    };
-    !messages.is_empty() && !messages.iter().any(message_value_is_visible_conversation)
-}
-
-#[cfg(test)]
 fn journal_has_visible_conversation(path: &Path) -> Option<bool> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -2933,35 +2919,6 @@ pub fn load_sessions_grouped() -> Result<(Vec<ServerGroup>, Vec<SessionInfo>)> {
     write_grouped_session_list_disk_cache(&sessions_dir, scan_limit, &groups, &orphan_sessions);
 
     Ok((groups, orphan_sessions))
-}
-
-/// Load only the sessions for a single external CLI (Codex or Claude Code),
-/// returned as orphan [`SessionInfo`] grouped output compatible with
-/// `SessionPicker::new_grouped`.
-///
-/// First-run onboarding's "continue where you left off" picker is filtered to a
-/// single external CLI, so the full `load_sessions_grouped` work (parsing every
-/// jcode snapshot, the other CLIs, and listing servers) is wasted there. This
-/// scoped loader keeps onboarding responsive by touching only the relevant
-/// transcripts.
-///
-/// The live onboarding flow now uses [`load_external_cli_sessions_grouped_multi`]
-/// (it shows every logged-in CLI together), so this single-CLI variant is kept
-/// only as a focused test helper.
-#[cfg(test)]
-pub(crate) fn load_external_cli_sessions_grouped(
-    cli: crate::tui::app::onboarding_flow::ExternalCli,
-) -> (Vec<ServerGroup>, Vec<SessionInfo>) {
-    use crate::tui::app::onboarding_flow::ExternalCli;
-    let scan_limit = session_scan_limit();
-    let sessions = match cli {
-        ExternalCli::Codex => load_external_codex_sessions(scan_limit),
-        ExternalCli::ClaudeCode => load_external_claude_code_sessions(scan_limit),
-        ExternalCli::Pi => load_external_pi_sessions(scan_limit),
-        ExternalCli::OpenCode => load_external_opencode_sessions(scan_limit),
-        ExternalCli::Cursor => load_external_cursor_sessions(scan_limit),
-    };
-    (Vec::new(), sessions)
 }
 
 /// Load sessions for several external CLIs at once (Codex and/or Claude Code),

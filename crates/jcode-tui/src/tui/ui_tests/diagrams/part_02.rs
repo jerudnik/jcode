@@ -241,7 +241,8 @@ fn test_current_mermaid_side_pane_auto_width_uses_most_available_space() {
         pane_width.saturating_sub(2),
         terminal_height.saturating_sub(2),
     );
-    let render_area = vcenter_fitted_image_with_font(inner, diagram.width, diagram.height, TEST_FONT);
+    let render_area =
+        vcenter_fitted_image_with_font(inner, diagram.width, diagram.height, TEST_FONT);
 
     assert!(chat_width >= min_chat_width);
     assert!(
@@ -349,4 +350,3 @@ fn test_pinned_diagram_probe_reports_full_inner_usage_in_viewport_mode() {
     assert_eq!(probe.inner_utilization.height_utilization_percent, 100.0);
     assert_eq!(probe.inner_utilization.area_utilization_percent, 100.0);
 }
-

@@ -64,7 +64,10 @@ fn test_display_message_mutations_bump_version() {
         thought_signature: None,
     };
     let mut tool_app = create_test_app();
-    for (content, title) in [("placeholder 1", Some("old title")), ("placeholder 2", None)] {
+    for (content, title) in [
+        ("placeholder 1", Some("old title")),
+        ("placeholder 2", None),
+    ] {
         tool_app.push_display_message(DisplayMessage {
             role: "tool".to_string(),
             content: content.to_string(),
@@ -86,7 +89,11 @@ fn test_display_message_mutations_bump_version() {
             content_app,
             |name, app| {
                 assert!(app.replace_display_message_content(0, "new reconnect status".to_string()));
-                assert_eq!(app.display_messages()[0].content, "new reconnect status", "{name}");
+                assert_eq!(
+                    app.display_messages()[0].content,
+                    "new reconnect status",
+                    "{name}"
+                );
             },
             Some(|_, app| {
                 assert!(app.replace_display_message_content(0, "new reconnect status".to_string()));
@@ -108,7 +115,10 @@ fn test_display_message_mutations_bump_version() {
                     .collect::<Vec<_>>();
                 assert_eq!(
                     messages,
-                    [("placeholder 1", Some("old title")), ("final output", Some("new title"))],
+                    [
+                        ("placeholder 1", Some("old title")),
+                        ("final output", Some("new title"))
+                    ],
                     "{name}"
                 );
             },
@@ -142,7 +152,10 @@ fn test_display_message_mutations_bump_version() {
         if let Some(repeat) = repeat {
             let after_change = app.display_messages_version;
             repeat(name, &mut app);
-            assert_eq!(app.display_messages_version, after_change, "{name}: idempotence");
+            assert_eq!(
+                app.display_messages_version, after_change,
+                "{name}: idempotence"
+            );
         }
     }
 }
@@ -435,11 +448,7 @@ fn test_tool_done_preserves_sibling_streaming_tool_inputs_and_intents() {
         .display_messages()
         .iter()
         .rev()
-        .find(|dm| {
-            dm.tool_data
-                .as_ref()
-                .is_some_and(|td| td.id == "tool_b")
-        })
+        .find(|dm| dm.tool_data.as_ref().is_some_and(|td| td.id == "tool_b"))
         .expect("missing tool_b display message");
     let tool_b = tool_b_msg.tool_data.as_ref().unwrap();
     assert_eq!(tool_b.intent.as_deref(), Some("Fetch page B"));

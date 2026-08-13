@@ -286,14 +286,6 @@ fn format_duration_compact(secs: f32) -> String {
 mod tests {
     use super::*;
 
-    fn todo(status: &str, blocked: bool) -> TodoItem {
-        todo_named("x", status, &[]).tap(|t| {
-            if blocked {
-                t.blocked_by = vec!["other".to_string()];
-            }
-        })
-    }
-
     fn todo_named(content: &str, status: &str, blocked_by: &[&str]) -> TodoItem {
         TodoItem {
             content: content.to_string(),
@@ -308,14 +300,6 @@ mod tests {
             assigned_to: None,
         }
     }
-
-    trait Tap: Sized {
-        fn tap(mut self, f: impl FnOnce(&mut Self)) -> Self {
-            f(&mut self);
-            self
-        }
-    }
-    impl Tap for TodoItem {}
 
     #[test]
     fn title_includes_session_and_compact_duration() {

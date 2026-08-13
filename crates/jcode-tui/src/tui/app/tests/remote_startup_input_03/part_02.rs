@@ -239,4 +239,3 @@ fn test_reload_progress_coalesces_into_single_message() {
         "🔄 Server reload initiated...\n[init] 🔄 Starting hot-reload...\n[verify] ✓ Binary verified\n  size=68.4MB\n"
     );
 }
-

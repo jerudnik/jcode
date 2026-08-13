@@ -67,12 +67,7 @@ fn test_reload_handoff_active_when_marker_present() {
             let temp = tempfile::TempDir::new().expect("create temp dir");
             crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-            crate::server::write_reload_state(
-                "reload-marker-test",
-                "test-hash",
-                phase,
-                None,
-            );
+            crate::server::write_reload_state("reload-marker-test", "test-hash", phase, None);
 
             let state = remote::RemoteRunState::default();
 
@@ -718,7 +713,10 @@ fn test_handle_server_event_history_restores_active_resume_processing_state() {
             &mut remote,
         );
 
-        assert!(needs_redraw, "resumed session history must redraw immediately");
+        assert!(
+            needs_redraw,
+            "resumed session history must redraw immediately"
+        );
         assert!(app.is_processing());
         assert!(app.processing_started.is_some());
         assert!(app.time_since_activity().is_some());
@@ -813,7 +811,8 @@ fn test_remote_swarm_status_does_not_clobber_newer_session_history_on_disk() {
             &mut remote,
         );
 
-        let persisted = crate::session::Session::load(session_id).expect("reload persisted session");
+        let persisted =
+            crate::session::Session::load(session_id).expect("reload persisted session");
         assert_eq!(
             persisted.messages.len(),
             2,

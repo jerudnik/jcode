@@ -494,5 +494,4 @@ mod tests {
             "File activity · …/jcode/src/tool/communicate.rs"
         );
     }
-
 }

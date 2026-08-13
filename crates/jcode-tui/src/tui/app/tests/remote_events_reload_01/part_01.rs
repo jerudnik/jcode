@@ -909,7 +909,6 @@ fn test_handle_post_connect_requests_client_reload_after_server_reload_even_with
     with_temp_jcode_home(|| {
         use std::time::{Duration, SystemTime};
 
-
         let mut app = create_test_app();
         app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
         let rt = tokio::runtime::Runtime::new().unwrap();

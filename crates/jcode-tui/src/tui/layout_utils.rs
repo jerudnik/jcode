@@ -10,9 +10,3 @@ pub(crate) fn rect_from_capture(rect: RectCapture) -> Rect {
         height: rect.height,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-}

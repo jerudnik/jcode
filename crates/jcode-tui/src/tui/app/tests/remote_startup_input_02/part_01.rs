@@ -1,4 +1,3 @@
-
 #[test]
 fn test_model_picker_cursor_models_have_cursor_route() {
     let mut app = create_test_app();
@@ -449,7 +448,8 @@ fn test_handle_key_super_left_right_move_to_edges() {
         app.handle_key(KeyCode::Left, KeyModifiers::SUPER).unwrap();
         assert_eq!(app.cursor_pos(), before);
 
-        app.handle_key(KeyCode::Home, KeyModifiers::empty()).unwrap();
+        app.handle_key(KeyCode::Home, KeyModifiers::empty())
+            .unwrap();
         assert_eq!(app.cursor_pos(), 0);
 
         app.handle_key(KeyCode::End, KeyModifiers::empty()).unwrap();
@@ -639,7 +639,9 @@ fn test_submit_input_commits_pending_streaming_assistant_text_before_user_messag
             id: "tool_read".to_string(),
             name: "read".to_string(),
             input: serde_json::json!({"file_path": "src/main.rs"}),
-            intent: None, thought_signature: None, },
+            intent: None,
+            thought_signature: None,
+        },
     ));
     app.bump_display_messages_version();
     app.streaming.streaming_text = "Here is the final paragraph".to_string();
@@ -1214,7 +1216,10 @@ fn test_model_picker_effort_variant_selection_stages_effort_in_remote_mode() {
     app.handle_key(KeyCode::Enter, KeyModifiers::empty())
         .unwrap();
 
-    assert!(app.inline_interactive_state.is_none(), "picker should close");
+    assert!(
+        app.inline_interactive_state.is_none(),
+        "picker should close"
+    );
     assert!(
         app.pending_route_selection.is_some(),
         "model switch should be staged for the remote dispatcher"
@@ -1267,7 +1272,10 @@ fn test_model_picker_plain_selection_stages_no_effort_in_remote_mode() {
     app.handle_key(KeyCode::Enter, KeyModifiers::empty())
         .unwrap();
 
-    assert!(app.inline_interactive_state.is_none(), "picker should close");
+    assert!(
+        app.inline_interactive_state.is_none(),
+        "picker should close"
+    );
     assert!(
         app.pending_reasoning_effort.is_none(),
         "plain rows must not override the server's effort"

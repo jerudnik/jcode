@@ -7,7 +7,3 @@ pub(crate) fn fuzzy_score(needle: &str, haystack: &str) -> Option<i32> {
 pub(crate) fn fuzzy_match_positions(needle: &str, haystack: &str) -> Vec<usize> {
     jcode_fuzzy::command_fuzzy_match_positions(needle, haystack)
 }
-
-#[cfg(test)]
-mod tests {
-}

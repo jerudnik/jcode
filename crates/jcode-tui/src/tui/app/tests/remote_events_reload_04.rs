@@ -2255,12 +2255,8 @@ fn test_remote_fork_with_prompt_stages_split_prompt() {
             let mut remote = crate::tui::backend::RemoteConnection::dummy();
             remote.mark_history_loaded();
 
-            rt.block_on(app.handle_remote_key(
-                KeyCode::Enter,
-                KeyModifiers::empty(),
-                &mut remote,
-            ))
-            .unwrap_or_else(|e| panic!("{command}: should launch split request: {e}"));
+            rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
+                .unwrap_or_else(|e| panic!("{command}: should launch split request: {e}"));
 
             assert!(
                 app.pending_split_prompt.is_some(),

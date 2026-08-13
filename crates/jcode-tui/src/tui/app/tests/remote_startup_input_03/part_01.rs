@@ -455,39 +455,33 @@ fn test_recover_session_without_tools_preserves_debug_and_canary_flags() {
 
 #[test]
 fn test_reload_requests_exit_when_newer_binary() {
-    use std::time::{Duration, SystemTime};
+    with_temp_jcode_home(|| {
+        use std::time::{Duration, SystemTime};
 
-    let mut app = create_test_app();
-    let exe = crate::build::launcher_binary_path().unwrap();
+        let mut app = create_test_app();
+        let exe = crate::build::launcher_binary_path().unwrap();
 
-    let mut created = false;
-    if !exe.exists() {
         if let Some(parent) = exe.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&exe, "test").unwrap();
-        created = true;
-    }
 
-    app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
-    app.input = "/reload".to_string();
-    app.submit_input();
+        app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
+        app.input = "/reload".to_string();
+        app.submit_input();
 
-    assert!(app.reload_requested.is_some());
-    assert!(app.should_quit);
+        assert!(app.reload_requested.is_some());
+        assert!(app.should_quit);
 
-    // Ensure the "no newer binary" path is exercised too.
-    app.reload_requested = None;
-    app.should_quit = false;
-    app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
-    app.input = "/reload".to_string();
-    app.submit_input();
-    assert!(app.reload_requested.is_none());
-    assert!(!app.should_quit);
-
-    if created {
-        let _ = std::fs::remove_file(&exe);
-    }
+        // Ensure the "no newer binary" path is exercised too.
+        app.reload_requested = None;
+        app.should_quit = false;
+        app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
+        app.input = "/reload".to_string();
+        app.submit_input();
+        assert!(app.reload_requested.is_none());
+        assert!(!app.should_quit);
+    });
 }
 
 #[test]
