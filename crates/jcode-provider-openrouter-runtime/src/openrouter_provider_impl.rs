@@ -60,8 +60,15 @@ impl Provider for OpenRouterProvider {
                 None
             }
         });
-        let allow_reasoning = (self.supports_provider_features || kimi_coding_endpoint)
-            && thinking_enabled != Some(false);
+        // Direct DeepSeek-family routes must replay the exact reasoning returned
+        // alongside assistant tool calls. Keep this route check separate from
+        // `include_reasoning_content`: unlike Kimi, DeepSeek must not receive a
+        // synthesized blank field when no reasoning was returned.
+        let direct_deepseek_model =
+            !self.supports_provider_features && Self::model_is_deepseek_family(&model);
+        let allow_reasoning =
+            (self.supports_provider_features || kimi_coding_endpoint || direct_deepseek_model)
+                && thinking_enabled != Some(false);
         let include_reasoning_content = thinking_enabled == Some(true)
             || (allow_reasoning && Self::is_kimi_model(&model))
             || kimi_coding_endpoint;
@@ -136,12 +143,13 @@ impl Provider for OpenRouterProvider {
         let mut sent_reasoning_config = false;
         if let Some(effort) = reasoning_effort.as_deref() {
             if self.supports_deepseek_reasoning_effort() {
-                // The `swarm` sentinel maps to the strongest real effort.
-                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
-                    "max"
-                } else {
-                    effort
-                };
+                let effort = Self::normalize_deepseek_request_effort(effort);
+                if direct_deepseek_model {
+                    request["thinking"] = serde_json::json!({
+                        "type": if effort == "none" { "disabled" } else { "enabled" }
+                    });
+                    sent_reasoning_config = true;
+                }
                 if effort != "none" {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;

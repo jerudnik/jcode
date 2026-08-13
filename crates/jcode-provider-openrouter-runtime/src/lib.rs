@@ -1213,6 +1213,16 @@ impl OpenRouterProvider {
         }
     }
 
+    fn normalize_deepseek_request_effort(effort: &str) -> &str {
+        match effort {
+            "none" => "none",
+            "low" => "low",
+            "medium" | "high" => "high",
+            "max" | "swarm" | "swarm-deep" => "max",
+            _ => "max",
+        }
+    }
+
     fn normalize_unified_reasoning_effort(raw: &str) -> Option<String> {
         let value = raw.trim().to_ascii_lowercase();
         if value.is_empty() {

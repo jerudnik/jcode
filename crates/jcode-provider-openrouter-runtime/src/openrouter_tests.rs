@@ -718,6 +718,198 @@ fn kimi_for_coding_tool_call_message_includes_reasoning_content() {
 }
 
 #[test]
+fn direct_deepseek_two_tool_continuation_replays_exact_reasoning_content() {
+    let _lock = ENV_LOCK.lock();
+    let _thinking = EnvVarGuard::remove("JCODE_OPENROUTER_THINKING");
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("opencode-zen".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("deepseek-v4-pro".to_string())),
+        ..make_custom_compatible_provider()
+    };
+    provider
+        .set_reasoning_effort("medium")
+        .expect("direct DeepSeek model should accept reasoning effort");
+
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "inspect, then verify".to_string(),
+                cache_control: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "First I need the exact file contents.\nDo not alter this spacing."
+                        .to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_read".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({"path": "src/lib.rs"}),
+                    thought_signature: None,
+                },
+            ],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "call_read".to_string(),
+                content: "pub fn answer() -> u8 { 42 }".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "Now I should run the focused test exactly once.".to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_test".to_string(),
+                    name: "bash".to_string(),
+                    input: serde_json::json!({"command": "cargo test answer"}),
+                    thought_signature: None,
+                },
+            ],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "call_test".to_string(),
+                content: "test result: ok".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+    ];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    let assistant_reasoning = body["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .filter(|message| message.get("role").and_then(|value| value.as_str()) == Some("assistant"))
+        .map(|message| {
+            message
+                .get("reasoning_content")
+                .and_then(|value| value.as_str())
+                .expect("DeepSeek tool continuation must replay returned reasoning")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        assistant_reasoning,
+        vec![
+            "First I need the exact file contents.\nDo not alter this spacing.",
+            "Now I should run the focused test exactly once.",
+        ]
+    );
+    assert_eq!(body["thinking"]["type"], "enabled");
+    assert_eq!(body["reasoning_effort"], "high");
+}
+
+#[test]
+fn direct_deepseek_does_not_synthesize_blank_reasoning_content() {
+    let _lock = ENV_LOCK.lock();
+    let _thinking = EnvVarGuard::remove("JCODE_OPENROUTER_THINKING");
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("deepseek".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("deepseek-v4-flash".to_string())),
+        ..make_custom_compatible_provider()
+    };
+
+    let messages = vec![
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({"path": "README.md"}),
+                thought_signature: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "call_1".to_string(),
+                content: "contents".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+    ];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    let assistant = body["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .find(|message| message.get("role").and_then(|value| value.as_str()) == Some("assistant"))
+        .expect("assistant tool-call message");
+    assert!(
+        assistant.get("reasoning_content").is_none(),
+        "DeepSeek must not inherit Kimi's blank reasoning compatibility field: {assistant}"
+    );
+}
+
+#[test]
 fn minimax_profile_exposes_static_models_before_catalog_refresh() {
     let models = jcode_base::provider_catalog::openai_compatible_profile_static_models(
         jcode_provider_metadata::MINIMAX_PROFILE,
@@ -1327,6 +1519,23 @@ fn direct_deepseek_profile_exposes_max_reasoning_effort() {
 }
 
 #[test]
+fn direct_deepseek_request_effort_mapping_uses_supported_values() {
+    assert_eq!(
+        [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "max",
+            "swarm",
+            "swarm-deep"
+        ]
+        .map(OpenRouterProvider::normalize_deepseek_request_effort),
+        ["none", "low", "high", "high", "max", "max", "max"]
+    );
+}
+
+#[test]
 fn openrouter_profile_exposes_unified_reasoning_effort() {
     let provider = make_provider();
 
@@ -1409,6 +1618,58 @@ fn openrouter_chat_request_sends_unified_reasoning_effort() {
     assert!(
         !request.contains(r#""thinking":{"type":"enabled"}"#),
         "unified reasoning should supersede legacy thinking override: {request}"
+    );
+}
+
+#[test]
+fn openrouter_deepseek_model_does_not_receive_direct_reasoning_fields() {
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        model: Arc::new(RwLock::new("deepseek/deepseek-v4-pro".to_string())),
+        supports_model_catalog: false,
+        ..make_provider()
+    };
+    provider
+        .set_reasoning_effort("high")
+        .expect("OpenRouter unified reasoning should accept high effort");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["reasoning"]["effort"], "high");
+    assert!(
+        body.get("reasoning_effort").is_none(),
+        "real OpenRouter must not receive direct DeepSeek reasoning_effort: {body}"
+    );
+    assert!(
+        body.get("thinking").is_none(),
+        "real OpenRouter must not receive direct DeepSeek thinking config: {body}"
     );
 }
 
@@ -1574,6 +1835,10 @@ fn direct_deepseek_chat_request_sends_reasoning_effort() {
     assert!(
         request.contains(r#""reasoning_effort":"max""#),
         "DeepSeek request should include max reasoning effort: {request}"
+    );
+    assert!(
+        request.contains(r#""thinking":{"type":"enabled"}"#),
+        "DeepSeek request should explicitly enable thinking: {request}"
     );
 }
 
