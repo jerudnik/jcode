@@ -3294,6 +3294,7 @@ dependencies = [
  "jcode-provider-cursor-runtime",
  "jcode-provider-doctor",
  "jcode-provider-gemini-runtime",
+ "jcode-provider-grok-build-runtime",
  "jcode-provider-openai-runtime",
  "jcode-provider-openrouter-runtime",
  "jcode-selfdev-types",
@@ -3962,6 +3963,19 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "uuid",
+]
+
+[[package]]
+name = "jcode-provider-grok-build-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "jcode-message-types",
+ "jcode-provider-acp-runtime",
+ "jcode-provider-core",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
