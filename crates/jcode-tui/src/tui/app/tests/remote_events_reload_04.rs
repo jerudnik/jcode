@@ -2231,71 +2231,72 @@ fn test_externally_started_tool_turn_shows_running_tool_status() {
 #[test]
 fn test_remote_fork_with_prompt_stages_split_prompt() {
     with_temp_jcode_home(|| {
-        let mut app = create_test_app();
-        app.is_remote = true;
-        app.input = "/fork explore plan b".to_string();
-        app.cursor_pos = app.input.len();
-
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let _guard = rt.enter();
-        let mut remote = crate::tui::backend::RemoteConnection::dummy();
-        remote.mark_history_loaded();
 
-        rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-            .expect("/fork <prompt> should launch split request");
+        for (command, expected_prompt, child_session_id, child_session_name) in [
+            (
+                "/fork explore plan b",
+                "explore plan b",
+                "session_fork_prompt_child",
+                "fork_prompt_child",
+            ),
+            (
+                "/btw what are we doing?",
+                "what are we doing?",
+                "session_btw_child",
+                "btw_child",
+            ),
+        ] {
+            let mut app = create_test_app();
+            app.is_remote = true;
+            app.input = command.to_string();
+            app.cursor_pos = app.input.len();
+            let mut remote = crate::tui::backend::RemoteConnection::dummy();
+            remote.mark_history_loaded();
 
-        assert!(app.pending_split_prompt.is_some());
-        assert_eq!(app.pending_split_label.as_deref(), Some("Prompt"));
-        assert!(!app.pending_split_request);
+            rt.block_on(app.handle_remote_key(
+                KeyCode::Enter,
+                KeyModifiers::empty(),
+                &mut remote,
+            ))
+            .unwrap_or_else(|e| panic!("{command}: should launch split request: {e}"));
 
-        app.handle_server_event(
-            crate::protocol::ServerEvent::SplitResponse {
-                id: 1,
-                new_session_id: "session_fork_prompt_child".to_string(),
-                new_session_name: "fork_prompt_child".to_string(),
-            },
-            &mut remote,
-        );
+            assert!(
+                app.pending_split_prompt.is_some(),
+                "{command}: split prompt staged"
+            );
+            assert_eq!(
+                app.pending_split_label.as_deref(),
+                Some("Prompt"),
+                "{command}: split label"
+            );
+            assert!(
+                !app.pending_split_request,
+                "{command}: request already dispatched"
+            );
 
-        let restored = App::restore_input_for_reload("session_fork_prompt_child")
-            .expect("forked session should stage the prompt");
-        assert_eq!(restored.input, "explore plan b");
-        assert!(restored.submit_on_restore);
-        assert!(app.pending_split_prompt.is_none());
-    });
-}
+            app.handle_server_event(
+                crate::protocol::ServerEvent::SplitResponse {
+                    id: 1,
+                    new_session_id: child_session_id.to_string(),
+                    new_session_name: child_session_name.to_string(),
+                },
+                &mut remote,
+            );
 
-#[test]
-fn test_remote_btw_stages_question_in_forked_session() {
-    with_temp_jcode_home(|| {
-        let mut app = create_test_app();
-        app.is_remote = true;
-        app.input = "/btw what are we doing?".to_string();
-        app.cursor_pos = app.input.len();
-
-        let rt = tokio::runtime::Runtime::new().expect("runtime");
-        let _guard = rt.enter();
-        let mut remote = crate::tui::backend::RemoteConnection::dummy();
-        remote.mark_history_loaded();
-
-        rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-            .expect("/btw should launch split request");
-
-        assert!(app.pending_split_prompt.is_some());
-
-        app.handle_server_event(
-            crate::protocol::ServerEvent::SplitResponse {
-                id: 1,
-                new_session_id: "session_btw_child".to_string(),
-                new_session_name: "btw_child".to_string(),
-            },
-            &mut remote,
-        );
-
-        let restored = App::restore_input_for_reload("session_btw_child")
-            .expect("btw fork should stage the question");
-        assert_eq!(restored.input, "what are we doing?");
-        assert!(restored.submit_on_restore);
+            let restored = App::restore_input_for_reload(child_session_id)
+                .unwrap_or_else(|| panic!("{command}: forked session should stage the prompt"));
+            assert_eq!(restored.input, expected_prompt, "{command}: staged input");
+            assert!(
+                restored.submit_on_restore,
+                "{command}: staged prompt submits on restore"
+            );
+            assert!(
+                app.pending_split_prompt.is_none(),
+                "{command}: pending prompt cleared after split response"
+            );
+        }
     });
 }
 
