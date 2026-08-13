@@ -1472,37 +1472,22 @@ impl Drop for AzureLoginEnvGuard {
 
 #[test]
 fn test_azure_login_completion_switches_local_model_without_completion() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let _guard = AzureLoginEnvGuard::save(&[
-        "AZURE_OPENAI_ENDPOINT",
-        "AZURE_OPENAI_MODEL",
-        "AZURE_OPENAI_API_KEY",
-        "AZURE_OPENAI_USE_ENTRA",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_API_KEY_NAME",
-        "JCODE_OPENROUTER_ENV_FILE",
-        "JCODE_OPENROUTER_CACHE_NAMESPACE",
-        "JCODE_OPENROUTER_PROVIDER_FEATURES",
-        "JCODE_OPENROUTER_MODEL_CATALOG",
-        "JCODE_OPENROUTER_AUTH_HEADER",
-        "JCODE_OPENROUTER_DYNAMIC_BEARER_PROVIDER",
-        "JCODE_OPENROUTER_MODEL",
-        "JCODE_RUNTIME_PROVIDER",
-        "JCODE_ACTIVE_PROVIDER",
-        "JCODE_FORCE_PROVIDER",
-    ]);
-    crate::env::set_var("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com");
-    crate::env::set_var("AZURE_OPENAI_MODEL", "azure-deployment");
-    crate::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
-    crate::env::set_var("AZURE_OPENAI_USE_ENTRA", "0");
+    // The scope already clears (and restores) every key this test cared about:
+    // the `AZURE_OPENAI_*` names match its provider suffixes or its explicit
+    // list, and the rest are `JCODE_`-prefixed.
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com");
+        crate::env::set_var("AZURE_OPENAI_MODEL", "azure-deployment");
+        crate::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
+        crate::env::set_var("AZURE_OPENAI_USE_ENTRA", "0");
 
-    let model = StdArc::new(StdMutex::new("old-model".to_string()));
-    let auth_changed = StdArc::new(AtomicUsize::new(0));
-    let complete_calls = StdArc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn Provider> = Arc::new(AzureLoginMockProvider {
-        model: StdArc::clone(&model),
-        auth_changed: StdArc::clone(&auth_changed),
-        complete_calls: StdArc::clone(&complete_calls),
+        let model = StdArc::new(StdMutex::new("old-model".to_string()));
+        let auth_changed = StdArc::new(AtomicUsize::new(0));
+        let complete_calls = StdArc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn Provider> = Arc::new(AzureLoginMockProvider {
+            model: StdArc::clone(&model),
+            auth_changed: StdArc::clone(&auth_changed),
+            complete_calls: StdArc::clone(&complete_calls),
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
@@ -1531,6 +1516,7 @@ fn test_azure_login_completion_switches_local_model_without_completion() {
         app.status_notice(),
         Some("Checking Azure Deployment...".to_string())
     );
+    });
 }
 
 #[test]

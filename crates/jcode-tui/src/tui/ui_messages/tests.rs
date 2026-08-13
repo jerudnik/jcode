@@ -148,35 +148,28 @@ fn render_system_message_centered_mode_left_aligns_with_padding() {
 
 #[test]
 fn render_system_message_uses_width_stable_titles_on_kitty() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let prev_term_program = std::env::var("TERM_PROGRAM").ok();
-    let prev_term = std::env::var("TERM").ok();
-    crate::env::set_var("TERM_PROGRAM", "kitty");
-    crate::env::set_var("TERM", "xterm-kitty");
+    // The scope does not *clear* `TERM`/`TERM_PROGRAM` on entry (this test sets
+    // them itself), but its drop restores the whole environment snapshot, so
+    // the values survive a panicking assertion below.
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("TERM_PROGRAM", "kitty");
+        crate::env::set_var("TERM", "xterm-kitty");
 
-    let msg = DisplayMessage::system(
-        "⚡ Connection lost - retrying (attempt 2, 7s) - connection reset by server",
-    )
-    .with_title("Connection");
+        let msg = DisplayMessage::system(
+            "⚡ Connection lost - retrying (attempt 2, 7s) - connection reset by server",
+        )
+        .with_title("Connection");
 
-    let lines = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains("reconnecting"));
-    assert!(!plain.contains("⚡ reconnecting"));
-
-    match prev_term_program {
-        Some(value) => crate::env::set_var("TERM_PROGRAM", value),
-        None => crate::env::remove_var("TERM_PROGRAM"),
-    }
-    match prev_term {
-        Some(value) => crate::env::set_var("TERM", value),
-        None => crate::env::remove_var("TERM"),
-    }
+        assert!(plain.contains("reconnecting"));
+        assert!(!plain.contains("⚡ reconnecting"));
+    });
 }
 
 #[test]

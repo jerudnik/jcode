@@ -1448,139 +1448,115 @@ fn test_info_widget_remote_openai_uses_explicit_route_when_credential_is_missing
 
 #[test]
 fn test_info_widget_local_direct_api_runtime_shows_cost_based_usage() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let tracked_env = [
-        "JCODE_RUNTIME_PROVIDER",
-        "JCODE_OPENROUTER_ALLOW_NO_AUTH",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_PROVIDER_FEATURES",
-        "JCODE_OPENROUTER_TRANSPORT_STATE",
-        "JCODE_OPENROUTER_CACHE_NAMESPACE",
-        "JCODE_NAMED_PROVIDER_PROFILE",
-        "JCODE_PROVIDER_PROFILE_ACTIVE",
-        "JCODE_PROVIDER_PROFILE_NAME",
-    ];
-    let saved_env = tracked_env
-        .iter()
-        .map(|&key| (key, std::env::var_os(key)))
-        .collect::<Vec<_>>();
-    for &key in &tracked_env {
-        crate::env::remove_var(key);
-    }
+    // Every key this test depends on is `JCODE_`-prefixed, so the scope both
+    // clears it on entry (the unset state each case starts from) and restores
+    // it on exit, including on panic.
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let cases = [
+            (
+                "claude-api",
+                "anthropic",
+                "claude-sonnet-4-6",
+                crate::tui::info_widget::AuthMethod::AnthropicApiKey,
+            ),
+            (
+                "openai-api",
+                "openai",
+                "gpt-5.4",
+                crate::tui::info_widget::AuthMethod::OpenAIApiKey,
+            ),
+            (
+                "openrouter",
+                "openrouter",
+                "anthropic/claude-sonnet-4",
+                crate::tui::info_widget::AuthMethod::OpenRouterApiKey,
+            ),
+            (
+                "openai-compatible",
+                "openrouter",
+                "direct-compatible-model",
+                crate::tui::info_widget::AuthMethod::ApiKey,
+            ),
+            (
+                "openai-compatible",
+                "cerebras",
+                "gpt-oss-120b",
+                crate::tui::info_widget::AuthMethod::ApiKey,
+            ),
+            (
+                "bedrock",
+                "bedrock",
+                "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                crate::tui::info_widget::AuthMethod::ApiKey,
+            ),
+        ];
 
-    let cases = [
-        (
-            "claude-api",
-            "anthropic",
-            "claude-sonnet-4-6",
-            crate::tui::info_widget::AuthMethod::AnthropicApiKey,
-        ),
-        (
-            "openai-api",
-            "openai",
-            "gpt-5.4",
-            crate::tui::info_widget::AuthMethod::OpenAIApiKey,
-        ),
-        (
-            "openrouter",
-            "openrouter",
-            "anthropic/claude-sonnet-4",
-            crate::tui::info_widget::AuthMethod::OpenRouterApiKey,
-        ),
-        (
-            "openai-compatible",
-            "openrouter",
-            "direct-compatible-model",
-            crate::tui::info_widget::AuthMethod::ApiKey,
-        ),
-        (
-            "openai-compatible",
-            "cerebras",
-            "gpt-oss-120b",
-            crate::tui::info_widget::AuthMethod::ApiKey,
-        ),
-        (
-            "bedrock",
-            "bedrock",
-            "anthropic.claude-3-5-sonnet-20241022-v2:0",
-            crate::tui::info_widget::AuthMethod::ApiKey,
-        ),
-    ];
+        for (runtime_provider, provider_name, model, expected_auth) in cases {
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
+            crate::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
+            crate::auth::AuthStatus::invalidate_cache();
 
-    for (runtime_provider, provider_name, model, expected_auth) in cases {
-        crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
+            let mut app = create_named_provider_test_app(provider_name, model);
+            app.streaming.streaming_input_tokens = 1_000;
+            app.streaming.streaming_output_tokens = 1_000;
+            app.token_accounting.total_input_tokens = 12_000;
+            app.token_accounting.total_output_tokens = 3_400;
+            app.update_cost_impl();
+
+            assert!(
+                app.cost.total_cost > 0.0,
+                "{runtime_provider} should accrue token cost"
+            );
+
+            let data = crate::tui::TuiState::info_widget_data(&app);
+            assert_eq!(data.auth_method, expected_auth);
+            let usage = data
+                .usage_info
+                .as_ref()
+                .expect("direct API runtime usage info");
+            assert_eq!(
+                usage.provider,
+                crate::tui::info_widget::UsageProvider::CostBased
+            );
+            assert_eq!(usage.input_tokens, 12_000);
+            assert_eq!(usage.output_tokens, 3_400);
+            assert!(usage.total_cost > 0.0);
+        }
+
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "jcode");
         crate::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
-        crate::auth::AuthStatus::invalidate_cache();
-
-        let mut app = create_named_provider_test_app(provider_name, model);
+        let mut app = create_named_provider_test_app("openrouter", "subscription-model");
         app.streaming.streaming_input_tokens = 1_000;
         app.streaming.streaming_output_tokens = 1_000;
         app.token_accounting.total_input_tokens = 12_000;
         app.token_accounting.total_output_tokens = 3_400;
         app.update_cost_impl();
-
-        assert!(
-            app.cost.total_cost > 0.0,
-            "{runtime_provider} should accrue token cost"
-        );
+        assert_eq!(app.cost.total_cost, 0.0);
 
         let data = crate::tui::TuiState::info_widget_data(&app);
-        assert_eq!(data.auth_method, expected_auth);
-        let usage = data
-            .usage_info
-            .as_ref()
-            .expect("direct API runtime usage info");
         assert_eq!(
-            usage.provider,
-            crate::tui::info_widget::UsageProvider::CostBased
+            data.auth_method,
+            crate::tui::info_widget::AuthMethod::Unknown
         );
-        assert_eq!(usage.input_tokens, 12_000);
-        assert_eq!(usage.output_tokens, 3_400);
-        assert!(usage.total_cost > 0.0);
-    }
+        assert!(data.usage_info.is_none());
 
-    crate::env::set_var("JCODE_RUNTIME_PROVIDER", "jcode");
-    crate::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
-    let mut app = create_named_provider_test_app("openrouter", "subscription-model");
-    app.streaming.streaming_input_tokens = 1_000;
-    app.streaming.streaming_output_tokens = 1_000;
-    app.token_accounting.total_input_tokens = 12_000;
-    app.token_accounting.total_output_tokens = 3_400;
-    app.update_cost_impl();
-    assert_eq!(app.cost.total_cost, 0.0);
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
+        crate::env::set_var("JCODE_OPENROUTER_ALLOW_NO_AUTH", "1");
+        let mut app = create_named_provider_test_app("openrouter", "local-model");
+        app.streaming.streaming_input_tokens = 1_000;
+        app.streaming.streaming_output_tokens = 1_000;
+        app.token_accounting.total_input_tokens = 12_000;
+        app.token_accounting.total_output_tokens = 3_400;
+        app.update_cost_impl();
+        assert_eq!(app.cost.total_cost, 0.0);
 
-    let data = crate::tui::TuiState::info_widget_data(&app);
-    assert_eq!(
-        data.auth_method,
-        crate::tui::info_widget::AuthMethod::Unknown
-    );
-    assert!(data.usage_info.is_none());
-
-    crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
-    crate::env::set_var("JCODE_OPENROUTER_ALLOW_NO_AUTH", "1");
-    let mut app = create_named_provider_test_app("openrouter", "local-model");
-    app.streaming.streaming_input_tokens = 1_000;
-    app.streaming.streaming_output_tokens = 1_000;
-    app.token_accounting.total_input_tokens = 12_000;
-    app.token_accounting.total_output_tokens = 3_400;
-    app.update_cost_impl();
-    assert_eq!(app.cost.total_cost, 0.0);
-
-    let data = crate::tui::TuiState::info_widget_data(&app);
-    assert_eq!(
-        data.auth_method,
-        crate::tui::info_widget::AuthMethod::Unknown
-    );
-    assert!(data.usage_info.is_none());
-
-    for (key, value) in saved_env {
-        if let Some(value) = value {
-            crate::env::set_var(key, value);
-        } else {
-            crate::env::remove_var(key);
-        }
-    }
-    crate::auth::AuthStatus::invalidate_cache();
+        let data = crate::tui::TuiState::info_widget_data(&app);
+        assert_eq!(
+            data.auth_method,
+            crate::tui::info_widget::AuthMethod::Unknown
+        );
+        assert!(data.usage_info.is_none());
+    });
 }
 
 #[test]
@@ -1592,43 +1568,36 @@ fn test_anthropic_api_cost_accounts_for_split_cache_tokens() {
     //     subtracting them from the fresh input (double subtraction), and
     //   - bill cache-creation (cache-write) tokens, which Anthropic charges at a
     //     premium over the input rate.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let saved_runtime = std::env::var_os("JCODE_RUNTIME_PROVIDER");
-    crate::env::set_var("JCODE_RUNTIME_PROVIDER", "claude-api");
-    crate::auth::AuthStatus::invalidate_cache();
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "claude-api");
+        crate::auth::AuthStatus::invalidate_cache();
 
-    // claude-sonnet-4-6 API pricing: input $3/Mtok, output $15/Mtok,
-    // cache-read $0.30/Mtok. Cache-write (1h TTL) is billed at 2x input = $6/Mtok.
-    let mut app = create_named_provider_test_app("anthropic", "claude-sonnet-4-6");
-    crate::provider::anthropic::set_cache_ttl_1h(true);
+        // claude-sonnet-4-6 API pricing: input $3/Mtok, output $15/Mtok,
+        // cache-read $0.30/Mtok. Cache-write (1h TTL) is billed at 2x input = $6/Mtok.
+        let mut app = create_named_provider_test_app("anthropic", "claude-sonnet-4-6");
+        crate::provider::anthropic::set_cache_ttl_1h(true);
 
-    // A representative cold turn: most of the prompt is freshly written to cache,
-    // a little is read back, and only a small uncached remainder is fresh input.
-    app.streaming.streaming_input_tokens = 1_000; // uncached fresh input
-    app.streaming.streaming_cache_read_tokens = Some(40_000); // served from cache
-    app.streaming.streaming_cache_creation_tokens = Some(100_000); // written to cache (premium)
-    app.streaming.streaming_output_tokens = 2_000;
-    app.update_cost_impl();
+        // A representative cold turn: most of the prompt is freshly written to cache,
+        // a little is read back, and only a small uncached remainder is fresh input.
+        app.streaming.streaming_input_tokens = 1_000; // uncached fresh input
+        app.streaming.streaming_cache_read_tokens = Some(40_000); // served from cache
+        app.streaming.streaming_cache_creation_tokens = Some(100_000); // written to cache (premium)
+        app.streaming.streaming_output_tokens = 2_000;
+        app.update_cost_impl();
 
-    // Expected:
-    //   fresh input:    1_000  * $3   / 1e6 = $0.003
-    //   output:         2_000  * $15  / 1e6 = $0.030
-    //   cache read:    40_000  * $0.3 / 1e6 = $0.012
-    //   cache write:  100_000  * $6   / 1e6 = $0.600
-    //   total                                = $0.645
-    let expected = 0.003 + 0.030 + 0.012 + 0.600;
-    assert!(
-        (app.cost.total_cost - expected).abs() < 1e-4,
-        "anthropic split-accounting cost should be ~${expected:.4}, got ${:.4}",
-        app.cost.total_cost
-    );
-
-    if let Some(value) = saved_runtime {
-        crate::env::set_var("JCODE_RUNTIME_PROVIDER", value);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_PROVIDER");
-    }
-    crate::auth::AuthStatus::invalidate_cache();
+        // Expected:
+        //   fresh input:    1_000  * $3   / 1e6 = $0.003
+        //   output:         2_000  * $15  / 1e6 = $0.030
+        //   cache read:    40_000  * $0.3 / 1e6 = $0.012
+        //   cache write:  100_000  * $6   / 1e6 = $0.600
+        //   total                                = $0.645
+        let expected = 0.003 + 0.030 + 0.012 + 0.600;
+        assert!(
+            (app.cost.total_cost - expected).abs() < 1e-4,
+            "anthropic split-accounting cost should be ~${expected:.4}, got ${:.4}",
+            app.cost.total_cost
+        );
+    });
 }
 
 #[test]

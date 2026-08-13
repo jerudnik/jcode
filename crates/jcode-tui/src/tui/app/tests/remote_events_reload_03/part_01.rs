@@ -31,95 +31,73 @@ fn test_handle_server_event_service_tier_changed_mentions_next_request_when_stre
 
 #[test]
 fn test_reload_handoff_active_when_server_reload_flag_set() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let temp = tempfile::TempDir::new().expect("create temp dir");
+        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    let state = remote::RemoteRunState {
-        server_reload_in_progress: true,
-        ..Default::default()
-    };
+        let state = remote::RemoteRunState {
+            server_reload_in_progress: true,
+            ..Default::default()
+        };
 
-    assert!(remote::reload_handoff_active(&state));
-
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
+        assert!(remote::reload_handoff_active(&state));
+    });
 }
 
 #[test]
 fn test_reload_handoff_inactive_without_flag_or_marker() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let temp = tempfile::TempDir::new().expect("create temp dir");
+        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    let state = remote::RemoteRunState::default();
+        let state = remote::RemoteRunState::default();
 
-    assert!(!remote::reload_handoff_active(&state));
-
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
+        assert!(!remote::reload_handoff_active(&state));
+    });
 }
 
 #[test]
 fn test_reload_handoff_active_when_reload_marker_present() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let temp = tempfile::TempDir::new().expect("create temp dir");
+        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    crate::server::write_reload_state(
-        "reload-marker-test",
-        "test-hash",
-        crate::server::ReloadPhase::Starting,
-        None,
-    );
+        crate::server::write_reload_state(
+            "reload-marker-test",
+            "test-hash",
+            crate::server::ReloadPhase::Starting,
+            None,
+        );
 
-    let state = remote::RemoteRunState {
-        ..Default::default()
-    };
+        let state = remote::RemoteRunState {
+            ..Default::default()
+        };
 
-    assert!(remote::reload_handoff_active(&state));
+        assert!(remote::reload_handoff_active(&state));
 
-    crate::server::clear_reload_marker();
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
+        crate::server::clear_reload_marker();
+    });
 }
 
 #[test]
 fn test_reload_handoff_active_when_socket_ready_marker_present() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let temp = tempfile::TempDir::new().expect("create temp dir");
+        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    crate::server::write_reload_state(
-        "reload-marker-test",
-        "test-hash",
-        crate::server::ReloadPhase::SocketReady,
-        None,
-    );
+        crate::server::write_reload_state(
+            "reload-marker-test",
+            "test-hash",
+            crate::server::ReloadPhase::SocketReady,
+            None,
+        );
 
-    let state = remote::RemoteRunState::default();
+        let state = remote::RemoteRunState::default();
 
-    assert!(remote::reload_handoff_active(&state));
+        assert!(remote::reload_handoff_active(&state));
 
-    crate::server::clear_reload_marker();
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
+        crate::server::clear_reload_marker();
+    });
 }
 
 #[test]
