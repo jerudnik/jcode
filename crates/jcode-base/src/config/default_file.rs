@@ -315,10 +315,13 @@ cross_provider_failover = "countdown"
 # to match this value. Also overridable per-launch via JCODE_STREAM_IDLE_TIMEOUT_SECS.
 # stream_idle_timeout_secs = 600
 
-# Max seconds from request start until the provider opens a response stream.
-# Covers the pre-stream path: auth refresh, model catalog/pricing lookups,
-# request build, connect, and response headers. If this fires, the turn fails
-# with a diagnostic instead of hanging forever. Default: 180.
+# Max seconds from request start until the provider hands back a response
+# stream. Covers the provider setup window: failover selection, lock
+# acquisition, auth/token refresh, catalog/pricing lookups, and request build.
+# Connect, response headers, and streaming run inside the provider's spawned
+# stream task and are bounded separately (stream_idle_timeout_secs). If this
+# fires, the turn fails with a diagnostic instead of hanging forever.
+# Default: 180.
 # Overridable per-launch via JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS.
 # pre_stream_open_timeout_secs = 600
 

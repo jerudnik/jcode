@@ -118,10 +118,11 @@ impl App {
                 session_id_clone.as_deref()
             ));
 
-            // Bound the whole pre-stream path (auth refresh, catalog and
-            // pricing lookups, request build, connect, response headers).
-            // A stall in any of them previously hung the turn forever with
-            // the spinner running; fail loudly instead.
+            // Bound the provider setup window (failover selection, lock
+            // acquisition, auth refresh, catalog/pricing lookups, request
+            // build). Connect, headers, and streaming run in the spawned
+            // stream task under their own timeouts; a stall here previously
+            // hung the turn forever with the spinner running.
             let pre_stream_deadline =
                 tokio::time::sleep(crate::provider::pre_stream_open_timeout());
             tokio::pin!(pre_stream_deadline);

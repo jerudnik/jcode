@@ -2379,3 +2379,71 @@ async fn finish_evidence_turn_populates_assistant_checkpoint() {
         }
     }
 }
+
+#[tokio::test]
+async fn run_turn_streaming_mpsc_fails_turn_when_stream_never_opens() {
+    let _guard = crate::storage::lock_test_env();
+    let timeout_var = ScopedEnvVar::set("JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS", "1");
+    jcode_base::config::invalidate_config_cache();
+
+    let provider: Arc<dyn Provider> = Arc::new(DelayedProvider {
+        open_delay: Duration::from_secs(3600),
+        first_event_delay: Duration::from_secs(0),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "test".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let result =
+        tokio::time::timeout(Duration::from_secs(30), agent.run_turn_streaming_mpsc(tx)).await;
+
+    drop(timeout_var);
+    jcode_base::config::invalidate_config_cache();
+
+    let outcome = result.expect("pre-stream watchdog should end the turn within 30s");
+    let err = outcome.expect_err("turn must fail when the provider never opens a stream");
+    assert!(
+        err.to_string().contains("did not open a response stream"),
+        "unexpected error: {err:#}"
+    );
+}
+
+#[tokio::test]
+async fn run_turn_fails_turn_when_stream_never_opens() {
+    let _guard = crate::storage::lock_test_env();
+    let timeout_var = ScopedEnvVar::set("JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS", "1");
+    jcode_base::config::invalidate_config_cache();
+
+    let provider: Arc<dyn Provider> = Arc::new(DelayedProvider {
+        open_delay: Duration::from_secs(3600),
+        first_event_delay: Duration::from_secs(0),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "test".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let result = tokio::time::timeout(Duration::from_secs(30), agent.run_turn(false)).await;
+
+    drop(timeout_var);
+    jcode_base::config::invalidate_config_cache();
+
+    let outcome = result.expect("pre-stream watchdog should end the turn within 30s");
+    let err = outcome.expect_err("turn must fail when the provider never opens a stream");
+    assert!(
+        err.to_string().contains("did not open a response stream"),
+        "unexpected error: {err:#}"
+    );
+}
