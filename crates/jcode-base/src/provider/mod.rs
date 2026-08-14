@@ -143,8 +143,8 @@ use self::state::ProviderState;
 pub use self::state::{ProviderModelSelectionSource, ProviderRuntimeState, ProviderStateEvent};
 pub(crate) use active_handle::active_provider_generation;
 pub use active_handle::{
-    active_provider_fork, active_provider_fork_with_model_spec, set_active_provider,
-    stores_reasoning_content_for_context, stream_idle_timeout,
+    active_provider_fork, active_provider_fork_with_model_spec, pre_stream_open_timeout,
+    set_active_provider, stores_reasoning_content_for_context, stream_idle_timeout,
 };
 pub(super) use profile_routes::{
     configured_standard_openrouter_profile_routes, direct_openai_compatible_profile_routes,

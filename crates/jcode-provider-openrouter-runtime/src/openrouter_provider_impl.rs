@@ -41,7 +41,9 @@ impl Provider for OpenRouterProvider {
         system: &str,
         _resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
+        jcode_base::logging::info("PRESTREAM: profile complete() enter");
         let model = self.model.read().await.clone();
+        jcode_base::logging::info("PRESTREAM: profile complete() model read");
         let reasoning_effort = self.reasoning_effort();
         let thinking_override = Self::thinking_override();
         // Moonshot's dedicated Kimi coding endpoint enables thinking server-side
@@ -88,6 +90,7 @@ impl Provider for OpenRouterProvider {
 
         let mut effective_messages: Vec<Message> = messages.to_vec();
         let cache_supported = self.model_supports_cache(&model).await;
+        jcode_base::logging::info("PRESTREAM: profile complete() cache check done");
         let cache_control_added = if cache_supported {
             add_cache_breakpoint(&mut effective_messages)
         } else {

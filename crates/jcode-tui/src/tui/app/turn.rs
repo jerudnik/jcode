@@ -118,6 +118,14 @@ impl App {
                 session_id_clone.as_deref()
             ));
 
+            // Bound the whole pre-stream path (auth refresh, catalog and
+            // pricing lookups, request build, connect, response headers).
+            // A stall in any of them previously hung the turn forever with
+            // the spinner running; fail loudly instead.
+            let pre_stream_deadline =
+                tokio::time::sleep(crate::provider::pre_stream_open_timeout());
+            tokio::pin!(pre_stream_deadline);
+
             let mut stream = loop {
                 tokio::select! {
                     biased;
@@ -191,6 +199,20 @@ impl App {
                             status_spinner_renderer.draw_full(self, terminal)?;
                             super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
                         }
+                    }
+                    _ = &mut pre_stream_deadline => {
+                        let timeout = crate::provider::pre_stream_open_timeout().as_secs();
+                        crate::logging::error(&format!(
+                            "Pre-stream watchdog: provider did not open a stream within {}s; failing the turn. Last PRESTREAM waypoint in the log localizes the stall.",
+                            timeout
+                        ));
+                        self.push_display_message(DisplayMessage::system(format!(
+                            "Provider did not open a response stream within {timeout}s (pre-stream watchdog). The turn was aborted instead of hanging. Check the log for the last PRESTREAM waypoint."
+                        )));
+                        return Err(anyhow::anyhow!(
+                            "Provider did not open a response stream within {}s (pre-stream watchdog)",
+                            timeout
+                        ));
                     }
                     // Poll API call
                     result = &mut api_future => {

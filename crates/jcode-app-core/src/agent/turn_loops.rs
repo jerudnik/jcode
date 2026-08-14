@@ -113,19 +113,25 @@ impl Agent {
                 },
                 provider_correlation.clone(),
             );
-            let mut stream = match self
-                .provider
-                .complete_split(
+            // Bound the whole pre-stream path (auth refresh, catalog and
+            // pricing lookups, request build, connect, response headers).
+            // A stall in any of them previously hung the turn forever with
+            // the session stuck in "working"; fail loudly instead.
+            let pre_stream_timeout = jcode_base::provider::pre_stream_open_timeout();
+            let mut stream = match tokio::time::timeout(
+                pre_stream_timeout,
+                self.provider.complete_split(
                     send_messages,
                     &tools,
                     &split_prompt.static_part,
                     &split_prompt.dynamic_part,
                     self.provider_session_id.as_deref(),
-                )
-                .await
+                ),
+            )
+            .await
             {
-                Ok(stream) => stream,
-                Err(e) => {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(e)) => {
                     if self.try_auto_compact_after_context_limit(&e.to_string()) {
                         self.append_provider_error_response(
                             self.provider.name(),
@@ -155,6 +161,24 @@ impl Agent {
                         self.provider.model(),
                         api_start,
                         e,
+                        EvidenceErrorClass::ProviderOpen,
+                        provider_correlation.clone(),
+                    ));
+                }
+                Err(_elapsed) => {
+                    let timeout_secs = pre_stream_timeout.as_secs();
+                    logging::error(&format!(
+                        "Pre-stream watchdog: provider did not open a stream within {}s; failing the turn. Last PRESTREAM waypoint in the log localizes the stall.",
+                        timeout_secs
+                    ));
+                    return Err(self.append_and_classify_provider_error(
+                        self.provider.name(),
+                        self.provider.model(),
+                        api_start,
+                        anyhow::anyhow!(
+                            "Provider did not open a response stream within {}s (pre-stream watchdog). The turn was aborted instead of hanging. Check the log for the last PRESTREAM waypoint to localize the stall.",
+                            timeout_secs
+                        ),
                         EvidenceErrorClass::ProviderOpen,
                         provider_correlation.clone(),
                     ));

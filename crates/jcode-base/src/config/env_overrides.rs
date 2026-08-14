@@ -726,6 +726,13 @@ impl Config {
                 }
             }
         }
+        if let Ok(v) = std::env::var("JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS") {
+            if let Ok(parsed) = v.trim().parse::<u64>() {
+                if parsed > 0 {
+                    self.provider.pre_stream_open_timeout_secs = parsed;
+                }
+            }
+        }
 
         // Copilot premium mode: env var overrides config
         // If set in config but not in env, propagate config -> env

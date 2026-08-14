@@ -209,10 +209,36 @@ impl Agent {
                     &split_prompt.dynamic_part,
                     resume_session_id.as_deref(),
                 ));
+                // Bound the whole pre-stream path (auth refresh, catalog and
+                // pricing lookups, request build, connect, response headers).
+                // A stall in any of them previously hung the turn forever with
+                // the session stuck in "working"; fail loudly instead.
+                let pre_stream_deadline =
+                    tokio::time::sleep(jcode_base::provider::pre_stream_open_timeout());
+                tokio::pin!(pre_stream_deadline);
                 loop {
                     tokio::select! {
                         _ = keepalive.tick() => {
                             send_stream_keepalive_mpsc(&event_tx);
+                        }
+                        _ = &mut pre_stream_deadline => {
+                            let timeout =
+                                jcode_base::provider::pre_stream_open_timeout().as_secs();
+                            logging::error(&format!(
+                                "Pre-stream watchdog: provider did not open a stream within {}s; failing the turn. Last PRESTREAM waypoint in the log localizes the stall.",
+                                timeout
+                            ));
+                            return Err(self.append_and_classify_provider_error(
+                                provider.name(),
+                                provider.model(),
+                                api_start,
+                                anyhow::anyhow!(
+                                    "Provider did not open a response stream within {}s (pre-stream watchdog). The turn was aborted instead of hanging. Check the log for the last PRESTREAM waypoint to localize the stall.",
+                                    timeout
+                                ),
+                                EvidenceErrorClass::ProviderOpen,
+                                provider_correlation.clone(),
+                            ));
                         }
                         _ = self.graceful_shutdown.notified() => {
                             logging::info(

@@ -66,6 +66,21 @@ pub fn stream_idle_timeout() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
+/// Provider-agnostic pre-stream watchdog: max seconds from request start to
+/// stream open before the turn fails with a diagnostic instead of hanging
+/// forever. Covers the whole pre-stream path (auth refresh, catalog/pricing
+/// lookups, request build, connect, response headers). Resolved from
+/// `[provider] pre_stream_open_timeout_secs` / `JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS`
+/// (default 180). The generous default accommodates a worst-case OAuth refresh
+/// (3 x 30s attempts with backoff) plus a catalog fetch on cold start.
+pub fn pre_stream_open_timeout() -> std::time::Duration {
+    let secs = crate::config::config()
+        .provider
+        .pre_stream_open_timeout_secs
+        .max(1);
+    std::time::Duration::from_secs(secs)
+}
+
 /// Whether reasoning deltas should be persisted in session history for later
 /// provider context reconstruction.
 ///
