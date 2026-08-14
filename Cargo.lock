@@ -3971,10 +3971,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "futures",
  "jcode-message-types",
  "jcode-provider-acp-runtime",
  "jcode-provider-core",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

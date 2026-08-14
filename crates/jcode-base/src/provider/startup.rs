@@ -1,6 +1,18 @@
 use super::*;
 
 impl MultiProvider {
+    pub(super) fn grok_build_provider_for_auth_status(
+        auth_status: &auth::AuthStatus,
+    ) -> Option<Arc<dyn Provider>> {
+        if !auth_status
+            .assessment_for_provider(crate::provider_catalog::GROK_BUILD_LOGIN_PROVIDER)
+            .is_available()
+        {
+            return None;
+        }
+        external::instantiate_expected_external_provider(external::GROK_BUILD_RUNTIME)
+    }
+
     pub(super) fn spawn_post_auth_model_refresh(
         provider: Arc<dyn Provider>,
         provider_label: &'static str,
@@ -206,6 +218,17 @@ impl MultiProvider {
             None
         };
 
+        // Grok Build is an isolated ACP execution slot. Install it when the
+        // official CLI and cached subscription login are both available so a
+        // fresh session can discover its live model catalog. Do not mark the
+        // slot active here: login must not silently change the user's model.
+        let grok_build_provider =
+            Self::grok_build_provider_for_auth_status(provider_state.auth_status());
+        let mut openai_compatible_profiles = HashMap::new();
+        if let Some(grok) = grok_build_provider.as_ref() {
+            openai_compatible_profiles.insert(GROK_BUILD_PROFILE_ID.to_string(), Arc::clone(grok));
+        }
+
         let copilot_premium_zero = matches!(
             std::env::var("JCODE_COPILOT_PREMIUM").ok().as_deref(),
             Some("0")
@@ -289,7 +312,7 @@ impl MultiProvider {
             cursor: RwLock::new(cursor_provider),
             bedrock: RwLock::new(bedrock_provider),
             openrouter: RwLock::new(openrouter),
-            openai_compatible_profiles: RwLock::new(HashMap::new()),
+            openai_compatible_profiles: RwLock::new(openai_compatible_profiles),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(active),
             use_claude_cli,
@@ -313,6 +336,9 @@ impl MultiProvider {
 
         result.spawn_anthropic_catalog_refresh_if_needed();
         result.spawn_openai_catalog_refresh_if_needed();
+        if let Some(grok) = grok_build_provider {
+            Self::spawn_post_auth_model_refresh(grok, "Grok Build");
+        }
         result.auto_select_active_multi_account();
         crate::logging::info(&format!(
             "[TIMING] provider_init: claude={}, anthropic={}, openai={}, copilot={}, antigravity={}, gemini={}, cursor={}, bedrock={}, openrouter={}, total={}ms",

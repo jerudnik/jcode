@@ -140,6 +140,12 @@ fn auto_scriptable_flow_reason_skips_when_scriptable_input_already_explicit() {
 }
 
 #[test]
+fn grok_build_no_browser_selects_cli_device_auth() {
+    assert_eq!(grok_build_login_args(false), ["login"]);
+    assert_eq!(grok_build_login_args(true), ["login", "--device-auth"]);
+}
+
+#[test]
 fn minimax_region_choices_are_canonicalized() {
     assert_eq!(
         canonical_minimax_region("international").unwrap(),

@@ -296,6 +296,9 @@ pub async fn run_login_provider(
             LoginProviderTarget::OpenAiApiKey => {
                 login_openai_api_key_flow().map(|_| LoginFlowOutcome::Completed)
             }
+            LoginProviderTarget::GrokBuild => login_grok_build_flow(options.no_browser)
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenRouter => {
                 login_openrouter_flow().map(|_| LoginFlowOutcome::Completed)
             }
@@ -410,6 +413,44 @@ pub async fn run_login_provider(
     maybe_persist_default_provider_after_login(provider, &options);
     notify_running_server_auth_changed_best_effort(Some(provider.id)).await;
     Ok(())
+}
+
+async fn login_grok_build_flow(device_auth: bool) -> Result<()> {
+    if !crate::auth::grok_build::cli_available() {
+        anyhow::bail!(crate::auth::grok_build::runtime_not_installed_hint());
+    }
+    let cli = crate::auth::grok_build::cli_path();
+    let mut command = tokio::process::Command::new(&cli);
+    command.args(grok_build_login_args(device_auth));
+    let status = command
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to launch '{}'. {}",
+                cli.display(),
+                crate::auth::grok_build::runtime_not_installed_hint()
+            )
+        })?;
+    if !status.success() {
+        let suffix = if device_auth { " --device-auth" } else { "" };
+        anyhow::bail!(
+            "`{} login{suffix}` exited with status {status}",
+            cli.display()
+        );
+    }
+    Ok(())
+}
+
+fn grok_build_login_args(device_auth: bool) -> &'static [&'static str] {
+    if device_auth {
+        &["login", "--device-auth"]
+    } else {
+        &["login"]
+    }
 }
 
 fn maybe_persist_default_provider_after_login(

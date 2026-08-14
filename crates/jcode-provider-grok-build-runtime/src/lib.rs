@@ -164,10 +164,10 @@ impl AcpProviderPolicy for GrokBuildPolicy {
 fn select_subscription_auth_method(
     response: &acp::InitializeResponse,
 ) -> Result<acp::AuthMethodId> {
-    let allowed = response.auth_methods.iter().filter(|method| {
-        let id = method.id().0.as_ref().to_ascii_lowercase();
-        id != "xai.api_key" && !id.contains("api_key") && !id.contains("api-key")
-    });
+    let allowed = response
+        .auth_methods
+        .iter()
+        .filter(|method| !names_api_key(method.id().0.as_ref()) && !names_api_key(method.name()));
     for preferred in ["cached_token", "grok.com"] {
         if let Some(method) = allowed
             .clone()
@@ -179,7 +179,10 @@ fn select_subscription_auth_method(
     if let Some(method) = allowed.into_iter().find(|method| {
         let id = method.id().0.as_ref().to_ascii_lowercase();
         let name = method.name().to_ascii_lowercase();
-        id.contains("grok") || id.contains("cached") || name.contains("grok")
+        id.contains("grok")
+            || id.contains("cached")
+            || name.contains("grok")
+            || name.contains("cached")
     }) {
         return Ok(method.id().clone());
     }
@@ -197,6 +200,15 @@ fn select_subscription_auth_method(
             &advertised
         }
     )
+}
+
+fn names_api_key(value: &str) -> bool {
+    value
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .contains("apikey")
 }
 
 fn models_from_initialize(response: &acp::InitializeResponse) -> DiscoveredModels {
@@ -341,6 +353,15 @@ mod tests {
     }
 
     #[test]
+    fn api_key_name_is_rejected_even_when_the_id_looks_like_subscription_auth() {
+        let initialized = response(vec![acp::AuthMethod::Agent(acp::AuthMethodAgent::new(
+            "grok",
+            "xAI API Key",
+        ))]);
+        assert!(select_subscription_auth_method(&initialized).is_err());
+    }
+
+    #[test]
     fn cached_token_beats_grok_com() {
         let initialized = response(vec![
             acp::AuthMethod::Agent(acp::AuthMethodAgent::new("grok.com", "Grok.com")),
@@ -356,11 +377,43 @@ mod tests {
     }
 
     #[test]
+    fn cached_named_subscription_method_is_accepted() {
+        let initialized = response(vec![acp::AuthMethod::Agent(acp::AuthMethodAgent::new(
+            "session",
+            "Cached subscription",
+        ))]);
+        let action = GrokBuildPolicy::new(PathBuf::from("grok"))
+            .choose_auth(&initialized)
+            .unwrap();
+        let AcpAuthAction::Authenticate { method_id, .. } = action else {
+            panic!("expected ACP authenticate action");
+        };
+        assert_eq!(method_id.0.as_ref(), "session");
+    }
+
+    #[test]
+    fn subscription_auth_is_requested_headlessly_without_api_key_metadata() {
+        let initialized = response(vec![acp::AuthMethod::Agent(acp::AuthMethodAgent::new(
+            "cached_token",
+            "Cached token",
+        ))]);
+        let action = GrokBuildPolicy::new(PathBuf::from("grok"))
+            .choose_auth(&initialized)
+            .unwrap();
+        let AcpAuthAction::Authenticate { method_id, meta } = action else {
+            panic!("expected ACP authenticate action");
+        };
+        assert_eq!(method_id.0.as_ref(), "cached_token");
+        assert_eq!(meta.get("headless"), Some(&Value::Bool(true)));
+        assert_eq!(meta.len(), 1, "no API-key metadata may be forwarded");
+    }
+
+    #[test]
     fn model_state_accepts_string_and_object_rows() {
         let state = json!({
-            "currentModelId": "grok-4.5",
+            "currentModelId": "grok-4.6",
             "availableModels": [
-                "grok-code-fast-1",
+                "grok-4.6",
                 {"modelId": "grok-4.5"},
                 {"id": "grok-4"},
                 {"name": "grok-3"},
@@ -368,10 +421,10 @@ mod tests {
             ]
         });
         let models = models_from_value(Some(&state));
-        assert_eq!(models.current.as_deref(), Some("grok-4.5"));
+        assert_eq!(models.current.as_deref(), Some("grok-4.6"));
         assert_eq!(
             models.available,
-            ["grok-code-fast-1", "grok-4.5", "grok-4", "grok-3"]
+            ["grok-4.6", "grok-4.5", "grok-4", "grok-3"]
         );
     }
 
@@ -423,5 +476,25 @@ mod tests {
         let process = GrokBuildPolicy::new(PathBuf::from("/tmp/grok")).process();
         assert_eq!(process.command, PathBuf::from("/tmp/grok"));
         assert_eq!(process.args, ["agent", "stdio"]);
+    }
+
+    #[tokio::test]
+    async fn permission_broker_denies_by_default() {
+        let request = AcpPermissionRequest {
+            provider: PROVIDER_ID,
+            provider_session_id: "session".to_string(),
+            tool_call_id: "tool-call".to_string(),
+            title: "Edit file".to_string(),
+            kind: jcode_provider_acp_runtime::AcpToolKind::Edit,
+            raw_input: None,
+            content: Vec::new(),
+            locations: Vec::new(),
+            options: Vec::new(),
+            meta: None,
+        };
+        assert_eq!(
+            DenyPermissionBroker.decide(request).await,
+            AcpPermissionDecision::Cancel
+        );
     }
 }

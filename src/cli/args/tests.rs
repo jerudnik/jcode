@@ -24,7 +24,13 @@ fn test_provider_choice_aliases_parse() {
     assert_eq!(args.provider, ProviderChoice::TogetherAi);
 
     let args = Args::try_parse_from(["jcode", "--provider", "grok", "run", "smoke"]).unwrap();
+    assert_eq!(args.provider, ProviderChoice::GrokBuild);
+
+    let args = Args::try_parse_from(["jcode", "--provider", "x.ai", "run", "smoke"]).unwrap();
     assert_eq!(args.provider, ProviderChoice::Xai);
+
+    let args = Args::try_parse_from(["jcode", "--provider", "grok-build"]).unwrap();
+    assert_eq!(args.provider, ProviderChoice::GrokBuild);
 
     let args = Args::try_parse_from(["jcode", "--provider", "cgc", "run", "smoke"]).unwrap();
     assert_eq!(args.provider, ProviderChoice::Comtegra);
@@ -357,6 +363,14 @@ fn login_accepts_provider_positional() {
     match args.command {
         Some(Command::Login { provider, .. }) => {
             assert_eq!(provider, Some(ProviderChoice::Google));
+        }
+        other => panic!("unexpected command: {:?}", other),
+    }
+
+    let args = Args::try_parse_from(["jcode", "login", "grok"]).unwrap();
+    match args.command {
+        Some(Command::Login { provider, .. }) => {
+            assert_eq!(provider, Some(ProviderChoice::GrokBuild));
         }
         other => panic!("unexpected command: {:?}", other),
     }

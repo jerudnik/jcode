@@ -151,6 +151,8 @@ pub(super) use profile_routes::{
     standard_openrouter_profile_configured,
 };
 
+pub(crate) const GROK_BUILD_PROFILE_ID: &str = "grok-build";
+
 /// MultiProvider wraps multiple providers and allows seamless model switching
 pub struct MultiProvider {
     /// Claude Code CLI provider
@@ -474,6 +476,25 @@ impl Provider for MultiProvider {
         let requested_model = model.trim();
         if requested_model.is_empty() {
             anyhow::bail!("Model cannot be empty");
+        }
+
+        if let Some(target_model) = requested_model.strip_prefix("grok-build:") {
+            let target_model = target_model.trim();
+            if target_model.is_empty() {
+                anyhow::bail!("Grok Build model cannot be empty");
+            }
+            let registry = ProviderRegistry::new(self);
+            let provider = registry
+                .compatible_profile(GROK_BUILD_PROFILE_ID)
+                .or_else(|| {
+                    external::instantiate_expected_external_provider(external::GROK_BUILD_RUNTIME)
+                })
+                .ok_or_else(|| anyhow!("Grok Build is not authenticated"))?;
+            provider.set_model(target_model)?;
+            registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, provider);
+            registry.set_active_compatible_profile(GROK_BUILD_PROFILE_ID);
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
         }
 
         let cfg = crate::config::config();
@@ -866,7 +887,10 @@ impl Provider for MultiProvider {
                 .map(|o| o.handles_tools_internally())
                 .unwrap_or(false),
             ActiveProvider::Bedrock => false, // jcode executes Bedrock tool calls
-            ActiveProvider::OpenRouter => false, // jcode executes tools
+            ActiveProvider::OpenRouter => ProviderRegistry::new(self)
+                .active_openrouter_execution()
+                .map(|provider| provider.handles_tools_internally())
+                .unwrap_or(false),
         }
     }
 

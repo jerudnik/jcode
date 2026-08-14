@@ -485,6 +485,16 @@ impl MultiProvider {
                 Some(Arc::new(bedrock::BedrockProvider::new()));
         }
 
+        let registry = ProviderRegistry::new(self);
+        if crate::auth::grok_build::is_available()
+            && registry.compatible_profile(GROK_BUILD_PROFILE_ID).is_none()
+            && let Some(grok) =
+                external::instantiate_expected_external_provider(external::GROK_BUILD_RUNTIME)
+        {
+            crate::logging::info("Hot-initialized Grok Build provider after login");
+            registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, grok);
+        }
+
         if let Some(anthropic) = self.anthropic_provider() {
             Self::spawn_post_auth_model_refresh(anthropic, "Anthropic");
         }
@@ -508,6 +518,9 @@ impl MultiProvider {
         }
         if let Some(bedrock) = self.bedrock_provider() {
             Self::spawn_post_auth_model_refresh(bedrock, "AWS Bedrock");
+        }
+        if let Some(grok) = ProviderRegistry::new(self).compatible_profile(GROK_BUILD_PROFILE_ID) {
+            Self::spawn_post_auth_model_refresh(grok, "Grok Build");
         }
         crate::logging::auth_event("auth_changed_completed", "multi-provider", &[]);
     }
@@ -653,6 +666,13 @@ impl MultiProvider {
             ActiveProvider::Cursor => "cursor",
             ActiveProvider::Bedrock => "bedrock",
             ActiveProvider::OpenRouter => {
+                if ProviderRegistry::new(self)
+                    .active_compatible_profile_id()
+                    .as_deref()
+                    == Some(GROK_BUILD_PROFILE_ID)
+                {
+                    return format!("grok-build:{current_model}");
+                }
                 if let Some(openrouter) = self.active_openrouter_execution_provider()
                     && let Some((_provider, api_method, _detail)) =
                         openrouter.direct_openai_compatible_route_parts()

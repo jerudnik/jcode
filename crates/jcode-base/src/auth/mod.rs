@@ -13,6 +13,7 @@ pub mod external;
 pub mod gemini;
 pub mod google;
 pub(crate) mod google_oauth;
+pub mod grok_build;
 pub mod integration;
 pub mod kimi;
 pub mod lifecycle;
@@ -261,6 +262,7 @@ impl AuthStatus {
             || self.antigravity == AuthState::Available
             || self.gemini == AuthState::Available
             || self.cursor == AuthState::Available
+            || self.grok_build == AuthState::Available
     }
 
     /// Emit a structured, non-secret snapshot of which providers currently have
@@ -296,6 +298,7 @@ impl AuthStatus {
                 ("antigravity", self.antigravity.label().to_string()),
                 ("gemini", self.gemini.label().to_string()),
                 ("cursor", self.cursor.label().to_string()),
+                ("grok_build", self.grok_build.label().to_string()),
             ],
         );
     }
@@ -328,6 +331,7 @@ impl AuthStatus {
             LoginProviderAuthStateKey::Antigravity => self.antigravity,
             LoginProviderAuthStateKey::Gemini => self.gemini,
             LoginProviderAuthStateKey::Cursor => self.cursor,
+            LoginProviderAuthStateKey::GrokBuild => self.grok_build,
             LoginProviderAuthStateKey::Google => self.google,
         }
     }
@@ -385,6 +389,7 @@ impl AuthStatus {
             // Same split for OpenAI: `openai` is the ChatGPT/Codex OAuth login,
             // `openai-api` (handled above) is the API-key login.
             crate::provider_catalog::LoginProviderTarget::OpenAi => self.openai_oauth_state,
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => self.grok_build,
             crate::provider_catalog::LoginProviderTarget::Bedrock => {
                 if crate::provider::bedrock::BedrockProvider::has_credentials() {
                     AuthState::Available
@@ -461,6 +466,17 @@ impl AuthStatus {
                     }
                 } else {
                     "not configured".to_string()
+                }
+            }
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => {
+                if !grok_build::cli_available() {
+                    grok_build::runtime_not_installed_hint()
+                } else if self.grok_build == AuthState::Available {
+                    "Grok CLI cached subscription login detected; ACP validates it when the provider starts"
+                        .to_string()
+                } else {
+                    "Grok Build runtime installed; run `grok login` or `grok login --device-auth`"
+                        .to_string()
                 }
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
@@ -692,6 +708,23 @@ impl AuthStatus {
                     AuthValidationMethod::PresenceCheck,
                 )
             }
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::LocalCliSession
+                } else {
+                    AuthCredentialSource::None
+                },
+                if !grok_build::cli_available() {
+                    grok_build::runtime_not_installed_hint()
+                } else if state == AuthState::Available {
+                    "Grok CLI cached subscription login".to_string()
+                } else {
+                    "Grok CLI installed; subscription login required".to_string()
+                },
+                AuthExpiryConfidence::Unknown,
+                AuthRefreshSupport::ExternalManaged,
+                AuthValidationMethod::PresenceCheck,
+            ),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 if profile.id == crate::provider_catalog::KIMI_PROFILE.id
                     && crate::auth::kimi::has_oauth_tokens()
@@ -852,6 +885,13 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
     });
     record_auth_probe_step(&mut timings, "cursor", || {
         probe_cursor_status(&mut status, mode)
+    });
+    record_auth_probe_step(&mut timings, "grok_build", || {
+        status.grok_build = if grok_build::is_available() {
+            AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
     });
     record_auth_probe_step(&mut timings, "google", || probe_google_status(&mut status));
 
@@ -1133,6 +1173,23 @@ fn assessment_for_key(
                 AuthValidationMethod::CompositeProbe,
             )
         }
+        LoginProviderAuthStateKey::GrokBuild => (
+            if state == AuthState::Available {
+                AuthCredentialSource::LocalCliSession
+            } else {
+                AuthCredentialSource::None
+            },
+            if state == AuthState::Available {
+                "Grok CLI cached subscription login".to_string()
+            } else if grok_build::cli_available() {
+                "Grok CLI installed; subscription login required".to_string()
+            } else {
+                grok_build::runtime_not_installed_hint()
+            },
+            AuthExpiryConfidence::Unknown,
+            AuthRefreshSupport::ExternalManaged,
+            AuthValidationMethod::PresenceCheck,
+        ),
         LoginProviderAuthStateKey::Google => {
             let (source, detail) = summarize_sources(vec![google_source()]);
             (

@@ -34,6 +34,7 @@ pub enum LoginProviderTarget {
     Azure,
     OpenAiCompatible(OpenAiCompatibleProfile),
     Cursor,
+    GrokBuild,
     Copilot,
     Gemini,
     Antigravity,
@@ -53,6 +54,7 @@ pub enum LoginProviderAuthStateKey {
     Gemini,
     Antigravity,
     Cursor,
+    GrokBuild,
     Google,
 }
 
@@ -657,7 +659,11 @@ mod tests {
         );
         assert_eq!(
             resolve_login_provider("grok").map(|provider| provider.id),
-            Some("xai")
+            Some("grok-build")
+        );
+        assert_eq!(
+            resolve_login_provider("grok-subscription").map(|provider| provider.id),
+            Some("grok-build")
         );
         assert_eq!(
             resolve_login_provider("lm-studio").map(|provider| provider.id),
@@ -686,6 +692,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn grok_build_is_cli_subscription_auth_not_xai_api_key_auth() {
+        let provider = resolve_login_provider("grok-build").expect("Grok Build provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::Cli);
+        assert_eq!(
+            provider.auth_state_key,
+            LoginProviderAuthStateKey::GrokBuild
+        );
+        assert_eq!(provider.target, LoginProviderTarget::GrokBuild);
+        assert!(
+            cli_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            auth_status_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            !tui_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id),
+            "Grok Build login must stay terminal-owned"
+        );
+
+        let xai = resolve_login_provider("xai").expect("xAI API-key provider");
+        assert_eq!(xai.id, "xai");
+        assert_eq!(xai.auth_kind, LoginProviderAuthKind::ApiKey);
     }
 
     #[test]

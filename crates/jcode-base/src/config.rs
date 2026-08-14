@@ -635,6 +635,8 @@ pub struct AcpConfig {
     pub profile: String,
     /// Tool profile to request when `jcode acp` starts a daemon itself.
     pub tool_profile: String,
+    /// Explicit Grok Build CLI path for the subscription ACP runtime.
+    pub grok_cli_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AcpConfig {
@@ -642,6 +644,7 @@ impl Default for AcpConfig {
         Self {
             profile: "standard".to_string(),
             tool_profile: "acp".to_string(),
+            grok_cli_path: None,
         }
     }
 }

@@ -969,11 +969,26 @@ pub const XAI_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor 
     auth_kind: LoginProviderAuthKind::ApiKey,
     auth_state_key: LoginProviderAuthStateKey::OpenRouterLike,
     auth_status_method: "API key",
-    aliases: &["x.ai", "x-ai", "grok"],
+    aliases: &["x.ai", "x-ai"],
     menu_detail: "API key",
     recommended: false,
     target: LoginProviderTarget::OpenAiCompatible(XAI_PROFILE),
     order: LoginProviderSurfaceOrder::new(Some(33), Some(33), Some(33), Some(33), Some(33)),
+};
+
+/// Official Grok subscription through the Grok Build ACP runtime. This is
+/// intentionally separate from the `xai` API-key profile above.
+pub const GROK_BUILD_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "grok-build",
+    display_name: "Grok Build",
+    auth_kind: LoginProviderAuthKind::Cli,
+    auth_state_key: LoginProviderAuthStateKey::GrokBuild,
+    auth_status_method: "Grok subscription login",
+    aliases: &["grok", "grok-subscription"],
+    menu_detail: "Grok subscription through official Grok Build ACP",
+    recommended: false,
+    target: LoginProviderTarget::GrokBuild,
+    order: LoginProviderSurfaceOrder::new(Some(39), None, None, None, Some(39)),
 };
 
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
@@ -1124,7 +1139,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 47] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 48] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1161,6 +1176,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 47] = [
     FIREWORKS_LOGIN_PROVIDER,
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
+    GROK_BUILD_LOGIN_PROVIDER,
     NVIDIA_NIM_LOGIN_PROVIDER,
     XIAOMI_MIMO_LOGIN_PROVIDER,
     LMSTUDIO_LOGIN_PROVIDER,

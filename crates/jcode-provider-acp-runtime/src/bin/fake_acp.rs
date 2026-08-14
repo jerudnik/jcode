@@ -8,6 +8,15 @@ fn scenario() -> String {
     std::env::var("JCODE_FAKE_ACP_SCENARIO").unwrap_or_else(|_| "happy".to_string())
 }
 
+fn json_env(name: &str) -> Result<Option<Value>> {
+    std::env::var_os(name)
+        .map(|value| {
+            serde_json::from_str(&value.to_string_lossy())
+                .with_context(|| format!("parse {name} as JSON"))
+        })
+        .transpose()
+}
+
 fn append_log(value: &Value) -> Result<()> {
     let Some(path) = std::env::var_os("JCODE_FAKE_ACP_LOG") else {
         return Ok(());
@@ -179,18 +188,21 @@ fn main() -> Result<()> {
                     json!({"vendor": {"arbitrary": [1, true, null]}})
                 } else {
                     json!({
-                        "modelState": model_state("model-a"),
+                        "modelState": json_env("JCODE_FAKE_ACP_MODEL_STATE")?
+                            .unwrap_or_else(|| model_state("model-a")),
                         "vendor": {"arbitrary": [1, true, null]}
                     })
                 };
-                let auth_methods = if scenario == "auth_missing" {
-                    json!([{"id":"other", "name":"Other"}])
-                } else {
-                    json!([
-                        {"id":"other", "name":"Other"},
-                        {"id":"cached", "name":"Cached"}
-                    ])
-                };
+                let auth_methods = json_env("JCODE_FAKE_ACP_AUTH_METHODS")?.unwrap_or_else(|| {
+                    if scenario == "auth_missing" {
+                        json!([{"id":"other", "name":"Other"}])
+                    } else {
+                        json!([
+                            {"id":"other", "name":"Other"},
+                            {"id":"cached", "name":"Cached"}
+                        ])
+                    }
+                });
                 response(
                     id,
                     json!({
