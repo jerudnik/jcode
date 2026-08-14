@@ -2,16 +2,17 @@ use crate::auth::{AuthState, AuthStatus};
 
 use super::pricing::cheapness_for_route;
 use super::{
-    ALL_OPENAI_MODELS, AccountModelAvailabilityState, GROK_BUILD_PROFILE_ID, ModelRoute,
-    MultiProvider, Provider, ProviderRegistry, anthropic_api_key_route_availability,
-    anthropic_oauth_route_availability, bedrock, build_anthropic_oauth_route, build_copilot_route,
-    build_openai_api_key_route, build_openai_oauth_route, build_openrouter_auto_route,
-    build_openrouter_endpoint_route, build_openrouter_fallback_provider_route,
-    configured_standard_openrouter_profile_routes, copilot, dedupe_model_routes,
-    direct_openai_compatible_profile_routes, format_account_model_availability_detail,
-    is_listable_model_name, known_anthropic_model_ids, known_openai_model_ids,
-    model_availability_for_account, openrouter, openrouter_catalog_model_id,
-    resolve_current_model_spec, standard_openrouter_profile_configured,
+    ALL_OPENAI_MODELS, AccountModelAvailabilityState, GROK_BUILD_PROFILE_ID,
+    KIMI_CODE_ACP_PROFILE_ID, ModelRoute, MultiProvider, Provider, ProviderRegistry,
+    anthropic_api_key_route_availability, anthropic_oauth_route_availability, bedrock,
+    build_anthropic_oauth_route, build_copilot_route, build_openai_api_key_route,
+    build_openai_oauth_route, build_openrouter_auto_route, build_openrouter_endpoint_route,
+    build_openrouter_fallback_provider_route, configured_standard_openrouter_profile_routes,
+    copilot, dedupe_model_routes, direct_openai_compatible_profile_routes,
+    format_account_model_availability_detail, is_listable_model_name, known_anthropic_model_ids,
+    known_openai_model_ids, model_availability_for_account, openrouter,
+    openrouter_catalog_model_id, resolve_current_model_spec,
+    standard_openrouter_profile_configured,
 };
 
 /// Build the fast local route snapshot used by the TUI model picker while the
@@ -296,6 +297,20 @@ pub(super) fn multiprovider_model_routes(provider: &MultiProvider) -> Vec<ModelR
             route.model = format!("grok-build:{}", route.model);
             route.provider = "Grok Build".to_string();
             route.api_method = "grok-build-acp".to_string();
+            if !routes.iter().any(|existing| {
+                existing.model == route.model && existing.api_method == route.api_method
+            }) {
+                routes.push(route);
+            }
+        }
+    }
+
+    if let Some(kimi) = ProviderRegistry::new(provider).compatible_profile(KIMI_CODE_ACP_PROFILE_ID)
+    {
+        for mut route in kimi.model_routes() {
+            route.model = format!("kimi-code-acp:{}", route.model);
+            route.provider = "Kimi Code (official CLI)".to_string();
+            route.api_method = "kimi-code-acp".to_string();
             if !routes.iter().any(|existing| {
                 existing.model == route.model && existing.api_method == route.api_method
             }) {

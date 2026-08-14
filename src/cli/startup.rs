@@ -122,6 +122,21 @@ pub async fn run() -> Result<()> {
 /// discoverable as more providers move out of the base crate.
 pub fn register_external_provider_runtimes() {
     crate::provider::external::register_external_provider_fallible(
+        crate::provider::external::KIMI_CODE_ACP_RUNTIME,
+        || {
+            if !crate::auth::kimi_code_acp::cli_available()
+                || !crate::auth::kimi_code_acp::has_cli_owned_state()
+            {
+                return None;
+            }
+            Some(
+                std::sync::Arc::new(jcode_provider_kimi_acp_runtime::provider(
+                    crate::auth::kimi_code_acp::cli_path(),
+                )) as std::sync::Arc<dyn crate::provider::Provider>,
+            )
+        },
+    );
+    crate::provider::external::register_external_provider_fallible(
         crate::provider::external::GROK_BUILD_RUNTIME,
         || {
             if !crate::auth::grok_build::cli_available()
@@ -334,6 +349,9 @@ mod tests {
         // but only instantiates when the CLI and cached subscription login exist.
         assert!(crate::provider::external::external_provider_registered(
             crate::provider::external::GROK_BUILD_RUNTIME
+        ));
+        assert!(crate::provider::external::external_provider_registered(
+            crate::provider::external::KIMI_CODE_ACP_RUNTIME
         ));
     }
 }

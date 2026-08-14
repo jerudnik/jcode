@@ -42,6 +42,9 @@ pub const OPENAI_RUNTIME: &str = "openai";
 /// Registry key for Grok Build's Grok CLI ACP runtime.
 pub const GROK_BUILD_RUNTIME: &str = "grok-build";
 
+/// Registry key for the official Kimi Code CLI ACP runtime.
+pub const KIMI_CODE_ACP_RUNTIME: &str = "kimi-code-acp";
+
 /// Construction spec for the OpenRouter / OpenAI-compatible runtime family.
 /// Unlike the other providers, one concrete runtime type serves several
 /// distinct identities (the real OpenRouter aggregator, a pinned OpenRouter

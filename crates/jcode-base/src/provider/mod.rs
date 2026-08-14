@@ -152,6 +152,7 @@ pub(super) use profile_routes::{
 };
 
 pub(crate) const GROK_BUILD_PROFILE_ID: &str = "grok-build";
+pub(crate) const KIMI_CODE_ACP_PROFILE_ID: &str = "kimi-code-acp";
 
 /// MultiProvider wraps multiple providers and allows seamless model switching
 pub struct MultiProvider {
@@ -493,6 +494,27 @@ impl Provider for MultiProvider {
             provider.set_model(target_model)?;
             registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, provider);
             registry.set_active_compatible_profile(GROK_BUILD_PROFILE_ID);
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
+        }
+
+        if let Some(target_model) = requested_model.strip_prefix("kimi-code-acp:") {
+            let target_model = target_model.trim();
+            if target_model.is_empty() {
+                anyhow::bail!("Kimi Code model cannot be empty");
+            }
+            let registry = ProviderRegistry::new(self);
+            let provider = registry
+                .compatible_profile(KIMI_CODE_ACP_PROFILE_ID)
+                .or_else(|| {
+                    external::instantiate_expected_external_provider(
+                        external::KIMI_CODE_ACP_RUNTIME,
+                    )
+                })
+                .ok_or_else(|| anyhow!("Kimi Code CLI is not authenticated"))?;
+            provider.set_model(target_model)?;
+            registry.install_compatible_profile(KIMI_CODE_ACP_PROFILE_ID, provider);
+            registry.set_active_compatible_profile(KIMI_CODE_ACP_PROFILE_ID);
             self.set_active_provider(ActiveProvider::OpenRouter);
             return Ok(());
         }

@@ -98,6 +98,7 @@ impl MultiProvider {
             | LoginProviderTarget::Jcode
             | LoginProviderTarget::Azure
             | LoginProviderTarget::GrokBuild
+            | LoginProviderTarget::KimiCodeAcp
             | LoginProviderTarget::Google => None,
         }
     }

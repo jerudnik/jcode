@@ -16,6 +16,7 @@ pub(crate) mod google_oauth;
 pub mod grok_build;
 pub mod integration;
 pub mod kimi;
+pub mod kimi_code_acp;
 pub mod lifecycle;
 pub mod login_diagnostics;
 pub mod login_flows;
@@ -263,6 +264,7 @@ impl AuthStatus {
             || self.gemini == AuthState::Available
             || self.cursor == AuthState::Available
             || self.grok_build == AuthState::Available
+            || self.kimi_code_acp == AuthState::Available
     }
 
     /// Emit a structured, non-secret snapshot of which providers currently have
@@ -299,6 +301,7 @@ impl AuthStatus {
                 ("gemini", self.gemini.label().to_string()),
                 ("cursor", self.cursor.label().to_string()),
                 ("grok_build", self.grok_build.label().to_string()),
+                ("kimi_code_acp", self.kimi_code_acp.label().to_string()),
             ],
         );
     }
@@ -332,6 +335,7 @@ impl AuthStatus {
             LoginProviderAuthStateKey::Gemini => self.gemini,
             LoginProviderAuthStateKey::Cursor => self.cursor,
             LoginProviderAuthStateKey::GrokBuild => self.grok_build,
+            LoginProviderAuthStateKey::KimiCodeAcp => self.kimi_code_acp,
             LoginProviderAuthStateKey::Google => self.google,
         }
     }
@@ -390,6 +394,7 @@ impl AuthStatus {
             // `openai-api` (handled above) is the API-key login.
             crate::provider_catalog::LoginProviderTarget::OpenAi => self.openai_oauth_state,
             crate::provider_catalog::LoginProviderTarget::GrokBuild => self.grok_build,
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => self.kimi_code_acp,
             crate::provider_catalog::LoginProviderTarget::Bedrock => {
                 if crate::provider::bedrock::BedrockProvider::has_credentials() {
                     AuthState::Available
@@ -477,6 +482,16 @@ impl AuthStatus {
                 } else {
                     "Grok Build runtime installed; run `grok login` or `grok login --device-auth`"
                         .to_string()
+                }
+            }
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => {
+                if !kimi_code_acp::cli_available() {
+                    kimi_code_acp::runtime_not_installed_hint()
+                } else if self.kimi_code_acp == AuthState::Available {
+                    "Kimi Code CLI-owned login detected; ACP validates it when the provider starts"
+                        .to_string()
+                } else {
+                    kimi_code_acp::authentication_required_hint().to_string()
                 }
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
@@ -725,6 +740,17 @@ impl AuthStatus {
                 AuthRefreshSupport::ExternalManaged,
                 AuthValidationMethod::PresenceCheck,
             ),
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::LocalCliSession
+                } else {
+                    AuthCredentialSource::None
+                },
+                self.method_detail_for_provider(provider),
+                AuthExpiryConfidence::Unknown,
+                AuthRefreshSupport::ExternalManaged,
+                AuthValidationMethod::PresenceCheck,
+            ),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 if profile.id == crate::provider_catalog::KIMI_PROFILE.id
                     && crate::auth::kimi::has_oauth_tokens()
@@ -888,6 +914,13 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
     });
     record_auth_probe_step(&mut timings, "grok_build", || {
         status.grok_build = if grok_build::is_available() {
+            AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
+    });
+    record_auth_probe_step(&mut timings, "kimi_code_acp", || {
+        status.kimi_code_acp = if kimi_code_acp::is_available() {
             AuthState::Available
         } else {
             AuthState::NotConfigured
@@ -1185,6 +1218,23 @@ fn assessment_for_key(
                 "Grok CLI installed; subscription login required".to_string()
             } else {
                 grok_build::runtime_not_installed_hint()
+            },
+            AuthExpiryConfidence::Unknown,
+            AuthRefreshSupport::ExternalManaged,
+            AuthValidationMethod::PresenceCheck,
+        ),
+        LoginProviderAuthStateKey::KimiCodeAcp => (
+            if state == AuthState::Available {
+                AuthCredentialSource::LocalCliSession
+            } else {
+                AuthCredentialSource::None
+            },
+            if !kimi_code_acp::cli_available() {
+                kimi_code_acp::runtime_not_installed_hint()
+            } else if state == AuthState::Available {
+                "Kimi Code CLI-owned login/configuration".to_string()
+            } else {
+                kimi_code_acp::authentication_required_hint().to_string()
             },
             AuthExpiryConfidence::Unknown,
             AuthRefreshSupport::ExternalManaged,

@@ -26,6 +26,12 @@ fn test_provider_choice_aliases_parse() {
     let args = Args::try_parse_from(["jcode", "--provider", "grok", "run", "smoke"]).unwrap();
     assert_eq!(args.provider, ProviderChoice::GrokBuild);
 
+    let args = Args::try_parse_from(["jcode", "--provider", "kimi-code-acp"]).unwrap();
+    assert_eq!(args.provider, ProviderChoice::KimiCodeAcp);
+
+    let args = Args::try_parse_from(["jcode", "--provider", "kimi-acp"]).unwrap();
+    assert_eq!(args.provider, ProviderChoice::KimiCodeAcp);
+
     let args = Args::try_parse_from(["jcode", "--provider", "x.ai", "run", "smoke"]).unwrap();
     assert_eq!(args.provider, ProviderChoice::Xai);
 

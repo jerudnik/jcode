@@ -65,6 +65,13 @@ pub(crate) fn tool_smoke_skip_detail_for_choice(
         );
     }
 
+    if matches!(choice, super::provider_init::ProviderChoice::KimiCodeAcp) {
+        return Some(
+            "Skipped: Kimi Code executes its ACP coding-tool loop internally; basic provider smoke validates the authenticated CLI transport."
+                .to_string(),
+        );
+    }
+
     if matches!(choice, super::provider_init::ProviderChoice::Fpt) {
         let model = effective_openai_compatible_auth_test_model(
             crate::provider_catalog::FPT_PROFILE,

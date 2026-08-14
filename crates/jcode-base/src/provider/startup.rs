@@ -13,6 +13,18 @@ impl MultiProvider {
         external::instantiate_expected_external_provider(external::GROK_BUILD_RUNTIME)
     }
 
+    pub(super) fn kimi_code_acp_provider_for_auth_status(
+        auth_status: &auth::AuthStatus,
+    ) -> Option<Arc<dyn Provider>> {
+        if !auth_status
+            .assessment_for_provider(crate::provider_catalog::KIMI_CODE_ACP_LOGIN_PROVIDER)
+            .is_available()
+        {
+            return None;
+        }
+        external::instantiate_expected_external_provider(external::KIMI_CODE_ACP_RUNTIME)
+    }
+
     pub(super) fn spawn_post_auth_model_refresh(
         provider: Arc<dyn Provider>,
         provider_label: &'static str,
@@ -224,11 +236,16 @@ impl MultiProvider {
         // slot active here: login must not silently change the user's model.
         let grok_build_provider =
             Self::grok_build_provider_for_auth_status(provider_state.auth_status());
+        let kimi_code_acp_provider =
+            Self::kimi_code_acp_provider_for_auth_status(provider_state.auth_status());
         let mut openai_compatible_profiles = HashMap::new();
         if let Some(grok) = grok_build_provider.as_ref() {
             openai_compatible_profiles.insert(GROK_BUILD_PROFILE_ID.to_string(), Arc::clone(grok));
         }
-
+        if let Some(kimi) = kimi_code_acp_provider.as_ref() {
+            openai_compatible_profiles
+                .insert(KIMI_CODE_ACP_PROFILE_ID.to_string(), Arc::clone(kimi));
+        }
         let copilot_premium_zero = matches!(
             std::env::var("JCODE_COPILOT_PREMIUM").ok().as_deref(),
             Some("0")
@@ -338,6 +355,9 @@ impl MultiProvider {
         result.spawn_openai_catalog_refresh_if_needed();
         if let Some(grok) = grok_build_provider {
             Self::spawn_post_auth_model_refresh(grok, "Grok Build");
+        }
+        if let Some(kimi) = kimi_code_acp_provider {
+            Self::spawn_post_auth_model_refresh(kimi, "Kimi Code (official CLI)");
         }
         result.auto_select_active_multi_account();
         crate::logging::info(&format!(

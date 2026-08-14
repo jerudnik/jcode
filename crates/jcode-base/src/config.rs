@@ -637,6 +637,8 @@ pub struct AcpConfig {
     pub tool_profile: String,
     /// Explicit Grok Build CLI path for the subscription ACP runtime.
     pub grok_cli_path: Option<std::path::PathBuf>,
+    /// Explicit Kimi Code CLI path for the official ACP runtime.
+    pub kimi_cli_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AcpConfig {
@@ -645,6 +647,7 @@ impl Default for AcpConfig {
             profile: "standard".to_string(),
             tool_profile: "acp".to_string(),
             grok_cli_path: None,
+            kimi_cli_path: None,
         }
     }
 }

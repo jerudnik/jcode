@@ -299,6 +299,9 @@ pub async fn run_login_provider(
             LoginProviderTarget::GrokBuild => login_grok_build_flow(options.no_browser)
                 .await
                 .map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::KimiCodeAcp => login_kimi_code_acp_flow()
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenRouter => {
                 login_openrouter_flow().map(|_| LoginFlowOutcome::Completed)
             }
@@ -451,6 +454,31 @@ fn grok_build_login_args(device_auth: bool) -> &'static [&'static str] {
     } else {
         &["login"]
     }
+}
+
+async fn login_kimi_code_acp_flow() -> Result<()> {
+    if !crate::auth::kimi_code_acp::cli_available() {
+        anyhow::bail!(crate::auth::kimi_code_acp::runtime_not_installed_hint());
+    }
+    let cli = crate::auth::kimi_code_acp::cli_path();
+    let status = tokio::process::Command::new(&cli)
+        .arg("login")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to launch '{} login'. {}",
+                cli.display(),
+                crate::auth::kimi_code_acp::runtime_not_installed_hint()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("`{} login` exited with status {status}", cli.display());
+    }
+    Ok(())
 }
 
 fn maybe_persist_default_provider_after_login(

@@ -985,9 +985,17 @@ fn test_multi_provider_with_isolated_slot(
 
 fn test_multi_provider_with_grok_slot(active: bool) -> (MultiProvider, Arc<StubExternalRuntime>) {
     let grok = Arc::new(StubExternalRuntime::grok_build());
-    let grok_provider: Arc<dyn Provider> = grok.clone();
+    test_multi_provider_with_compatible_profile(GROK_BUILD_PROFILE_ID, grok, active)
+}
+
+fn test_multi_provider_with_compatible_profile(
+    profile_id: &str,
+    runtime: Arc<StubExternalRuntime>,
+    active: bool,
+) -> (MultiProvider, Arc<StubExternalRuntime>) {
+    let runtime_provider: Arc<dyn Provider> = runtime.clone();
     let mut profiles = std::collections::HashMap::new();
-    profiles.insert(GROK_BUILD_PROFILE_ID.to_string(), grok_provider);
+    profiles.insert(profile_id.to_string(), runtime_provider);
     let provider = MultiProvider {
         claude: RwLock::new(None),
         anthropic: RwLock::new(None),
@@ -999,9 +1007,7 @@ fn test_multi_provider_with_grok_slot(active: bool) -> (MultiProvider, Arc<StubE
         bedrock: RwLock::new(None),
         openrouter: RwLock::new(None),
         openai_compatible_profiles: RwLock::new(profiles),
-        active_openai_compatible_profile: RwLock::new(
-            active.then(|| GROK_BUILD_PROFILE_ID.to_string()),
-        ),
+        active_openai_compatible_profile: RwLock::new(active.then(|| profile_id.to_string())),
         active: RwLock::new(if active {
             ActiveProvider::OpenRouter
         } else {
@@ -1012,7 +1018,7 @@ fn test_multi_provider_with_grok_slot(active: bool) -> (MultiProvider, Arc<StubE
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
     };
-    (provider, grok)
+    (provider, runtime)
 }
 
 #[test]
@@ -1031,6 +1037,30 @@ fn grok_build_startup_slot_requires_available_auth_status() {
     let provider = MultiProvider::grok_build_provider_for_auth_status(&available)
         .expect("available Grok auth should install the runtime slot");
     assert_eq!(provider.name(), "grok-build");
+}
+
+#[test]
+fn kimi_code_acp_startup_slot_requires_available_auth_status() {
+    external::register_external_provider(external::KIMI_CODE_ACP_RUNTIME, || {
+        Arc::new(StubExternalRuntime::new(
+            "kimi-code-acp",
+            "Kimi Code (official CLI)",
+            "kimi-code-acp",
+            &["kimi-code/k3"],
+        ))
+    });
+
+    assert!(
+        MultiProvider::kimi_code_acp_provider_for_auth_status(&auth::AuthStatus::default())
+            .is_none()
+    );
+    let available = auth::AuthStatus {
+        kimi_code_acp: auth::AuthState::Available,
+        ..auth::AuthStatus::default()
+    };
+    let provider = MultiProvider::kimi_code_acp_provider_for_auth_status(&available)
+        .expect("available Kimi Code auth should install the runtime slot");
+    assert_eq!(provider.name(), "kimi-code-acp");
 }
 
 #[test]

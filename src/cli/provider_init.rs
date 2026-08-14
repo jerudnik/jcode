@@ -92,6 +92,8 @@ pub enum ProviderChoice {
     Xai,
     #[value(alias = "grok", alias = "grok-subscription")]
     GrokBuild,
+    #[value(alias = "kimi-acp")]
+    KimiCodeAcp,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,
     #[value(alias = "xiaomi", alias = "mimo", alias = "xiaomi-mimo-api")]
@@ -164,6 +166,7 @@ impl ProviderChoice {
             Self::Minimax => "minimax",
             Self::Xai => "xai",
             Self::GrokBuild => "grok-build",
+            Self::KimiCodeAcp => "kimi-code-acp",
             Self::NvidiaNim => "nvidia-nim",
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::Lmstudio => "lmstudio",
@@ -320,6 +323,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::GrokBuild,
         crate::provider_catalog::GROK_BUILD_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::KimiCodeAcp,
+        crate::provider_catalog::KIMI_CODE_ACP_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::NvidiaNim,
@@ -1270,6 +1277,15 @@ pub async fn login_and_bootstrap_provider(
                 anyhow::anyhow!("Grok Build runtime is not registered or authenticated")
             })?
         }
+        LoginProviderTarget::KimiCodeAcp => {
+            disable_subscription_runtime_mode();
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::KIMI_CODE_ACP_RUNTIME,
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!("Kimi Code ACP runtime is not registered or authenticated")
+            })?
+        }
         LoginProviderTarget::OpenAiApiKey => {
             disable_subscription_runtime_mode();
             lock_model_provider("openai");
@@ -1505,6 +1521,23 @@ async fn init_provider_with_options(
                 crate::provider::external::GROK_BUILD_RUNTIME,
             )
             .ok_or_else(|| anyhow::anyhow!("Grok Build runtime is not registered"))?
+        }
+        ProviderChoice::KimiCodeAcp => {
+            disable_subscription_runtime_mode();
+            if !crate::auth::kimi_code_acp::cli_available() {
+                anyhow::bail!(crate::auth::kimi_code_acp::runtime_not_installed_hint());
+            }
+            if !crate::auth::kimi_code_acp::has_cli_owned_state() {
+                anyhow::bail!(crate::auth::kimi_code_acp::authentication_required_hint());
+            }
+            init_notice("Using Kimi Code through the authenticated official CLI ACP runtime");
+            unlock_model_provider();
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "kimi-code-acp");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::KIMI_CODE_ACP_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Kimi Code ACP runtime is not registered"))?
         }
         ProviderChoice::Openrouter => {
             disable_subscription_runtime_mode();

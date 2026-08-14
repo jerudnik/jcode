@@ -48,6 +48,8 @@ pub struct AuthStatus {
     pub cursor: AuthState,
     /// Grok Build CLI installed with a cached subscription login detected
     pub grok_build: AuthState,
+    /// Kimi Code CLI installed with CLI-owned login/configuration detected
+    pub kimi_code_acp: AuthState,
     /// Google/Gmail OAuth configured
     pub google: AuthState,
     /// Google Gmail has send capability (Full tier)

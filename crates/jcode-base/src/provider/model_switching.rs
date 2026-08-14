@@ -494,6 +494,17 @@ impl MultiProvider {
             crate::logging::info("Hot-initialized Grok Build provider after login");
             registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, grok);
         }
+        if crate::auth::kimi_code_acp::is_available()
+            && registry
+                .compatible_profile(KIMI_CODE_ACP_PROFILE_ID)
+                .is_none()
+            && let Some(kimi) =
+                external::instantiate_expected_external_provider(external::KIMI_CODE_ACP_RUNTIME)
+        {
+            crate::logging::info("Hot-initialized Kimi Code ACP provider after login");
+            registry.install_compatible_profile(KIMI_CODE_ACP_PROFILE_ID, kimi);
+        }
+        {}
 
         if let Some(anthropic) = self.anthropic_provider() {
             Self::spawn_post_auth_model_refresh(anthropic, "Anthropic");
@@ -522,6 +533,11 @@ impl MultiProvider {
         if let Some(grok) = ProviderRegistry::new(self).compatible_profile(GROK_BUILD_PROFILE_ID) {
             Self::spawn_post_auth_model_refresh(grok, "Grok Build");
         }
+        if let Some(kimi) = ProviderRegistry::new(self).compatible_profile(KIMI_CODE_ACP_PROFILE_ID)
+        {
+            Self::spawn_post_auth_model_refresh(kimi, "Kimi Code (official CLI)");
+        }
+        {}
         crate::logging::auth_event("auth_changed_completed", "multi-provider", &[]);
     }
 
@@ -672,6 +688,13 @@ impl MultiProvider {
                     == Some(GROK_BUILD_PROFILE_ID)
                 {
                     return format!("grok-build:{current_model}");
+                }
+                if ProviderRegistry::new(self)
+                    .active_compatible_profile_id()
+                    .as_deref()
+                    == Some(KIMI_CODE_ACP_PROFILE_ID)
+                {
+                    return format!("kimi-code-acp:{current_model}");
                 }
                 if let Some(openrouter) = self.active_openrouter_execution_provider()
                     && let Some((_provider, api_method, _detail)) =

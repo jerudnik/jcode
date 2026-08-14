@@ -991,6 +991,21 @@ pub const GROK_BUILD_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDesc
     order: LoginProviderSurfaceOrder::new(Some(39), None, None, None, Some(39)),
 };
 
+/// Official Kimi Code subscription/CLI runtime over ACP. This is intentionally
+/// separate from the direct `kimi` OpenAI-compatible API profile.
+pub const KIMI_CODE_ACP_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "kimi-code-acp",
+    display_name: "Kimi Code (official CLI)",
+    auth_kind: LoginProviderAuthKind::Cli,
+    auth_state_key: LoginProviderAuthStateKey::KimiCodeAcp,
+    auth_status_method: "Kimi Code CLI-owned login",
+    aliases: &["kimi-acp"],
+    menu_detail: "Kimi subscription through the official Kimi Code ACP runtime",
+    recommended: false,
+    target: LoginProviderTarget::KimiCodeAcp,
+    order: LoginProviderSurfaceOrder::new(Some(41), None, None, None, Some(41)),
+};
+
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "nvidia-nim",
     display_name: "NVIDIA NIM",
@@ -1139,7 +1154,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 48] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 49] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1177,6 +1192,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 48] = [
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,
+    KIMI_CODE_ACP_LOGIN_PROVIDER,
     NVIDIA_NIM_LOGIN_PROVIDER,
     XIAOMI_MIMO_LOGIN_PROVIDER,
     LMSTUDIO_LOGIN_PROVIDER,

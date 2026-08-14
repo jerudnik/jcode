@@ -35,6 +35,7 @@ pub enum LoginProviderTarget {
     OpenAiCompatible(OpenAiCompatibleProfile),
     Cursor,
     GrokBuild,
+    KimiCodeAcp,
     Copilot,
     Gemini,
     Antigravity,
@@ -55,6 +56,7 @@ pub enum LoginProviderAuthStateKey {
     Antigravity,
     Cursor,
     GrokBuild,
+    KimiCodeAcp,
     Google,
 }
 
@@ -723,6 +725,37 @@ mod tests {
         let xai = resolve_login_provider("xai").expect("xAI API-key provider");
         assert_eq!(xai.id, "xai");
         assert_eq!(xai.auth_kind, LoginProviderAuthKind::ApiKey);
+    }
+
+    #[test]
+    fn kimi_code_acp_is_terminal_owned_cli_auth_not_kimi_api_auth() {
+        let provider = resolve_login_provider("kimi-code-acp").expect("Kimi Code ACP provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::Cli);
+        assert_eq!(
+            provider.auth_state_key,
+            LoginProviderAuthStateKey::KimiCodeAcp
+        );
+        assert_eq!(provider.target, LoginProviderTarget::KimiCodeAcp);
+        assert!(
+            cli_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            auth_status_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            !tui_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id),
+            "Kimi Code ACP login must stay terminal-owned"
+        );
+
+        let kimi_api = resolve_login_provider("kimi").expect("Kimi API provider");
+        assert_eq!(kimi_api.id, "kimi");
+        assert_ne!(kimi_api.target, LoginProviderTarget::KimiCodeAcp);
     }
 
     #[test]

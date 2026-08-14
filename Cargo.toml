@@ -62,6 +62,7 @@ members = [
     "crates/jcode-provider-openai-runtime",
     "crates/jcode-provider-acp-runtime",
     "crates/jcode-provider-grok-build-runtime",
+    "crates/jcode-provider-kimi-acp-runtime",
     "crates/jcode-provider-doctor",
     "crates/jcode-tui-markdown",
     "crates/jcode-tui-messages",
@@ -205,6 +206,7 @@ jcode-provider-openrouter-runtime = { path = "crates/jcode-provider-openrouter-r
 jcode-provider-anthropic-runtime = { path = "crates/jcode-provider-anthropic-runtime" }
 jcode-provider-openai-runtime = { path = "crates/jcode-provider-openai-runtime" }
 jcode-provider-grok-build-runtime = { path = "crates/jcode-provider-grok-build-runtime" }
+jcode-provider-kimi-acp-runtime = { path = "crates/jcode-provider-kimi-acp-runtime" }
 jcode-selfdev-types = { path = "crates/jcode-selfdev-types" }
 urlencoding = "2"
 
