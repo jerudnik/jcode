@@ -1565,9 +1565,7 @@ fn test_info_widget_local_kimi_respects_explicit_auth_mode() {
         crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
         crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
 
-        let mut app = create_named_provider_test_app("openrouter", "kimi-for-coding");
-        app.session.provider_key = Some("kimi".to_string());
-        app.session.route_api_method = Some("openai-compatible:kimi".to_string());
+        let app = create_identified_provider_test_app("openrouter", "kimi-for-coding", "kimi");
 
         crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "oauth");
         assert_eq!(
@@ -1582,14 +1580,13 @@ fn test_info_widget_local_kimi_respects_explicit_auth_mode() {
         );
 
         crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "oauth");
-        for (runtime_provider, provider_key, api_method) in [
-            ("grok-build", "grok-build", "grok-build-acp"),
-            ("kimi-code-acp", "kimi-code-acp", "kimi-code-acp"),
-            ("reasonix", "reasonix", "reasonix-acp"),
-        ] {
+        for runtime_provider in ["grok-build", "kimi-code-acp", "reasonix"] {
             crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
-            app.session.provider_key = Some(provider_key.to_string());
-            app.session.route_api_method = Some(api_method.to_string());
+            let app = create_identified_provider_test_app(
+                "openrouter",
+                "kimi-for-coding",
+                runtime_provider,
+            );
             assert_ne!(
                 crate::tui::TuiState::info_widget_data(&app).auth_method,
                 crate::tui::info_widget::AuthMethod::KimiOAuth,

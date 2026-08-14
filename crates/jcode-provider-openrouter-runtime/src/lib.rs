@@ -1701,6 +1701,18 @@ impl OpenRouterProvider {
         api_base.to_ascii_lowercase().contains("mistral.ai")
     }
 
+    fn allows_reasoning_context_replay(&self, model: &str, thinking_enabled: Option<bool>) -> bool {
+        let direct_deepseek_model =
+            !self.supports_provider_features && Self::model_is_deepseek_family(model);
+        let route_supports_replay = self.supports_provider_features
+            || self.is_kimi_coding_endpoint(model)
+            || direct_deepseek_model;
+
+        route_supports_replay
+            && thinking_enabled != Some(false)
+            && !Self::strict_openai_schema_endpoint(self.profile_id.as_deref(), &self.api_base)
+    }
+
     pub fn new() -> Result<Self> {
         let catalog_profile =
             activated_openai_compatible_profile().or_else(autodetected_openai_compatible_profile);

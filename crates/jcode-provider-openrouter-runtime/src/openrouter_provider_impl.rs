@@ -71,9 +71,7 @@ impl Provider for OpenRouterProvider {
                 .profile_id
                 .as_deref()
                 .is_some_and(|id| id.eq_ignore_ascii_case("zai"));
-        let allow_reasoning =
-            (self.supports_provider_features || kimi_coding_endpoint || direct_deepseek_model)
-                && thinking_enabled != Some(false);
+        let allow_reasoning = self.allows_reasoning_context_replay(&model, thinking_enabled);
         let include_reasoning_content = thinking_enabled == Some(true)
             || (allow_reasoning && Self::is_kimi_model(&model))
             || kimi_coding_endpoint;
@@ -85,7 +83,6 @@ impl Provider for OpenRouterProvider {
         // regardless of any thinking override (issue #261).
         let strict_openai_schema =
             Self::strict_openai_schema_endpoint(self.profile_id.as_deref(), &self.api_base);
-        let allow_reasoning = allow_reasoning && !strict_openai_schema;
         let include_reasoning_content = include_reasoning_content && !strict_openai_schema;
         let allow_image_input = self.supports_image_input();
 
@@ -352,6 +349,28 @@ impl Provider for OpenRouterProvider {
 
     fn name(&self) -> &str {
         "openrouter"
+    }
+
+    fn provider_identity(&self) -> String {
+        self.profile_id
+            .clone()
+            .unwrap_or_else(|| "openrouter".to_string())
+    }
+
+    fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        let model = self.model();
+        let thinking_enabled = Self::thinking_override().or_else(|| {
+            if Self::is_kimi_model(&model) {
+                Some(true)
+            } else {
+                None
+            }
+        });
+
+        jcode_provider_core::ProviderCapabilities {
+            reasoning_context_replay: self
+                .allows_reasoning_context_replay(&model, thinking_enabled),
+        }
     }
 
     fn display_name(&self) -> String {

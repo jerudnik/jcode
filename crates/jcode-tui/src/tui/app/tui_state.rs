@@ -283,23 +283,10 @@ impl App {
         .map(|resolved| resolved.active)
     }
 
-    fn active_openai_compatible_profile_is(
-        &self,
-        profile_id: &str,
-        runtime_provider: Option<&str>,
-    ) -> bool {
-        runtime_provider.is_some_and(|provider| provider.eq_ignore_ascii_case(profile_id))
-            || self
-                .session
-                .provider_key
-                .as_deref()
-                .is_some_and(|provider| provider.eq_ignore_ascii_case(profile_id))
-            || self
-                .session
-                .route_api_method
-                .as_deref()
-                .and_then(|method| method.strip_prefix("openai-compatible:"))
-                .is_some_and(|provider| provider.eq_ignore_ascii_case(profile_id))
+    fn active_provider_identity_is(&self, provider_id: &str) -> bool {
+        self.provider
+            .provider_identity()
+            .eq_ignore_ascii_case(provider_id)
     }
 
     fn widget_auth_method(&self, route: WidgetRouteInfo) -> crate::tui::info_widget::AuthMethod {
@@ -339,10 +326,7 @@ impl App {
                     );
                 if transport_state
                     == crate::provider::openrouter::OpenRouterTransportState::DirectApiKey
-                    && self.active_openai_compatible_profile_is(
-                        crate::provider_catalog::KIMI_PROFILE.id,
-                        runtime_provider.as_deref(),
-                    )
+                    && self.active_provider_identity_is(crate::provider_catalog::KIMI_PROFILE.id)
                     && matches!(
                         crate::auth::kimi::selected_auth_mode(),
                         Some(crate::auth::kimi::KimiAuthMode::OAuth)

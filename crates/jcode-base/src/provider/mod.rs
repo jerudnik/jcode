@@ -272,6 +272,68 @@ impl Provider for MultiProvider {
         }
     }
 
+    fn provider_identity(&self) -> String {
+        match self.active_provider() {
+            ActiveProvider::Claude => self
+                .anthropic_provider()
+                .or_else(|| self.claude_provider())
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::OpenAI => self
+                .openai_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Copilot => self
+                .copilot_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Antigravity => self
+                .antigravity_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Gemini => self
+                .gemini_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Cursor => self
+                .cursor_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Bedrock => self
+                .bedrock_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::OpenRouter => self
+                .active_openrouter_execution_provider()
+                .map(|provider| provider.provider_identity()),
+        }
+        .unwrap_or_else(|| self.name().trim().to_ascii_lowercase())
+    }
+
+    fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        match self.active_provider() {
+            ActiveProvider::Claude => self
+                .anthropic_provider()
+                .or_else(|| self.claude_provider())
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::OpenAI => self
+                .openai_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Copilot => self
+                .copilot_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Antigravity => self
+                .antigravity_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Gemini => self
+                .gemini_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Cursor => self
+                .cursor_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Bedrock => self
+                .bedrock_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::OpenRouter => self
+                .active_openrouter_execution_provider()
+                .map(|provider| provider.capabilities()),
+        }
+        .unwrap_or_default()
+    }
+
     fn display_name(&self) -> String {
         // The OpenRouter slot multiplexes the public aggregator and every
         // direct OpenAI-compatible profile (NVIDIA NIM, DeepSeek, ...). Ask the

@@ -1100,6 +1100,7 @@ fn grok_build_slot_exposes_prefixed_advertised_routes_without_becoming_active() 
 #[test]
 fn grok_build_active_route_keeps_identity_when_forking() {
     let (provider, _) = test_multi_provider_with_grok_slot(true);
+    assert_eq!(provider.provider_identity(), "grok-build");
     assert_eq!(provider.model(), "grok-4.6");
     assert!(provider.handles_tools_internally());
     assert_eq!(

@@ -85,6 +85,10 @@ impl Provider for JcodeProvider {
         "Jcode Subscription"
     }
 
+    fn provider_identity(&self) -> String {
+        "jcode".to_string()
+    }
+
     fn model(&self) -> String {
         self.selected_model
             .read()

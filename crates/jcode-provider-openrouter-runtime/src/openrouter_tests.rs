@@ -488,8 +488,8 @@ fn parse_captured_request_body(request: &str) -> serde_json::Value {
 }
 
 /// Regression for issue #321: when an assistant turn is interrupted mid-thinking
-/// on a direct OpenAI-compatible provider that does not support reasoning replay
-/// (e.g. DeepSeek), the persisted assistant message contains only a `Reasoning`
+/// on a direct OpenAI-compatible provider/model pair that does not support
+/// reasoning replay, the persisted assistant message contains only a `Reasoning`
 /// block. The request builder must not emit an assistant message that has
 /// neither `content` nor `tool_calls`, otherwise the provider rejects the whole
 /// request with 400 "Invalid assistant message: content or tool_calls must be
@@ -500,12 +500,11 @@ fn interrupted_reasoning_only_assistant_message_is_not_sent_empty() {
     let (api_base, request_rx) = spawn_single_response_chat_server();
     let provider = OpenRouterProvider {
         api_base,
-        profile_id: Some("deepseek".to_string()),
+        profile_id: Some("custom".to_string()),
         supports_provider_features: false,
         supports_model_catalog: false,
         ..make_custom_compatible_provider()
     };
-
     let messages = vec![
         Message {
             role: Role::User,
@@ -692,6 +691,7 @@ fn kimi_for_coding_tool_call_message_includes_reasoning_content() {
         model: Arc::new(RwLock::new("kimi-for-coding".to_string())),
         ..make_custom_compatible_provider()
     };
+    assert!(provider.capabilities().reasoning_context_replay);
 
     let messages = vec![
         Message {
@@ -781,6 +781,7 @@ fn direct_deepseek_two_tool_continuation_replays_exact_reasoning_content() {
         model: Arc::new(RwLock::new("deepseek-v4-pro".to_string())),
         ..make_custom_compatible_provider()
     };
+    assert!(provider.capabilities().reasoning_context_replay);
     provider
         .set_reasoning_effort("medium")
         .expect("direct DeepSeek model should accept reasoning effort");
@@ -2780,6 +2781,20 @@ fn strict_openai_schema_endpoint_detects_mistral_profile() {
 }
 
 #[test]
+fn strict_mistral_profile_does_not_advertise_reasoning_context_replay() {
+    let provider = OpenRouterProvider {
+        api_base: "https://api.mistral.ai/v1".to_string(),
+        profile_id: Some("mistral".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("magistral-medium-latest".to_string())),
+        ..make_custom_compatible_provider()
+    };
+
+    assert!(!provider.capabilities().reasoning_context_replay);
+}
+
+#[test]
 fn strict_openai_schema_endpoint_detects_mistral_api_base() {
     assert!(OpenRouterProvider::strict_openai_schema_endpoint(
         None,
@@ -2826,6 +2841,8 @@ fn runtime_display_name_for_profile_runtime_instance() {
     .expect("build nvidia-nim runtime");
     assert_eq!(nim.runtime_display_name(), "NVIDIA NIM");
     assert_eq!(Provider::name(&nim), "openrouter");
+    assert_eq!(Provider::provider_identity(&nim), "nvidia-nim");
+    assert!(!Provider::capabilities(&nim).reasoning_context_replay);
 }
 
 #[test]
