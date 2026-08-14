@@ -78,6 +78,27 @@ fn write_test_api_key(env_file: &str, env_key: &str, value: &str) {
         .expect("write test api key");
 }
 
+fn write_fresh_grok_direct_credentials(access_token: &str) {
+    let config_dir = jcode_base::storage::app_config_dir().expect("temporary app config dir");
+    let credentials_dir = config_dir.join("grok-direct");
+    std::fs::create_dir_all(&credentials_dir).expect("create Grok Direct credentials dir");
+    let credentials = serde_json::json!({
+        "version": jcode_base::auth::grok_direct::CREDENTIAL_VERSION,
+        "access_token": access_token,
+        "refresh_token": "test-refresh-token",
+        "expires_at_ms": i64::MAX,
+        "token_type": "Bearer",
+        "scope": ["api:access"],
+        "issuer": jcode_base::auth::grok_direct::ISSUER,
+        "client_id": jcode_base::auth::grok_direct::CLIENT_ID,
+    });
+    std::fs::write(
+        credentials_dir.join("credentials.json"),
+        serde_json::to_vec_pretty(&credentials).expect("serialize Grok Direct credentials"),
+    )
+    .expect("write Grok Direct credentials");
+}
+
 fn isolate_openrouter_autodetect_env() -> Vec<EnvVarGuard> {
     let mut guards = vec![
         EnvVarGuard::remove("JCODE_OPENROUTER_API_BASE"),
@@ -1544,6 +1565,34 @@ fn spawn_single_response_chat_server() -> (String, mpsc::Receiver<String>) {
     (format!("http://{addr}/v1"), request_rx)
 }
 
+fn spawn_single_json_response_server(body: &str) -> (String, mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let addr = listener.local_addr().expect("fake provider address");
+    let (request_tx, request_rx) = mpsc::channel();
+    let body = body.to_string();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept fake provider request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set read timeout");
+        let mut request = vec![0u8; 16384];
+        let n = stream.read(&mut request).unwrap_or(0);
+        let request = String::from_utf8_lossy(&request[..n]).into_owned();
+        let _ = request_tx.send(request);
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write fake provider response");
+    });
+
+    (format!("http://{addr}/v1"), request_rx)
+}
+
 #[test]
 fn direct_deepseek_profile_exposes_max_reasoning_effort() {
     let provider = OpenRouterProvider {
@@ -1589,6 +1638,146 @@ fn kimi_k3_exposes_only_supported_reasoning_efforts() {
     assert_eq!(provider.reasoning_effort().as_deref(), Some("high"));
     provider.set_model("kimi-for-coding").unwrap();
     assert!(provider.available_efforts().is_empty());
+}
+
+#[test]
+fn grok_direct_reasoning_uses_strict_xai_vocabulary() {
+    let provider = OpenRouterProvider {
+        model: Arc::new(RwLock::new("grok-4.5".to_string())),
+        profile_id: Some("grok-direct".to_string()),
+        supports_provider_features: false,
+        ..make_custom_compatible_provider()
+    };
+
+    assert_eq!(
+        provider.available_efforts(),
+        vec!["low", "medium", "high", "xhigh"]
+    );
+    provider
+        .set_reasoning_effort("max")
+        .expect("max should map to xhigh for internal swarm compatibility");
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("xhigh"));
+    assert!(provider.set_reasoning_effort("none").is_err());
+    assert!(provider.set_reasoning_effort("extreme").is_err());
+}
+
+#[test]
+fn grok_direct_chat_uses_managed_bearer_truthful_user_agent_and_top_level_reasoning() {
+    let _env_lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    write_fresh_grok_direct_credentials("grok-test-access-token");
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        auth: ProviderAuth::ManagedOAuth {
+            provider: ManagedOAuthProvider::GrokDirect,
+            label: "Grok Direct OAuth".to_string(),
+        },
+        model: Arc::new(RwLock::new("grok-4.5".to_string())),
+        profile_id: Some("grok-direct".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    provider
+        .set_reasoning_effort("xhigh")
+        .expect("xhigh is supported by Grok Direct");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake Grok Direct chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake Grok Direct request");
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer grok-test-access-token")
+    );
+    assert!(
+        request.contains(&format!(
+            "user-agent: {}",
+            jcode_base::auth::grok_direct::user_agent()
+        )) || request.contains(&format!(
+            "User-Agent: {}",
+            jcode_base::auth::grok_direct::user_agent()
+        ))
+    );
+    assert!(!request.contains("HTTP-Referer:"));
+    assert!(!request.contains("X-Title:"));
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["reasoning_effort"], "xhigh");
+    assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn grok_direct_models_discovery_uses_managed_bearer_and_replaces_seed() {
+    let _env_lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    let _cache_namespace = EnvVarGuard::set("JCODE_OPENROUTER_CACHE_NAMESPACE", "grok-direct");
+    write_fresh_grok_direct_credentials("grok-models-access-token");
+    let (api_base, request_rx) =
+        spawn_single_json_response_server(r#"{"data":[{"id":"grok-4.5"},{"id":"grok-4.6"}]}"#);
+    let provider = OpenRouterProvider {
+        api_base,
+        auth: ProviderAuth::ManagedOAuth {
+            provider: ManagedOAuthProvider::GrokDirect,
+            label: "Grok Direct OAuth".to_string(),
+        },
+        model: Arc::new(RwLock::new("grok-4.5".to_string())),
+        profile_id: Some("grok-direct".to_string()),
+        supports_provider_features: false,
+        static_models: vec!["grok-4.5".to_string()],
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let models = rt
+        .block_on(provider.fetch_models())
+        .expect("authenticated Grok Direct /models request");
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["grok-4.5", "grok-4.6"]
+    );
+    assert!(!provider.should_merge_static_models_with_live_catalog());
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake Grok Direct models request");
+    assert!(request.starts_with("GET /v1/models "));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer grok-models-access-token")
+    );
 }
 
 #[test]
@@ -2629,8 +2818,13 @@ async fn kimi_api_key_request_uses_bearer_auth_and_jcode_user_agent() {
 
 #[test]
 fn kimi_oauth_unauthorized_refreshes_exactly_once() {
-    let oauth = ProviderAuth::KimiOAuth {
+    let oauth = ProviderAuth::ManagedOAuth {
+        provider: ManagedOAuthProvider::Kimi,
         label: "Kimi OAuth".to_string(),
+    };
+    let grok_oauth = ProviderAuth::ManagedOAuth {
+        provider: ManagedOAuthProvider::GrokDirect,
+        label: "Grok Direct OAuth".to_string(),
     };
     let api_key = ProviderAuth::AuthorizationBearer {
         token: "sk-kimi-test".to_string(),
@@ -2645,6 +2839,16 @@ fn kimi_oauth_unauthorized_refreshes_exactly_once() {
     assert!(!should_refresh_after_unauthorized(
         reqwest::StatusCode::UNAUTHORIZED,
         &oauth,
+        true,
+    ));
+    assert!(should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &grok_oauth,
+        false,
+    ));
+    assert!(!should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &grok_oauth,
         true,
     ));
     assert!(!should_refresh_after_unauthorized(

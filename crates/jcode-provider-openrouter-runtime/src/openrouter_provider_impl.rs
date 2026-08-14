@@ -147,7 +147,10 @@ impl Provider for OpenRouterProvider {
 
         let mut sent_reasoning_config = false;
         if let Some(effort) = reasoning_effort.as_deref() {
-            if self.supports_kimi_reasoning_effort() {
+            if self.supports_grok_reasoning_effort() {
+                request["reasoning_effort"] = serde_json::json!(effort);
+                sent_reasoning_config = true;
+            } else if self.supports_kimi_reasoning_effort() {
                 request["reasoning_effort"] =
                     serde_json::json!(Self::normalize_kimi_request_effort(effort));
                 sent_reasoning_config = true;
@@ -489,7 +492,7 @@ impl Provider for OpenRouterProvider {
                 "Reasoning effort is not supported by the current model/profile. It works for OpenRouter, DeepSeek-family and GPT-family reasoning models, and profiles with supports_reasoning_effort = true."
             );
         }
-        let normalized = self.normalize_reasoning_effort_for_self(effort);
+        let normalized = self.normalize_reasoning_effort_for_self(effort)?;
         let mut current = self.reasoning_effort.try_write().map_err(|_| {
             anyhow::anyhow!("Cannot change reasoning effort while a request is in progress")
         })?;
@@ -498,7 +501,9 @@ impl Provider for OpenRouterProvider {
     }
 
     fn available_efforts(&self) -> Vec<&'static str> {
-        if self.supports_kimi_reasoning_effort() {
+        if self.supports_grok_reasoning_effort() {
+            vec!["low", "medium", "high", "xhigh"]
+        } else if self.supports_kimi_reasoning_effort() {
             vec!["low", "high", "max", "swarm", "swarm-deep"]
         } else if self.supports_deepseek_reasoning_effort() {
             vec![
