@@ -14,6 +14,7 @@ pub mod gemini;
 pub mod google;
 pub(crate) mod google_oauth;
 pub mod grok_build;
+pub mod grok_direct;
 pub mod integration;
 pub mod kimi;
 pub mod kimi_code_acp;

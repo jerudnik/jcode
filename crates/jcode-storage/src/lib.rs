@@ -2,9 +2,11 @@ use anyhow::Result;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 mod active_pids;
 
@@ -634,6 +636,53 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
         jcode_core::fs::set_directory_permissions_owner_only(path)?;
     }
     Ok(())
+}
+
+/// A bounded cross-process exclusive lock backed by a filesystem lock file.
+///
+/// The lock is released automatically when this value is dropped. Callers
+/// should acquire it from a blocking thread when used by async code.
+pub struct ExclusiveFileLock {
+    file: File,
+}
+
+impl ExclusiveFileLock {
+    pub fn acquire(path: &Path, timeout: Duration, retry_delay: Duration) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            ensure_dir(parent)?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(path)?;
+        jcode_core::fs::set_permissions_owner_only(path)?;
+
+        let started = Instant::now();
+        loop {
+            match fs2::FileExt::try_lock_exclusive(&file) {
+                Ok(()) => return Ok(Self { file }),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if started.elapsed() >= timeout {
+                        anyhow::bail!(
+                            "timed out after {:.1}s waiting for lock {}",
+                            timeout.as_secs_f64(),
+                            path.display()
+                        );
+                    }
+                    std::thread::sleep(retry_delay.max(Duration::from_millis(1)));
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+}
+
+impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
 }
 
 pub fn write_text_secret(path: &Path, content: &str) -> Result<()> {
