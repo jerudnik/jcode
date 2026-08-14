@@ -1560,6 +1560,46 @@ fn test_info_widget_local_direct_api_runtime_shows_cost_based_usage() {
 }
 
 #[test]
+fn test_info_widget_local_kimi_respects_explicit_auth_mode() {
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
+        crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
+
+        let mut app = create_named_provider_test_app("openrouter", "kimi-for-coding");
+        app.session.provider_key = Some("kimi".to_string());
+        app.session.route_api_method = Some("openai-compatible:kimi".to_string());
+
+        crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "oauth");
+        assert_eq!(
+            crate::tui::TuiState::info_widget_data(&app).auth_method,
+            crate::tui::info_widget::AuthMethod::KimiOAuth
+        );
+
+        crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "api_key");
+        assert_eq!(
+            crate::tui::TuiState::info_widget_data(&app).auth_method,
+            crate::tui::info_widget::AuthMethod::ApiKey
+        );
+
+        crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "oauth");
+        for (runtime_provider, provider_key, api_method) in [
+            ("grok-build", "grok-build", "grok-build-acp"),
+            ("kimi-code-acp", "kimi-code-acp", "kimi-code-acp"),
+            ("reasonix", "reasonix", "reasonix-acp"),
+        ] {
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
+            app.session.provider_key = Some(provider_key.to_string());
+            app.session.route_api_method = Some(api_method.to_string());
+            assert_ne!(
+                crate::tui::TuiState::info_widget_data(&app).auth_method,
+                crate::tui::info_widget::AuthMethod::KimiOAuth,
+                "{runtime_provider} must not inherit direct Kimi OAuth auth"
+            );
+        }
+    });
+}
+
+#[test]
 fn test_anthropic_api_cost_accounts_for_split_cache_tokens() {
     // Anthropic reports usage with *split* accounting: `input_tokens` already
     // excludes cache-read and cache-creation tokens. The cost figure must

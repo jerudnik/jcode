@@ -1544,6 +1544,14 @@ mod tests {
             "all clear"
         );
     }
+
+    #[test]
+    fn kimi_oauth_overscroll_label_is_oauth() {
+        assert_eq!(
+            overscroll_auth_label(crate::tui::info_widget::AuthMethod::KimiOAuth),
+            Some(("OAuth", rgb(190, 140, 255)))
+        );
+    }
 }
 
 /// Build the spans for the notification line. Returns empty vec when there is nothing to show.
@@ -2019,6 +2027,7 @@ fn overscroll_auth_label(
         }
         AuthMethod::AnthropicOAuth => Some(("OAuth", rgb(255, 160, 100))),
         AuthMethod::OpenAIOAuth => Some(("OAuth", rgb(100, 200, 180))),
+        AuthMethod::KimiOAuth => Some(("OAuth", rgb(190, 140, 255))),
         AuthMethod::CopilotOAuth => Some(("OAuth", rgb(110, 200, 140))),
         AuthMethod::GeminiOAuth => Some(("OAuth", rgb(120, 190, 255))),
     }

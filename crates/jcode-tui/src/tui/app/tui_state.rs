@@ -283,6 +283,25 @@ impl App {
         .map(|resolved| resolved.active)
     }
 
+    fn active_openai_compatible_profile_is(
+        &self,
+        profile_id: &str,
+        runtime_provider: Option<&str>,
+    ) -> bool {
+        runtime_provider.is_some_and(|provider| provider.eq_ignore_ascii_case(profile_id))
+            || self
+                .session
+                .provider_key
+                .as_deref()
+                .is_some_and(|provider| provider.eq_ignore_ascii_case(profile_id))
+            || self
+                .session
+                .route_api_method
+                .as_deref()
+                .and_then(|method| method.strip_prefix("openai-compatible:"))
+                .is_some_and(|provider| provider.eq_ignore_ascii_case(profile_id))
+    }
+
     fn widget_auth_method(&self, route: WidgetRouteInfo) -> crate::tui::info_widget::AuthMethod {
         use crate::auth::ActiveCredential;
         use crate::tui::info_widget::AuthMethod;
@@ -318,7 +337,19 @@ impl App {
                     crate::provider::openrouter::OpenRouterTransportState::from_current_env(
                         runtime_provider.as_deref(),
                     );
-                if transport_state.is_real_openrouter() {
+                if transport_state
+                    == crate::provider::openrouter::OpenRouterTransportState::DirectApiKey
+                    && self.active_openai_compatible_profile_is(
+                        crate::provider_catalog::KIMI_PROFILE.id,
+                        runtime_provider.as_deref(),
+                    )
+                    && matches!(
+                        crate::auth::kimi::selected_auth_mode(),
+                        Some(crate::auth::kimi::KimiAuthMode::OAuth)
+                    )
+                {
+                    crate::tui::info_widget::AuthMethod::KimiOAuth
+                } else if transport_state.is_real_openrouter() {
                     crate::tui::info_widget::AuthMethod::OpenRouterApiKey
                 } else if transport_state.accrues_user_api_key_cost() {
                     crate::tui::info_widget::AuthMethod::ApiKey
