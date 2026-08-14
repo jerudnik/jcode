@@ -56,10 +56,46 @@ pub enum LoginProviderAuthStateKey {
     Gemini,
     Antigravity,
     Cursor,
+    GrokDirect,
     GrokBuild,
     KimiCodeAcp,
     Reasonix,
     Google,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagedOAuthProvider {
+    Kimi,
+    GrokDirect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenAiCompatibleAuthStrategy {
+    ApiKey {
+        required: bool,
+    },
+    ManagedOAuth {
+        provider: ManagedOAuthProvider,
+        api_key_fallback: bool,
+    },
+}
+
+impl OpenAiCompatibleAuthStrategy {
+    pub const fn requires_api_key(self) -> bool {
+        match self {
+            Self::ApiKey { required } => required,
+            Self::ManagedOAuth {
+                api_key_fallback, ..
+            } => api_key_fallback,
+        }
+    }
+
+    pub const fn managed_oauth_provider(self) -> Option<ManagedOAuthProvider> {
+        match self {
+            Self::ManagedOAuth { provider, .. } => Some(provider),
+            Self::ApiKey { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +170,9 @@ pub struct OpenAiCompatibleProfile {
     pub env_file: &'static str,
     pub setup_url: &'static str,
     pub default_model: Option<&'static str>,
+    pub auth_strategy: OpenAiCompatibleAuthStrategy,
+    /// Compatibility projection for existing callers. New auth decisions should
+    /// use [`Self::auth_strategy`].
     pub requires_api_key: bool,
 }
 
@@ -147,6 +186,7 @@ pub struct ResolvedOpenAiCompatibleProfile {
     pub env_file: String,
     pub setup_url: String,
     pub default_model: Option<String>,
+    pub auth_strategy: OpenAiCompatibleAuthStrategy,
     pub requires_api_key: bool,
 }
 
@@ -727,6 +767,32 @@ mod tests {
         let xai = resolve_login_provider("xai").expect("xAI API-key provider");
         assert_eq!(xai.id, "xai");
         assert_eq!(xai.auth_kind, LoginProviderAuthKind::ApiKey);
+    }
+
+    #[test]
+    fn grok_direct_is_distinct_managed_oauth_profile() {
+        let direct = resolve_login_provider("grok-direct").expect("Grok Direct provider");
+        assert_eq!(direct.auth_kind, LoginProviderAuthKind::DeviceCode);
+        assert_eq!(direct.auth_state_key, LoginProviderAuthStateKey::GrokDirect);
+        assert_eq!(
+            direct.target,
+            LoginProviderTarget::OpenAiCompatible(GROK_DIRECT_PROFILE)
+        );
+        assert!(direct.menu_detail.contains("Experimental"));
+        assert_eq!(
+            GROK_DIRECT_PROFILE.auth_strategy,
+            OpenAiCompatibleAuthStrategy::ManagedOAuth {
+                provider: ManagedOAuthProvider::GrokDirect,
+                api_key_fallback: false,
+            }
+        );
+        assert_eq!(GROK_DIRECT_PROFILE.default_model, Some("grok-4.5"));
+        assert_eq!(
+            resolve_login_provider("grok").map(|provider| provider.id),
+            Some("grok-build")
+        );
+        assert_ne!(direct.id, XAI_LOGIN_PROVIDER.id);
+        assert_ne!(direct.id, GROK_BUILD_LOGIN_PROVIDER.id);
     }
 
     #[test]

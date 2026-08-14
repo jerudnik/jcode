@@ -70,6 +70,7 @@ pub fn resolve_openai_compatible_profile_with_api_key_hint(
         env_file: profile.env_file.to_string(),
         setup_url: profile.setup_url.to_string(),
         default_model: profile.default_model.map(ToString::to_string),
+        auth_strategy: profile.auth_strategy,
         requires_api_key: profile.requires_api_key,
     };
 
@@ -448,6 +449,7 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("kimi-k2-thinking");
             push("kimi-k2-thinking-turbo");
         }
+        "grok-direct" => push("grok-4.5"),
         "firmware" => {
             push("kimi-k2.5");
             push("zai-glm-5-1");
@@ -583,6 +585,7 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
     let model = model.trim().to_ascii_lowercase();
 
     match profile_id.as_str() {
+        "grok-direct" if model == "grok-4.5" => Some(500_000),
         // DeepSeek V4 direct API models advertise a 1M token context window. The
         // direct profile runs through the OpenRouter/OpenAI-compatible provider
         // implementation, whose live catalog can be unavailable during startup.
@@ -889,8 +892,11 @@ pub fn openai_compatible_profile_is_configured(profile: OpenAiCompatibleProfile)
         return configured;
     }
 
-    if profile.id == KIMI_PROFILE.id {
-        return crate::auth::kimi::is_configured();
+    if let Some(provider) = profile.auth_strategy.managed_oauth_provider() {
+        return match provider {
+            ManagedOAuthProvider::Kimi => crate::auth::kimi::is_configured(),
+            ManagedOAuthProvider::GrokDirect => crate::auth::grok_direct::is_configured(),
+        };
     }
 
     let resolved = resolve_openai_compatible_profile(profile);

@@ -339,6 +339,7 @@ impl AuthStatus {
             LoginProviderAuthStateKey::Antigravity => self.antigravity,
             LoginProviderAuthStateKey::Gemini => self.gemini,
             LoginProviderAuthStateKey::Cursor => self.cursor,
+            LoginProviderAuthStateKey::GrokDirect => self.grok_direct,
             LoginProviderAuthStateKey::GrokBuild => self.grok_build,
             LoginProviderAuthStateKey::KimiCodeAcp => self.kimi_code_acp,
             LoginProviderAuthStateKey::Reasonix => self.reasonix,
@@ -410,10 +411,17 @@ impl AuthStatus {
                 }
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
-                if crate::provider_catalog::openai_compatible_profile_is_configured(profile) {
-                    AuthState::Available
-                } else {
-                    AuthState::NotConfigured
+                match profile.auth_strategy.managed_oauth_provider() {
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect) => {
+                        self.grok_direct
+                    }
+                    _ if crate::provider_catalog::openai_compatible_profile_is_configured(
+                        profile,
+                    ) =>
+                    {
+                        AuthState::Available
+                    }
+                    _ => AuthState::NotConfigured,
                 }
             }
             _ => self.state_for_key(provider.auth_state_key),
@@ -520,29 +528,48 @@ impl AuthStatus {
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 let resolved = crate::provider_catalog::resolve_openai_compatible_profile(profile);
-                if self.state_for_provider(provider) == AuthState::Available {
-                    if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                        && crate::auth::kimi::has_oauth_tokens()
+                match profile.auth_strategy.managed_oauth_provider() {
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect) => {
+                        match self.grok_direct {
+                            AuthState::Available => {
+                                "Jcode-managed Grok Direct OAuth token (automatic refresh)"
+                                    .to_string()
+                            }
+                            AuthState::Expired => {
+                                "Grok Direct OAuth credentials need attention; run `/login grok-direct`"
+                                    .to_string()
+                            }
+                            AuthState::NotConfigured => "not configured".to_string(),
+                        }
+                    }
+                    Some(crate::provider_catalog::ManagedOAuthProvider::Kimi)
+                        if crate::auth::kimi::has_oauth_tokens() =>
                     {
                         "OAuth (automatic refresh)".to_string()
-                    } else if resolved.requires_api_key {
+                    }
+                    _ if self.state_for_provider(provider) == AuthState::Available
+                        && resolved.requires_api_key =>
+                    {
                         format!("API key (`{}`)", resolved.api_key_env)
-                    } else if crate::provider_catalog::load_api_key(
+                    }
+                    _ if self.state_for_provider(provider) == AuthState::Available
+                        && crate::provider_catalog::load_api_key(
                         &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
                             &resolved,
                         ),
                     )
                     .is_some()
+                    =>
                     {
                         format!(
                             "local endpoint (`{}`) + optional API key (`{}`)",
                             resolved.api_base, resolved.api_key_env
                         )
-                    } else {
+                    }
+                    _ if self.state_for_provider(provider) == AuthState::Available => {
                         format!("local endpoint (`{}`)", resolved.api_base)
                     }
-                } else {
-                    "not configured".to_string()
+                    _ => "not configured".to_string(),
                 }
             }
             _ => match provider.auth_state_key {
@@ -787,8 +814,30 @@ impl AuthStatus {
                 AuthValidationMethod::PresenceCheck,
             ),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                    && crate::auth::kimi::has_oauth_tokens()
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect)
+                ) {
+                    (
+                        if state == AuthState::NotConfigured {
+                            AuthCredentialSource::None
+                        } else {
+                            AuthCredentialSource::JcodeManagedFile
+                        },
+                        "Jcode-managed Grok Direct OAuth token store (`~/.config/jcode/grok-direct/credentials.json`)"
+                            .to_string(),
+                        if state == AuthState::NotConfigured {
+                            AuthExpiryConfidence::Unknown
+                        } else {
+                            AuthExpiryConfidence::Exact
+                        },
+                        AuthRefreshSupport::Automatic,
+                        AuthValidationMethod::TimestampCheck,
+                    )
+                } else if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(crate::provider_catalog::ManagedOAuthProvider::Kimi)
+                ) && crate::auth::kimi::has_oauth_tokens()
                 {
                     (
                         AuthCredentialSource::JcodeManagedFile,
@@ -953,6 +1002,9 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
         } else {
             AuthState::NotConfigured
         }
+    });
+    record_auth_probe_step(&mut timings, "grok_direct", || {
+        status.grok_direct = grok_direct::auth_state();
     });
     record_auth_probe_step(&mut timings, "kimi_code_acp", || {
         status.kimi_code_acp = if kimi_code_acp::is_available() {
@@ -1264,6 +1316,21 @@ fn assessment_for_key(
             AuthExpiryConfidence::Unknown,
             AuthRefreshSupport::ExternalManaged,
             AuthValidationMethod::PresenceCheck,
+        ),
+        LoginProviderAuthStateKey::GrokDirect => (
+            if state == AuthState::NotConfigured {
+                AuthCredentialSource::None
+            } else {
+                AuthCredentialSource::JcodeManagedFile
+            },
+            "Jcode-managed Grok Direct OAuth token store".to_string(),
+            if state == AuthState::NotConfigured {
+                AuthExpiryConfidence::Unknown
+            } else {
+                AuthExpiryConfidence::Exact
+            },
+            AuthRefreshSupport::Automatic,
+            AuthValidationMethod::TimestampCheck,
         ),
         LoginProviderAuthStateKey::KimiCodeAcp => (
             if state == AuthState::Available {

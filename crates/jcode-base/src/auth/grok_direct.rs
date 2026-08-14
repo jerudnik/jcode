@@ -177,6 +177,27 @@ pub fn is_configured() -> bool {
     load_credentials().ok().flatten().is_some()
 }
 
+pub fn auth_state() -> crate::auth::AuthState {
+    match load_credentials() {
+        Ok(Some(_)) => {
+            let permanently_rejected = crate::auth::refresh_state::get(REFRESH_KEY)
+                .and_then(|record| record.last_error)
+                .is_some_and(|error| error.contains("rejected the Grok Direct refresh token"));
+            if permanently_rejected {
+                crate::auth::AuthState::Expired
+            } else {
+                crate::auth::AuthState::Available
+            }
+        }
+        Ok(None) => crate::auth::AuthState::NotConfigured,
+        Err(_) => credentials_path()
+            .ok()
+            .filter(|path| path.exists())
+            .map(|_| crate::auth::AuthState::Expired)
+            .unwrap_or(crate::auth::AuthState::NotConfigured),
+    }
+}
+
 pub fn credentials_are_fresh(credentials: &GrokDirectCredentials) -> bool {
     credentials
         .expires_at_ms

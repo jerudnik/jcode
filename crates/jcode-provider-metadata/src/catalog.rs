@@ -1,6 +1,7 @@
 use super::{
     LoginProviderAuthKind, LoginProviderAuthStateKey, LoginProviderDescriptor,
-    LoginProviderSurfaceOrder, LoginProviderTarget, OpenAiCompatibleProfile,
+    LoginProviderSurfaceOrder, LoginProviderTarget, ManagedOAuthProvider,
+    OpenAiCompatibleAuthStrategy, OpenAiCompatibleProfile,
 };
 
 pub const OPENCODE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
@@ -12,6 +13,7 @@ pub const OPENCODE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "opencode.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("minimax-m2.7"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -24,6 +26,7 @@ pub const OPENCODE_GO_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile
     env_file: "opencode-go.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -36,6 +39,7 @@ pub const ZAI_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "zai.env",
     setup_url: "https://docs.z.ai/devpack/quick-start",
     default_model: Some("glm-5.2"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -48,6 +52,10 @@ pub const KIMI_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "kimi.env",
     setup_url: "https://www.kimi.com/coding/docs/en/more/third-party-agents.html",
     default_model: Some("kimi-for-coding"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ManagedOAuth {
+        provider: ManagedOAuthProvider::Kimi,
+        api_key_fallback: true,
+    },
     requires_api_key: true,
 };
 
@@ -60,6 +68,7 @@ pub const AI302_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "302ai.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("qwen3-235b-a22b-instruct-2507"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -72,6 +81,7 @@ pub const BASETEN_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "baseten.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("zai-org/GLM-4.7"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -84,6 +94,7 @@ pub const CORTECS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "cortecs.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -101,6 +112,7 @@ pub const OPENROUTER_OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiComp
     env_file: "openrouter.env",
     setup_url: "https://openrouter.ai/keys",
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -121,6 +133,7 @@ pub const ANTHROPIC_OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompa
     env_file: "anthropic.env",
     setup_url: "https://docs.anthropic.com/en/api/openai-sdk",
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -133,6 +146,7 @@ pub const OPENAI_NATIVE_OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiC
     env_file: "openai.env",
     setup_url: "https://platform.openai.com/api-keys",
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -148,6 +162,7 @@ pub const GEMINI_OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatib
     env_file: "gemini.env",
     setup_url: "https://ai.google.dev/gemini-api/docs/openai",
     default_model: Some("gemini-2.5-flash"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -160,6 +175,7 @@ pub const DEEPSEEK_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "deepseek.env",
     setup_url: "https://api-docs.deepseek.com/",
     default_model: Some("deepseek-v4-flash"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -172,6 +188,7 @@ pub const COMTEGRA_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "comtegra.env",
     setup_url: "https://docs.cgc.comtegra.cloud/llm-api",
     default_model: Some("glm-51-nvfp4"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -184,6 +201,7 @@ pub const FPT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "fpt.env",
     setup_url: "https://ai-docs.fptcloud.com/api-reference/ai-marketplace/api-reference/api-integration-large-language-model-md",
     default_model: Some("GLM-5.1"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -196,6 +214,7 @@ pub const FIRMWARE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "firmware.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -208,6 +227,7 @@ pub const HUGGING_FACE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfil
     env_file: "huggingface.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("zai-org/GLM-4.7"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -220,6 +240,7 @@ pub const MOONSHOT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "moonshotai.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -232,6 +253,7 @@ pub const NEBIUS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "nebius.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("openai/gpt-oss-120b"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -244,6 +266,7 @@ pub const SCALEWAY_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "scaleway.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("qwen3-coder-30b-a3b-instruct"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -256,6 +279,7 @@ pub const STACKIT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "stackit.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("openai/gpt-oss-120b"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -268,6 +292,7 @@ pub const GROQ_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "groq.env",
     setup_url: "https://console.groq.com/docs/openai",
     default_model: Some("llama-3.1-8b-instant"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -280,6 +305,7 @@ pub const MISTRAL_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "mistral.env",
     setup_url: "https://docs.mistral.ai/getting-started/models/",
     default_model: Some("devstral-medium-2507"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -292,6 +318,7 @@ pub const PERPLEXITY_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile 
     env_file: "perplexity.env",
     setup_url: "https://docs.perplexity.ai/docs/agent-api/openai-compatibility",
     default_model: Some("sonar"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -304,6 +331,7 @@ pub const TOGETHER_AI_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile
     env_file: "togetherai.env",
     setup_url: "https://docs.together.ai/docs/openai-api-compatibility",
     default_model: Some("moonshotai/Kimi-K2-Instruct"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -316,6 +344,7 @@ pub const DEEPINFRA_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "deepinfra.env",
     setup_url: "https://deepinfra.com/docs/api-reference",
     default_model: Some("moonshotai/Kimi-K2-Instruct"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -328,6 +357,7 @@ pub const FIREWORKS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "fireworks.env",
     setup_url: "https://docs.fireworks.ai/tools-sdks/openai-compatibility",
     default_model: Some("accounts/fireworks/routers/kimi-k2p5-turbo"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -340,6 +370,7 @@ pub const MINIMAX_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "minimax.env",
     setup_url: "https://platform.minimax.io/docs/guides/text-generation",
     default_model: Some("MiniMax-M3"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -355,7 +386,24 @@ pub const XAI_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "xai.env",
     setup_url: "https://docs.x.ai/developers/quickstart",
     default_model: Some("grok-code-fast-1"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
+};
+
+pub const GROK_DIRECT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
+    id: "grok-direct",
+    display_name: "Grok Direct",
+    api_base: "https://api.x.ai/v1",
+    api_key_env: "GROK_DIRECT_UNUSED_API_KEY",
+    api_key_aliases: &[],
+    env_file: "grok-direct.env",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
+    default_model: Some("grok-4.5"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ManagedOAuth {
+        provider: ManagedOAuthProvider::GrokDirect,
+        api_key_fallback: false,
+    },
+    requires_api_key: false,
 };
 
 pub const LMSTUDIO_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
@@ -367,6 +415,7 @@ pub const LMSTUDIO_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "lmstudio.env",
     setup_url: "https://lmstudio.ai/docs/app/api/endpoints/openai",
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: false },
     requires_api_key: false,
 };
 
@@ -379,6 +428,7 @@ pub const OLLAMA_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "ollama.env",
     setup_url: "https://docs.ollama.com/api/openai-compatibility",
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: false },
     requires_api_key: false,
 };
 
@@ -395,6 +445,7 @@ pub const CHUTES_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     // `/models` catalog instead of advertising a stale model that may 404 at
     // chat/completions time.
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -407,6 +458,7 @@ pub const CEREBRAS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     env_file: "cerebras.env",
     setup_url: "https://inference-docs.cerebras.ai/introduction",
     default_model: Some("gpt-oss-120b"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -419,6 +471,7 @@ pub const ALIBABA_CODING_PLAN_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibl
     env_file: "alibaba-coding-plan.env",
     setup_url: "https://www.alibabacloud.com/help/en/model-studio/coding-plan-quickstart",
     default_model: Some("qwen3-coder-plus"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -431,6 +484,7 @@ pub const NVIDIA_NIM_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile 
     env_file: "nvidia-nim.env",
     setup_url: "https://build.nvidia.com/explore/discover",
     default_model: Some("nvidia/llama-3.1-nemotron-ultra-253b-v1"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -443,6 +497,7 @@ pub const XIAOMI_MIMO_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile
     env_file: "xiaomi-mimo.env",
     setup_url: "https://platform.xiaomimimo.com",
     default_model: Some("mimo-v2.5"),
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
@@ -455,10 +510,11 @@ pub const OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfi
     env_file: "openai-compatible.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: None,
+    auth_strategy: OpenAiCompatibleAuthStrategy::ApiKey { required: true },
     requires_api_key: true,
 };
 
-pub(crate) const OPENAI_COMPAT_PROFILES: [OpenAiCompatibleProfile; 36] = [
+pub(crate) const OPENAI_COMPAT_PROFILES: [OpenAiCompatibleProfile; 37] = [
     OPENCODE_PROFILE,
     OPENCODE_GO_PROFILE,
     ZAI_PROFILE,
@@ -490,6 +546,7 @@ pub(crate) const OPENAI_COMPAT_PROFILES: [OpenAiCompatibleProfile; 36] = [
     FIREWORKS_PROFILE,
     MINIMAX_PROFILE,
     XAI_PROFILE,
+    GROK_DIRECT_PROFILE,
     NVIDIA_NIM_PROFILE,
     XIAOMI_MIMO_PROFILE,
     LMSTUDIO_PROFILE,
@@ -976,6 +1033,22 @@ pub const XAI_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor 
     order: LoginProviderSurfaceOrder::new(Some(33), Some(33), Some(33), Some(33), Some(33)),
 };
 
+/// Experimental Grok subscription access over xAI's native OpenAI-compatible
+/// HTTPS endpoint. Credentials are owned by jcode and never borrowed from the
+/// Grok Build CLI.
+pub const GROK_DIRECT_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "grok-direct",
+    display_name: "Grok Direct",
+    auth_kind: LoginProviderAuthKind::DeviceCode,
+    auth_state_key: LoginProviderAuthStateKey::GrokDirect,
+    auth_status_method: "Grok subscription OAuth device code",
+    aliases: &["grok-oauth", "supergrok-direct"],
+    menu_detail: "Experimental Grok subscription over native HTTPS",
+    recommended: false,
+    target: LoginProviderTarget::OpenAiCompatible(GROK_DIRECT_PROFILE),
+    order: LoginProviderSurfaceOrder::new(Some(39), Some(39), Some(39), Some(39), Some(39)),
+};
+
 /// Official Grok subscription through the Grok Build ACP runtime. This is
 /// intentionally separate from the `xai` API-key profile above.
 pub const GROK_BUILD_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
@@ -988,7 +1061,7 @@ pub const GROK_BUILD_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDesc
     menu_detail: "Grok subscription through official Grok Build ACP",
     recommended: false,
     target: LoginProviderTarget::GrokBuild,
-    order: LoginProviderSurfaceOrder::new(Some(39), None, None, None, Some(39)),
+    order: LoginProviderSurfaceOrder::new(Some(40), None, None, None, Some(40)),
 };
 
 /// Official Kimi Code subscription/CLI runtime over ACP. This is intentionally
@@ -1016,7 +1089,7 @@ pub const REASONIX_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescri
     menu_detail: "Reasonix through its official workspace-only ACP runtime",
     recommended: false,
     target: LoginProviderTarget::Reasonix,
-    order: LoginProviderSurfaceOrder::new(Some(40), None, None, None, Some(40)),
+    order: LoginProviderSurfaceOrder::new(Some(42), None, None, None, Some(42)),
 };
 
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
@@ -1167,7 +1240,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 50] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 51] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1204,6 +1277,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 50] = [
     FIREWORKS_LOGIN_PROVIDER,
     MINIMAX_LOGIN_PROVIDER,
     XAI_LOGIN_PROVIDER,
+    GROK_DIRECT_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,
     KIMI_CODE_ACP_LOGIN_PROVIDER,
     REASONIX_LOGIN_PROVIDER,

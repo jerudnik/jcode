@@ -48,6 +48,8 @@ pub struct AuthStatus {
     pub cursor: AuthState,
     /// Grok Build CLI installed with a cached subscription login detected
     pub grok_build: AuthState,
+    /// Jcode-managed Grok Direct OAuth credentials
+    pub grok_direct: AuthState,
     /// Kimi Code CLI installed with CLI-owned login/configuration detected
     pub kimi_code_acp: AuthState,
     /// Reasonix CLI installed with project or user configuration detected
