@@ -105,7 +105,7 @@ pub use diagram_pane::{
 use diagram_pane::{
     debug_probe_pinned_diagram_with_font, div_ceil_u32,
     estimate_pinned_diagram_pane_width_with_font, is_diagram_poor_fit,
-    vcenter_fitted_image_with_font,
+    is_diagram_poor_fit_with_font, vcenter_fitted_image_with_font,
 };
 use diagram_pane::{
     draw_pinned_diagram, estimate_pinned_diagram_pane_height, estimate_pinned_diagram_pane_width,

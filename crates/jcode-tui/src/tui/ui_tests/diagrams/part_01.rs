@@ -245,13 +245,11 @@ fn test_estimate_pinned_diagram_pane_height_tall_image() {
 
 #[test]
 fn test_is_diagram_poor_fit_wide_in_side_pane() {
-    // The math below is written against the (8, 16) fallback; if a picker is
-    // ever initialised in this binary the expected values change.
-    assert_eq!(
-        crate::tui::mermaid::get_font_size(),
-        None,
-        "test assumes the (8,16) cell fallback"
-    );
+    // The math below is written against the (8, 16) cell fallback. Pass it
+    // explicitly: the picker global is a process-wide OnceLock that another
+    // test can initialize before this one runs, so asserting on it made this
+    // test order-dependent under `cargo test`.
+    let font = None; // (8, 16) fallback
 
     // A very wide diagram in a side pane (narrow+tall) should be a poor fit
     let diagram = info_widget::DiagramInfo {
@@ -266,7 +264,12 @@ fn test_is_diagram_poor_fit_wide_in_side_pane() {
         width: 30,
         height: 40,
     };
-    let poor = is_diagram_poor_fit(&diagram, area, crate::config::DiagramPanePosition::Side);
+    let poor = is_diagram_poor_fit_with_font(
+        &diagram,
+        area,
+        crate::config::DiagramPanePosition::Side,
+        font,
+    );
     assert!(
         poor,
         "very wide diagram in narrow side pane should be poor fit"
@@ -294,11 +297,11 @@ fn test_is_diagram_poor_fit_wide_in_side_pane() {
         "fixture must clear the early return, got {scale}"
     );
     assert!(
-        is_diagram_poor_fit(&diagram, area, crate::config::DiagramPanePosition::Side),
+        is_diagram_poor_fit_with_font(&diagram, area, crate::config::DiagramPanePosition::Side, font),
         "wide image wastes a wide short pane"
     );
     assert!(
-        !is_diagram_poor_fit(&diagram, area, crate::config::DiagramPanePosition::Top),
+        !is_diagram_poor_fit_with_font(&diagram, area, crate::config::DiagramPanePosition::Top, font),
         "same geometry is not a Top-pane poor fit"
     );
 }
