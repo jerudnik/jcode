@@ -8,6 +8,7 @@ paths = [
   '''(?:^|/)target(?:/.*)?$''',
   '''(?:^|/)docs/fork/(?:ideal-base|normalization)/evidence(?:/.*)?$''',
   '''(?:^|/)crates/jcode-base/src/auth/cursor_tests\.rs$''',
+  '''(?:^|/)crates/jcode-base/src/auth/reasonix\.rs$''',
   '''(?:^|/)crates/jcode-base/src/auth/claude_tests\.rs$''',
   '''(?:^|/)crates/jcode-base/src/auth/tests\.rs$''',
   '''(?:^|/)crates/jcode-base/src/gateway_tests\.rs$''',

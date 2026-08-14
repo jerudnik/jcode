@@ -681,7 +681,9 @@ impl ExclusiveFileLock {
 
 impl Drop for ExclusiveFileLock {
     fn drop(&mut self) {
-        let _ = fs2::FileExt::unlock(&self.file);
+        if let Err(error) = fs2::FileExt::unlock(&self.file) {
+            eprintln!("failed to unlock credential lock file: {error}");
+        }
     }
 }
 

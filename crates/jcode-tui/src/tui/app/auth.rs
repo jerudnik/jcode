@@ -1654,7 +1654,7 @@ impl App {
                 "Scan this on another device to open the xAI verification page:",
             )
             .map(|section| format!("\n\n{section}"))
-            .unwrap_or_default();
+            .unwrap_or_else(String::new);
             Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
                 provider: "grok_direct_code".to_string(),
                 success: true,
@@ -1665,7 +1665,11 @@ impl App {
             }));
 
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let _ = Self::open_auth_browser(&verification_url);
+            if !Self::open_auth_browser(&verification_url) {
+                crate::logging::warn(
+                    "Grok Direct login: could not open the verification URL in a browser",
+                );
+            }
 
             let credentials =
                 match crate::auth::grok_direct::poll_for_credentials_with_cancellation(

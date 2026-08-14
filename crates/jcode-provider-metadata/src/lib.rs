@@ -191,6 +191,7 @@ pub struct ResolvedOpenAiCompatibleProfile {
 }
 
 mod catalog;
+mod compat_profiles;
 
 pub use catalog::*;
 use catalog::{LOGIN_PROVIDERS, OPENAI_COMPAT_PROFILES};
