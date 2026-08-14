@@ -102,6 +102,59 @@ fn auto_scriptable_flow_reason_prefers_non_interactive_for_oauth_provider() {
 }
 
 #[test]
+fn grok_direct_uses_scriptable_device_flow_without_terminal_or_browser() {
+    let provider = crate::provider_catalog::resolve_login_provider("grok-direct")
+        .expect("resolve Grok Direct provider");
+    assert_eq!(
+        auto_scriptable_flow_reason(provider, &LoginOptions::default(), false),
+        Some("non_interactive_terminal")
+    );
+    assert_eq!(
+        auto_scriptable_flow_reason(
+            provider,
+            &LoginOptions {
+                no_browser: true,
+                ..LoginOptions::default()
+            },
+            true,
+        ),
+        Some("no_browser_requested")
+    );
+}
+
+#[test]
+fn grok_direct_pending_login_has_independent_storage_key() {
+    let pending = PendingScriptableLogin::GrokDirect {
+        device_code: "device".to_string(),
+        user_code: "CODE".to_string(),
+        verification_uri: "https://auth.x.ai/activate".to_string(),
+        verification_uri_complete: None,
+        expires_in: Some(600),
+        interval: 5,
+    };
+    assert_eq!(pending.key(), "grok-direct");
+    assert_ne!(pending.key(), "kimi");
+    let serialized = serde_json::to_value(&pending).expect("serialize pending Grok Direct login");
+    assert_eq!(serialized["provider"], "grok-direct");
+}
+
+#[test]
+fn grok_direct_terminal_poll_failures_are_distinguished_from_transient_errors() {
+    for message in [
+        "Grok Direct device authorization was denied",
+        "Grok Direct device authorization expired before login completed",
+        "Grok Direct device authorization was cancelled",
+    ] {
+        assert!(grok_direct_poll_error_is_terminal(&anyhow::anyhow!(
+            message
+        )));
+    }
+    assert!(!grok_direct_poll_error_is_terminal(&anyhow::anyhow!(
+        "failed to poll Grok Direct device authorization: connection reset"
+    )));
+}
+
+#[test]
 fn auto_scriptable_flow_reason_uses_no_browser_reason_when_requested() {
     let provider =
         crate::provider_catalog::resolve_login_provider("claude").expect("resolve claude provider");

@@ -90,6 +90,7 @@ pub enum ProviderChoice {
     Minimax,
     #[value(alias = "x.ai", alias = "x-ai")]
     Xai,
+    GrokDirect,
     #[value(alias = "grok", alias = "grok-subscription")]
     GrokBuild,
     #[value(alias = "kimi-acp")]
@@ -167,6 +168,7 @@ impl ProviderChoice {
             Self::Fireworks => "fireworks",
             Self::Minimax => "minimax",
             Self::Xai => "xai",
+            Self::GrokDirect => "grok-direct",
             Self::GrokBuild => "grok-build",
             Self::KimiCodeAcp => "kimi-code-acp",
             Self::Reasonix => "reasonix",
@@ -322,6 +324,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::Xai,
         crate::provider_catalog::XAI_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::GrokDirect,
+        crate::provider_catalog::GROK_DIRECT_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::GrokBuild,
@@ -1617,6 +1623,7 @@ async fn init_provider_with_options(
         | ProviderChoice::Fireworks
         | ProviderChoice::Minimax
         | ProviderChoice::Xai
+        | ProviderChoice::GrokDirect
         | ProviderChoice::NvidiaNim
         | ProviderChoice::XiaomiMimo
         | ProviderChoice::Lmstudio

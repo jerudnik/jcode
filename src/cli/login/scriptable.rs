@@ -20,8 +20,11 @@ pub(super) fn auto_scriptable_flow_reason(
     ) || matches!(
         provider.target,
         LoginProviderTarget::OpenAiCompatible(profile)
-            if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                && options.openai_compatible_api_key.is_none()
+            if match profile.auth_strategy.managed_oauth_provider() {
+                Some(ManagedOAuthProvider::Kimi) => options.openai_compatible_api_key.is_none(),
+                Some(ManagedOAuthProvider::GrokDirect) => true,
+                None => false,
+            }
     );
     if !supports_scriptable {
         return None;
@@ -202,7 +205,10 @@ pub(super) async fn start_scriptable_login(
             )
         }
         LoginProviderTarget::OpenAiCompatible(profile)
-            if profile.id == crate::provider_catalog::KIMI_PROFILE.id =>
+            if matches!(
+                profile.auth_strategy.managed_oauth_provider(),
+                Some(ManagedOAuthProvider::Kimi)
+            ) =>
         {
             let device = auth::kimi::request_device_authorization().await?;
             let expires_at_ms =
@@ -222,9 +228,34 @@ pub(super) async fn start_scriptable_login(
                 expires_at_ms,
             )
         }
+        LoginProviderTarget::OpenAiCompatible(profile)
+            if matches!(
+                profile.auth_strategy.managed_oauth_provider(),
+                Some(ManagedOAuthProvider::GrokDirect)
+            ) =>
+        {
+            let device = auth::grok_direct::request_device_authorization().await?;
+            let expires_at_ms =
+                current_time_ms() + (device.expires_in.unwrap_or(600) as i64 * 1000);
+            let auth_url = device.verification_url().to_string();
+            (
+                PendingScriptableLogin::GrokDirect {
+                    device_code: device.device_code,
+                    user_code: device.user_code.clone(),
+                    verification_uri: device.verification_uri,
+                    verification_uri_complete: device.verification_uri_complete,
+                    expires_in: device.expires_in,
+                    interval: device.interval,
+                },
+                auth_url,
+                "complete",
+                Some(device.user_code),
+                expires_at_ms,
+            )
+        }
         _ => {
             anyhow::bail!(
-                "`--print-auth-url` is currently supported for: claude, openai, gemini, antigravity, google, copilot, kimi."
+                "`--print-auth-url` is currently supported for: claude, openai, gemini, antigravity, google, copilot, kimi, grok-direct."
             )
         }
     };
@@ -297,7 +328,10 @@ pub(super) async fn complete_scriptable_login(
             complete_scriptable_copilot_login(provider.id, options).await
         }
         LoginProviderTarget::OpenAiCompatible(profile)
-            if profile.id == crate::provider_catalog::KIMI_PROFILE.id =>
+            if matches!(
+                profile.auth_strategy.managed_oauth_provider(),
+                Some(ManagedOAuthProvider::Kimi)
+            ) =>
         {
             if input.is_some() {
                 anyhow::bail!(
@@ -309,8 +343,24 @@ pub(super) async fn complete_scriptable_login(
             }
             complete_scriptable_kimi_login(provider.id, options).await
         }
+        LoginProviderTarget::OpenAiCompatible(profile)
+            if matches!(
+                profile.auth_strategy.managed_oauth_provider(),
+                Some(ManagedOAuthProvider::GrokDirect)
+            ) =>
+        {
+            if input.is_some() {
+                anyhow::bail!(
+                    "Grok Direct completion uses `--complete` and does not accept --callback-url or --auth-code."
+                )
+            }
+            if !options.complete {
+                anyhow::bail!("Grok Direct completion requires `--complete`.")
+            }
+            complete_scriptable_grok_direct_login(provider.id, options).await
+        }
         _ => anyhow::bail!(
-            "Scriptable completion is currently supported for: claude, openai, gemini, antigravity, google, copilot, kimi."
+            "Scriptable completion is currently supported for: claude, openai, gemini, antigravity, google, copilot, kimi, grok-direct."
         ),
     }
 }
@@ -662,6 +712,69 @@ pub(super) async fn complete_scriptable_kimi_login(
         eprintln!("Tokens saved to {}", auth::kimi::tokens_path()?.display());
     }
     Ok(LoginFlowOutcome::Completed)
+}
+
+pub(super) async fn complete_scriptable_grok_direct_login(
+    provider_id: &str,
+    options: &LoginOptions,
+) -> Result<LoginFlowOutcome> {
+    let pending_path = pending_login_path("grok-direct")?;
+    let PendingScriptableLogin::GrokDirect {
+        device_code,
+        user_code,
+        verification_uri,
+        verification_uri_complete,
+        expires_in,
+        interval,
+    } = load_pending_login(&pending_path, "grok-direct")?
+    else {
+        anyhow::bail!("Pending Grok Direct login state is invalid.");
+    };
+    let device = auth::grok_direct::DeviceAuthorization {
+        device_code,
+        user_code,
+        verification_uri,
+        verification_uri_complete,
+        expires_in,
+        interval,
+    };
+    let credentials = match auth::grok_direct::poll_for_credentials(&device).await {
+        Ok(credentials) => credentials,
+        Err(error) => {
+            if grok_direct_poll_error_is_terminal(&error) {
+                clear_pending_login(&pending_path);
+            }
+            return Err(error);
+        }
+    };
+    auth::grok_direct::save_credentials(&credentials)?;
+    clear_pending_login(&pending_path);
+    crate::telemetry::record_auth_success(provider_id, "oauth_device_code");
+    emit_scriptable_auth_success(
+        options.json,
+        ScriptableAuthSuccess {
+            status: "authenticated",
+            provider: provider_id.to_string(),
+            account_label: None,
+            credentials_path: Some(auth::grok_direct::credentials_path()?.display().to_string()),
+            email: None,
+        },
+    )?;
+    if !options.json {
+        eprintln!("Successfully logged in to Grok Direct!");
+        eprintln!(
+            "Credentials saved to {}",
+            auth::grok_direct::credentials_path()?.display()
+        );
+    }
+    Ok(LoginFlowOutcome::Completed)
+}
+
+pub(super) fn grok_direct_poll_error_is_terminal(error: &anyhow::Error) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("authorization was denied")
+        || message.contains("authorization expired")
+        || message.contains("authorization was cancelled")
 }
 
 pub(super) fn pending_login_path(key: &str) -> Result<PathBuf> {

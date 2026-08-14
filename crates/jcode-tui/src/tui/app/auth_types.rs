@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 #[derive(Debug, Clone)]
 pub(crate) enum PendingLogin {
     /// Waiting for user to paste Claude OAuth code for a specific stored account
@@ -48,6 +53,8 @@ pub(crate) enum PendingLogin {
     Copilot,
     /// Kimi device flow in progress (polling in background)
     Kimi,
+    /// Grok Direct device flow in progress (polling in background)
+    GrokDirect { cancelled: Arc<AtomicBool> },
     /// Waiting for the user to choose which external auth sources to import.
     AutoImportSelection {
         candidates: Vec<crate::external_auth::ExternalAuthReviewCandidate>,
@@ -88,12 +95,41 @@ impl PendingLogin {
             Self::CursorApiKey => Some(("cursor".to_string(), "api_key".to_string())),
             Self::Copilot => Some(("copilot".to_string(), "device_code".to_string())),
             Self::Kimi => Some(("kimi".to_string(), "oauth_device_code".to_string())),
+            Self::GrokDirect { .. } => {
+                Some(("grok-direct".to_string(), "oauth_device_code".to_string()))
+            }
             Self::AutoImportSelection { .. } => None,
             Self::AzureEndpoint | Self::AzureModel { .. } | Self::AzureAuthChoice { .. } => {
                 Some(("azure".to_string(), "hybrid".to_string()))
             }
             Self::AzureApiKey { .. } => Some(("azure".to_string(), "api_key".to_string())),
         }
+    }
+
+    pub(crate) fn cancel_background_poll(&self) {
+        if let Self::GrokDirect { cancelled } = self {
+            cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grok_direct_pending_login_has_independent_telemetry_and_cancellation() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let pending = PendingLogin::GrokDirect {
+            cancelled: Arc::clone(&cancelled),
+        };
+
+        assert_eq!(
+            pending.telemetry_context(),
+            Some(("grok-direct".to_string(), "oauth_device_code".to_string()))
+        );
+        pending.cancel_background_poll();
+        assert!(cancelled.load(Ordering::Relaxed));
     }
 }
 

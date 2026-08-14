@@ -577,6 +577,62 @@ fn test_tui_api_key_auth_refreshes_catalog_shows_diff_without_opening_picker() {
 }
 
 #[test]
+fn test_tui_grok_direct_post_login_preserves_requested_model() {
+    let provider = AuthUxStateSpaceProvider {
+        authed: StdArc::new(AtomicBool::new(false)),
+        refreshes: StdArc::new(AtomicUsize::new(0)),
+        model: StdArc::new(StdMutex::new("grok-4.5".to_string())),
+        set_model_requests: StdArc::new(StdMutex::new(Vec::new())),
+        provider_id: "grok-direct",
+        provider_label: "Grok Direct",
+        models: &["grok-4.6", "grok-4.5"],
+        include_wrong_profile_first: false,
+        include_generic_profile_duplicate: false,
+    };
+    let set_model_requests = provider.set_model_requests.clone();
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut app = create_test_app_with_provider(provider);
+    let session_id = app.session.id.clone();
+    let mut bus_rx = crate::bus::Bus::global().subscribe();
+    while bus_rx.try_recv().is_ok() {}
+
+    let _guard = rt.enter();
+    app.start_openai_compatible_post_login_activation(
+        "grok-direct".to_string(),
+        "Grok Direct".to_string(),
+    );
+
+    let activation = rt.block_on(async {
+        loop {
+            match tokio::time::timeout(Duration::from_secs(2), bus_rx.recv()).await {
+                Ok(Ok(event))
+                    if matches!(
+                        &event,
+                        crate::bus::BusEvent::ProviderModelActivated {
+                            session_id: event_session_id,
+                            ..
+                        } if event_session_id == &session_id
+                    ) =>
+                {
+                    break event;
+                }
+                Ok(Ok(_)) => continue,
+                other => panic!("expected Grok Direct activation event, got {other:?}"),
+            }
+        }
+    });
+
+    assert_eq!(
+        set_model_requests.lock().unwrap().as_slice(),
+        &["grok-direct:grok-4.5"],
+        "live catalog order must not replace the requested Grok Direct model"
+    );
+    super::local::handle_bus_event(&mut app, Ok(activation));
+    assert_eq!(app.session.model.as_deref(), Some("grok-4.5"));
+}
+
+#[test]
 fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
     with_temp_jcode_home(|| {
         let _guard = AzureLoginEnvGuard::save(&[

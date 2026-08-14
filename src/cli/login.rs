@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::auth;
 use crate::provider_catalog::{
-    LoginProviderDescriptor, LoginProviderTarget, OPENAI_COMPAT_LOCAL_ENABLED_ENV,
-    OpenAiCompatibleProfile, resolve_openai_compatible_profile,
+    LoginProviderDescriptor, LoginProviderTarget, ManagedOAuthProvider,
+    OPENAI_COMPAT_LOCAL_ENABLED_ENV, OpenAiCompatibleProfile, resolve_openai_compatible_profile,
 };
 
 use super::provider_init::{ProviderChoice, login_provider_for_choice, save_named_api_key};
@@ -111,6 +111,15 @@ enum PendingScriptableLogin {
         expires_in: Option<u64>,
         interval: u64,
     },
+    #[serde(rename = "grok-direct")]
+    GrokDirect {
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        verification_uri_complete: Option<String>,
+        expires_in: Option<u64>,
+        interval: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +138,7 @@ impl PendingScriptableLogin {
             Self::Google { .. } => "google",
             Self::Copilot { .. } => "copilot",
             Self::Kimi { .. } => "kimi",
+            Self::GrokDirect { .. } => "grok-direct",
         }
     }
 
@@ -313,10 +323,22 @@ pub async fn run_login_provider(
             }
             LoginProviderTarget::Azure => login_azure_flow().map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenAiCompatible(profile)
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                    && options.openai_compatible_api_key.is_none() =>
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(ManagedOAuthProvider::Kimi)
+                ) && options.openai_compatible_api_key.is_none() =>
             {
                 login_kimi_flow(options.no_browser)
+                    .await
+                    .map(|_| LoginFlowOutcome::Completed)
+            }
+            LoginProviderTarget::OpenAiCompatible(profile)
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(ManagedOAuthProvider::GrokDirect)
+                ) =>
+            {
+                login_grok_direct_flow(options.no_browser)
                     .await
                     .map(|_| LoginFlowOutcome::Completed)
             }
@@ -777,6 +799,43 @@ async fn login_kimi_flow(no_browser: bool) -> Result<()> {
     eprintln!("Successfully logged in to Kimi Code!");
     eprintln!("Tokens saved to {}", auth::kimi::tokens_path()?.display());
     crate::telemetry::record_auth_success("kimi", "oauth_device_code");
+    Ok(())
+}
+
+async fn login_grok_direct_flow(no_browser: bool) -> Result<()> {
+    eprintln!("Logging in to Grok Direct with xAI device authorization...");
+    eprintln!(
+        "Use your Grok subscription. This does not log into the Grok Build CLI and does not create or consume an xAI API key."
+    );
+    let device = auth::grok_direct::request_device_authorization().await?;
+    let verification_url = device.verification_url().to_string();
+    eprintln!("Verification URL: {}", verification_url);
+    eprintln!("User code: {}", device.user_code);
+    if maybe_open_browser(&verification_url, no_browser) {
+        eprintln!("Opened the verification URL in your browser.");
+    } else {
+        eprintln!("Open the verification URL above to continue.");
+    }
+    eprintln!("Waiting for xAI authorization... Press Ctrl-C to cancel.");
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let credentials = tokio::select! {
+        result = auth::grok_direct::poll_for_credentials_with_cancellation(
+            &device,
+            std::sync::Arc::clone(&cancelled),
+        ) => result?,
+        signal = tokio::signal::ctrl_c() => {
+            signal.context("failed to listen for Ctrl-C during Grok Direct login")?;
+            cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+            anyhow::bail!("Grok Direct device authorization was cancelled");
+        }
+    };
+    auth::grok_direct::save_credentials(&credentials)?;
+    eprintln!("Authenticated with Grok Direct.");
+    eprintln!(
+        "Credentials saved to {}",
+        auth::grok_direct::credentials_path()?.display()
+    );
+    crate::telemetry::record_auth_success("grok-direct", "oauth_device_code");
     Ok(())
 }
 
