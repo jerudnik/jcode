@@ -1675,7 +1675,7 @@ impl RawClient {
         })
         .await?;
         self.read_until(
-            Duration::from_secs(5),
+            e2e_wait_budget(),
             |event| matches!(event, ServerEvent::Done { id: done_id } if *done_id == id),
         )
         .await?;
@@ -1732,7 +1732,7 @@ impl RawClient {
         self.send_request(Request::GetState { id }).await?;
         match self
             .read_until(
-                Duration::from_secs(5),
+                e2e_wait_budget(),
                 |event| matches!(event, ServerEvent::State { id: event_id, .. } if *event_id == id),
             )
             .await?
@@ -1772,7 +1772,7 @@ impl RawClient {
         })
         .await?;
         match self
-                .read_until(Duration::from_secs(5), |event| {
+                .read_until(e2e_wait_budget(), |event| {
                     matches!(event, ServerEvent::CommMembers { id: event_id, .. } if *event_id == id)
                 })
                 .await?
@@ -1796,7 +1796,7 @@ impl RawClient {
         })
         .await?;
         match self
-                .read_until(Duration::from_secs(5), |event| {
+                .read_until(e2e_wait_budget(), |event| {
                     matches!(event, ServerEvent::CommStatusResponse { id: event_id, .. } if *event_id == id)
                 })
                 .await?
@@ -1830,11 +1830,19 @@ impl RawClient {
     }
 }
 
+/// Timeout budget for end-to-end waits in these tests. Deliberately
+/// generous: nextest runs many in-process servers concurrently on a loaded
+/// machine, and every wait polls and returns as soon as its condition is met,
+/// so a larger cap only slows genuine failures, never passing runs.
+fn e2e_wait_budget() -> Duration {
+    Duration::from_secs(30)
+}
+
 async fn wait_for_server_socket(
     path: &Path,
     server_task: &mut tokio::task::JoinHandle<Result<crate::server::ServerExit>>,
 ) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + e2e_wait_budget();
     loop {
         if server_task.is_finished() {
             let result = server_task.await?;
@@ -1876,7 +1884,7 @@ async fn wait_for_member_status(
     target_session: &str,
     expected_status: &str,
 ) -> Result<Vec<AgentInfo>> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + e2e_wait_budget();
     loop {
         let members = client.comm_list(requester_session).await?;
         if members
@@ -1903,7 +1911,7 @@ async fn wait_for_member_presence(
     requester_session: &str,
     target_session: &str,
 ) -> Result<Vec<AgentInfo>> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + e2e_wait_budget();
     loop {
         let members = client.comm_list(requester_session).await?;
         if members
