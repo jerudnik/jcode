@@ -639,6 +639,8 @@ pub struct AcpConfig {
     pub grok_cli_path: Option<std::path::PathBuf>,
     /// Explicit Kimi Code CLI path for the official ACP runtime.
     pub kimi_cli_path: Option<std::path::PathBuf>,
+    /// Explicit Reasonix CLI path for the ACP runtime.
+    pub reasonix_cli_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AcpConfig {
@@ -648,6 +650,7 @@ impl Default for AcpConfig {
             tool_profile: "acp".to_string(),
             grok_cli_path: None,
             kimi_cli_path: None,
+            reasonix_cli_path: None,
         }
     }
 }

@@ -50,6 +50,8 @@ pub struct AuthStatus {
     pub grok_build: AuthState,
     /// Kimi Code CLI installed with CLI-owned login/configuration detected
     pub kimi_code_acp: AuthState,
+    /// Reasonix CLI installed with project or user configuration detected
+    pub reasonix: AuthState,
     /// Google/Gmail OAuth configured
     pub google: AuthState,
     /// Google Gmail has send capability (Full tier)

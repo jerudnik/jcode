@@ -72,6 +72,13 @@ pub(crate) fn tool_smoke_skip_detail_for_choice(
         );
     }
 
+    if matches!(choice, super::provider_init::ProviderChoice::Reasonix) {
+        return Some(
+            "Skipped: Reasonix executes its workspace-only ACP tool loop internally; basic provider smoke validates the ACP transport."
+                .to_string(),
+        );
+    }
+
     if matches!(choice, super::provider_init::ProviderChoice::Fpt) {
         let model = effective_openai_compatible_auth_test_model(
             crate::provider_catalog::FPT_PROFILE,

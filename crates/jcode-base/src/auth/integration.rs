@@ -66,6 +66,7 @@ pub fn runtime_id_for_login_provider(
         LoginProviderTarget::Cursor => Some(RuntimeProviderId::Cursor),
         LoginProviderTarget::GrokBuild => Some(RuntimeProviderId::GrokBuild),
         LoginProviderTarget::KimiCodeAcp => Some(RuntimeProviderId::KimiCodeAcp),
+        LoginProviderTarget::Reasonix => Some(RuntimeProviderId::Reasonix),
         LoginProviderTarget::Copilot => Some(RuntimeProviderId::Copilot),
         LoginProviderTarget::Gemini => Some(RuntimeProviderId::Gemini),
         LoginProviderTarget::Antigravity => Some(RuntimeProviderId::Antigravity),

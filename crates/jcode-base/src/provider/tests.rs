@@ -833,6 +833,15 @@ impl StubExternalRuntime {
         )
     }
 
+    fn reasonix() -> Self {
+        Self::new(
+            "reasonix",
+            "Reasonix",
+            "reasonix-acp",
+            &["reasonix-pro", "reasonix-fast"],
+        )
+    }
+
     fn anthropic() -> Self {
         Self::new(
             "anthropic",
@@ -1115,6 +1124,75 @@ fn grok_build_catalog_refresh_runs_after_auth_changes() {
             })
             .await
             .expect("Grok Build catalog refresh was not scheduled after auth change");
+        });
+    });
+}
+
+#[test]
+fn reasonix_startup_slot_requires_available_auth_status() {
+    external::register_external_provider(external::REASONIX_RUNTIME, || {
+        Arc::new(StubExternalRuntime::reasonix())
+    });
+
+    assert!(
+        MultiProvider::reasonix_provider_for_auth_status(&auth::AuthStatus::default()).is_none()
+    );
+    let available = auth::AuthStatus {
+        reasonix: auth::AuthState::Available,
+        ..auth::AuthStatus::default()
+    };
+    let provider = MultiProvider::reasonix_provider_for_auth_status(&available)
+        .expect("available Reasonix setup should install the runtime slot");
+    assert_eq!(provider.name(), "reasonix");
+}
+
+#[test]
+fn reasonix_slot_exposes_prefixed_routes_and_preserves_fork_identity() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        let _runtime_guard = runtime.enter();
+        let reasonix = Arc::new(StubExternalRuntime::reasonix());
+        let (provider, _) =
+            test_multi_provider_with_compatible_profile(REASONIX_PROFILE_ID, reasonix, true);
+        let routes = provider
+            .model_routes()
+            .into_iter()
+            .filter(|route| route.api_method == "reasonix-acp")
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.model.as_str())
+                .collect::<Vec<_>>(),
+            ["reasonix:reasonix-pro", "reasonix:reasonix-fast"]
+        );
+        assert!(routes.iter().all(|route| route.provider == "Reasonix"));
+        assert_eq!(
+            provider.fork_model_switch_request(provider.active_provider(), &provider.model()),
+            "reasonix:reasonix-pro"
+        );
+    });
+}
+
+#[test]
+fn reasonix_catalog_refresh_runs_after_auth_changes() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        let _runtime_guard = runtime.enter();
+        let reasonix = Arc::new(StubExternalRuntime::reasonix());
+        let (provider, reasonix) =
+            test_multi_provider_with_compatible_profile(REASONIX_PROFILE_ID, reasonix, false);
+
+        provider.handle_auth_changed(false);
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while reasonix.prefetch_call_count() == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("Reasonix catalog refresh was not scheduled after auth change");
         });
     });
 }

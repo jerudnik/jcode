@@ -36,6 +36,7 @@ pub enum LoginProviderTarget {
     Cursor,
     GrokBuild,
     KimiCodeAcp,
+    Reasonix,
     Copilot,
     Gemini,
     Antigravity,
@@ -57,6 +58,7 @@ pub enum LoginProviderAuthStateKey {
     Cursor,
     GrokBuild,
     KimiCodeAcp,
+    Reasonix,
     Google,
 }
 
@@ -756,6 +758,30 @@ mod tests {
         let kimi_api = resolve_login_provider("kimi").expect("Kimi API provider");
         assert_eq!(kimi_api.id, "kimi");
         assert_ne!(kimi_api.target, LoginProviderTarget::KimiCodeAcp);
+    }
+
+    #[test]
+    fn reasonix_is_terminal_owned_cli_setup_auth() {
+        let provider = resolve_login_provider("reasonix").expect("Reasonix provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::Cli);
+        assert_eq!(provider.auth_state_key, LoginProviderAuthStateKey::Reasonix);
+        assert_eq!(provider.target, LoginProviderTarget::Reasonix);
+        assert!(
+            cli_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            auth_status_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            !tui_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id),
+            "Reasonix setup must stay terminal-owned"
+        );
     }
 
     #[test]

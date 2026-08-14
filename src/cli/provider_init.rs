@@ -94,6 +94,8 @@ pub enum ProviderChoice {
     GrokBuild,
     #[value(alias = "kimi-acp")]
     KimiCodeAcp,
+    #[value(alias = "reasonix-acp")]
+    Reasonix,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,
     #[value(alias = "xiaomi", alias = "mimo", alias = "xiaomi-mimo-api")]
@@ -167,6 +169,7 @@ impl ProviderChoice {
             Self::Xai => "xai",
             Self::GrokBuild => "grok-build",
             Self::KimiCodeAcp => "kimi-code-acp",
+            Self::Reasonix => "reasonix",
             Self::NvidiaNim => "nvidia-nim",
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::Lmstudio => "lmstudio",
@@ -327,6 +330,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::KimiCodeAcp,
         crate::provider_catalog::KIMI_CODE_ACP_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::Reasonix,
+        crate::provider_catalog::REASONIX_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::NvidiaNim,
@@ -1286,6 +1293,13 @@ pub async fn login_and_bootstrap_provider(
                 anyhow::anyhow!("Kimi Code ACP runtime is not registered or authenticated")
             })?
         }
+        LoginProviderTarget::Reasonix => {
+            disable_subscription_runtime_mode();
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::REASONIX_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Reasonix runtime is not registered or configured"))?
+        }
         LoginProviderTarget::OpenAiApiKey => {
             disable_subscription_runtime_mode();
             lock_model_provider("openai");
@@ -1538,6 +1552,23 @@ async fn init_provider_with_options(
                 crate::provider::external::KIMI_CODE_ACP_RUNTIME,
             )
             .ok_or_else(|| anyhow::anyhow!("Kimi Code ACP runtime is not registered"))?
+        }
+        ProviderChoice::Reasonix => {
+            disable_subscription_runtime_mode();
+            if !crate::auth::reasonix::cli_available() {
+                anyhow::bail!(crate::auth::reasonix::runtime_not_installed_hint());
+            }
+            if !crate::auth::reasonix::config_presence().any() {
+                anyhow::bail!(crate::auth::reasonix::setup_required_hint());
+            }
+            init_notice("Using Reasonix through its workspace-only ACP runtime");
+            unlock_model_provider();
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "reasonix");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::REASONIX_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Reasonix runtime is not registered"))?
         }
         ProviderChoice::Openrouter => {
             disable_subscription_runtime_mode();

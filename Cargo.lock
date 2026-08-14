@@ -3298,6 +3298,7 @@ dependencies = [
  "jcode-provider-kimi-acp-runtime",
  "jcode-provider-openai-runtime",
  "jcode-provider-openrouter-runtime",
+ "jcode-provider-reasonix-runtime",
  "jcode-selfdev-types",
  "jcode-tui",
  "jcode-tui-session-picker",
@@ -4079,6 +4080,21 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
+]
+
+[[package]]
+name = "jcode-provider-reasonix-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "jcode-message-types",
+ "jcode-provider-acp-runtime",
+ "jcode-provider-core",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

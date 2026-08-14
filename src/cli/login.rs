@@ -302,6 +302,9 @@ pub async fn run_login_provider(
             LoginProviderTarget::KimiCodeAcp => login_kimi_code_acp_flow()
                 .await
                 .map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::Reasonix => login_reasonix_flow()
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenRouter => {
                 login_openrouter_flow().map(|_| LoginFlowOutcome::Completed)
             }
@@ -477,6 +480,31 @@ async fn login_kimi_code_acp_flow() -> Result<()> {
         })?;
     if !status.success() {
         anyhow::bail!("`{} login` exited with status {status}", cli.display());
+    }
+    Ok(())
+}
+
+async fn login_reasonix_flow() -> Result<()> {
+    if !crate::auth::reasonix::cli_available() {
+        anyhow::bail!(crate::auth::reasonix::runtime_not_installed_hint());
+    }
+    let cli = crate::auth::reasonix::cli_path();
+    let status = tokio::process::Command::new(&cli)
+        .arg("setup")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to launch '{} setup'. {}",
+                cli.display(),
+                crate::auth::reasonix::runtime_not_installed_hint()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("`{} setup` exited with status {status}", cli.display());
     }
     Ok(())
 }

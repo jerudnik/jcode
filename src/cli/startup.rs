@@ -137,6 +137,21 @@ pub fn register_external_provider_runtimes() {
         },
     );
     crate::provider::external::register_external_provider_fallible(
+        crate::provider::external::REASONIX_RUNTIME,
+        || {
+            if !crate::auth::reasonix::cli_available()
+                || !crate::auth::reasonix::config_presence().any()
+            {
+                return None;
+            }
+            Some(
+                std::sync::Arc::new(jcode_provider_reasonix_runtime::provider(
+                    crate::auth::reasonix::cli_path(),
+                )) as std::sync::Arc<dyn crate::provider::Provider>,
+            )
+        },
+    );
+    crate::provider::external::register_external_provider_fallible(
         crate::provider::external::GROK_BUILD_RUNTIME,
         || {
             if !crate::auth::grok_build::cli_available()
@@ -351,7 +366,7 @@ mod tests {
             crate::provider::external::GROK_BUILD_RUNTIME
         ));
         assert!(crate::provider::external::external_provider_registered(
-            crate::provider::external::KIMI_CODE_ACP_RUNTIME
+            crate::provider::external::REASONIX_RUNTIME
         ));
     }
 }

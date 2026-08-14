@@ -21,6 +21,7 @@ pub mod lifecycle;
 pub mod login_diagnostics;
 pub mod login_flows;
 pub mod oauth;
+pub mod reasonix;
 pub(crate) mod refresh_coordinator;
 pub mod refresh_state;
 mod status_types;
@@ -138,6 +139,7 @@ fn log_auth_status_snapshot(event: &str, status: &AuthStatus) {
             ("gemini", auth_state_label(status.gemini)),
             ("cursor", auth_state_label(status.cursor)),
             ("google", auth_state_label(status.google)),
+            ("reasonix", auth_state_label(status.reasonix)),
         ],
     );
 }
@@ -265,6 +267,7 @@ impl AuthStatus {
             || self.cursor == AuthState::Available
             || self.grok_build == AuthState::Available
             || self.kimi_code_acp == AuthState::Available
+            || self.reasonix == AuthState::Available
     }
 
     /// Emit a structured, non-secret snapshot of which providers currently have
@@ -302,6 +305,7 @@ impl AuthStatus {
                 ("cursor", self.cursor.label().to_string()),
                 ("grok_build", self.grok_build.label().to_string()),
                 ("kimi_code_acp", self.kimi_code_acp.label().to_string()),
+                ("reasonix", self.reasonix.label().to_string()),
             ],
         );
     }
@@ -336,6 +340,7 @@ impl AuthStatus {
             LoginProviderAuthStateKey::Cursor => self.cursor,
             LoginProviderAuthStateKey::GrokBuild => self.grok_build,
             LoginProviderAuthStateKey::KimiCodeAcp => self.kimi_code_acp,
+            LoginProviderAuthStateKey::Reasonix => self.reasonix,
             LoginProviderAuthStateKey::Google => self.google,
         }
     }
@@ -395,6 +400,7 @@ impl AuthStatus {
             crate::provider_catalog::LoginProviderTarget::OpenAi => self.openai_oauth_state,
             crate::provider_catalog::LoginProviderTarget::GrokBuild => self.grok_build,
             crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => self.kimi_code_acp,
+            crate::provider_catalog::LoginProviderTarget::Reasonix => self.reasonix,
             crate::provider_catalog::LoginProviderTarget::Bedrock => {
                 if crate::provider::bedrock::BedrockProvider::has_credentials() {
                     AuthState::Available
@@ -492,6 +498,23 @@ impl AuthStatus {
                         .to_string()
                 } else {
                     kimi_code_acp::authentication_required_hint().to_string()
+                }
+            }
+            crate::provider_catalog::LoginProviderTarget::Reasonix => {
+                let presence = reasonix::config_presence();
+                if !reasonix::cli_available() {
+                    reasonix::runtime_not_installed_hint()
+                } else if presence.project && presence.user {
+                    "Reasonix project and user configuration detected; ACP validates runtime setup when the provider starts"
+                        .to_string()
+                } else if presence.project {
+                    "Reasonix project configuration (`./reasonix.toml`) detected; ACP validates runtime setup when the provider starts"
+                        .to_string()
+                } else if presence.user {
+                    "Reasonix user configuration (`~/.reasonix/config.toml`) detected; ACP validates runtime setup when the provider starts"
+                        .to_string()
+                } else {
+                    reasonix::setup_required_hint().to_string()
                 }
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
@@ -751,6 +774,17 @@ impl AuthStatus {
                 AuthRefreshSupport::ExternalManaged,
                 AuthValidationMethod::PresenceCheck,
             ),
+            crate::provider_catalog::LoginProviderTarget::Reasonix => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::LocalCliSession
+                } else {
+                    AuthCredentialSource::None
+                },
+                self.method_detail_for_provider(provider),
+                AuthExpiryConfidence::Unknown,
+                AuthRefreshSupport::ExternalManaged,
+                AuthValidationMethod::PresenceCheck,
+            ),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 if profile.id == crate::provider_catalog::KIMI_PROFILE.id
                     && crate::auth::kimi::has_oauth_tokens()
@@ -921,6 +955,13 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
     });
     record_auth_probe_step(&mut timings, "kimi_code_acp", || {
         status.kimi_code_acp = if kimi_code_acp::is_available() {
+            AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
+    });
+    record_auth_probe_step(&mut timings, "reasonix", || {
+        status.reasonix = if reasonix::is_available() {
             AuthState::Available
         } else {
             AuthState::NotConfigured
@@ -1235,6 +1276,23 @@ fn assessment_for_key(
                 "Kimi Code CLI-owned login/configuration".to_string()
             } else {
                 kimi_code_acp::authentication_required_hint().to_string()
+            },
+            AuthExpiryConfidence::Unknown,
+            AuthRefreshSupport::ExternalManaged,
+            AuthValidationMethod::PresenceCheck,
+        ),
+        LoginProviderAuthStateKey::Reasonix => (
+            if state == AuthState::Available {
+                AuthCredentialSource::LocalCliSession
+            } else {
+                AuthCredentialSource::None
+            },
+            if !reasonix::cli_available() {
+                reasonix::runtime_not_installed_hint()
+            } else if state == AuthState::Available {
+                "Reasonix project or user configuration".to_string()
+            } else {
+                reasonix::setup_required_hint().to_string()
             },
             AuthExpiryConfidence::Unknown,
             AuthRefreshSupport::ExternalManaged,

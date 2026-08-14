@@ -1006,6 +1006,19 @@ pub const KIMI_CODE_ACP_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderD
     order: LoginProviderSurfaceOrder::new(Some(41), None, None, None, Some(41)),
 };
 
+pub const REASONIX_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
+    id: "reasonix",
+    display_name: "Reasonix",
+    auth_kind: LoginProviderAuthKind::Cli,
+    auth_state_key: LoginProviderAuthStateKey::Reasonix,
+    auth_status_method: "Reasonix setup",
+    aliases: &["reasonix-acp"],
+    menu_detail: "Reasonix through its official workspace-only ACP runtime",
+    recommended: false,
+    target: LoginProviderTarget::Reasonix,
+    order: LoginProviderSurfaceOrder::new(Some(40), None, None, None, Some(40)),
+};
+
 pub const NVIDIA_NIM_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescriptor {
     id: "nvidia-nim",
     display_name: "NVIDIA NIM",
@@ -1154,7 +1167,7 @@ pub const GOOGLE_LOGIN_PROVIDER: LoginProviderDescriptor = LoginProviderDescript
     order: LoginProviderSurfaceOrder::new(Some(13), None, None, None, None),
 };
 
-pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 49] = [
+pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 50] = [
     AUTO_IMPORT_LOGIN_PROVIDER,
     CLAUDE_LOGIN_PROVIDER,
     ANTHROPIC_API_LOGIN_PROVIDER,
@@ -1193,6 +1206,7 @@ pub(crate) const LOGIN_PROVIDERS: [LoginProviderDescriptor; 49] = [
     XAI_LOGIN_PROVIDER,
     GROK_BUILD_LOGIN_PROVIDER,
     KIMI_CODE_ACP_LOGIN_PROVIDER,
+    REASONIX_LOGIN_PROVIDER,
     NVIDIA_NIM_LOGIN_PROVIDER,
     XIAOMI_MIMO_LOGIN_PROVIDER,
     LMSTUDIO_LOGIN_PROVIDER,

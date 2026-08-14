@@ -760,6 +760,7 @@ fn normalized_login_provider_id(provider_id: &str) -> Option<&'static str> {
         "antigravity" => Some("antigravity"),
         "grok-build" | "grok-subscription" => Some("grok-build"),
         "kimi-code-acp" | "kimi-acp" => Some("kimi-code-acp"),
+        "reasonix" | "reasonix-acp" => Some("reasonix"),
         _ => None,
     }
 }
@@ -1053,6 +1054,10 @@ fn direct_provider_activation(provider_id: &str) -> Option<ProviderActivation> {
             RuntimeProviderId::KimiCodeAcp,
             ActiveProvider::OpenRouter,
         )),
+        "reasonix" => Some(ProviderActivation::locked(
+            RuntimeProviderId::Reasonix,
+            ActiveProvider::OpenRouter,
+        )),
         _ => None,
     }
 }
@@ -1083,6 +1088,7 @@ pub fn model_switch_request_for_provider_id(
         Some("antigravity") => format!("antigravity:{}", model),
         Some("grok-build") => format!("grok-build:{}", model),
         Some("kimi-code-acp") => format!("kimi-code-acp:{}", model),
+        Some("reasonix") => format!("reasonix:{}", model),
         _ => model.to_string(),
     }
 }
@@ -1428,6 +1434,9 @@ mod tests {
                     "openrouter",
                     "kimi-code-acp",
                 )),
+                crate::provider_catalog::LoginProviderTarget::Reasonix => {
+                    Some(("reasonix", "reasonix", "openrouter", "reasonix"))
+                }
                 _ => None,
             }) else {
                 continue;
@@ -1500,6 +1509,7 @@ mod tests {
             "antigravity",
             "grok-build",
             "kimi-code-acp",
+            "reasonix",
         ] {
             assert!(
                 covered.contains(&expected),

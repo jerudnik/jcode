@@ -13,8 +13,10 @@
   pkg-config,
   cmake,
   perl,
+  makeWrapper,
   openssl,
   libiconv,
+  reasonix,
   # Build metadata. Keep the executable derivation stable across repository
   # revisions by avoiding commit-specific inputs here; provenance records the
   # exact revision separately.
@@ -113,6 +115,8 @@ craneLib.buildPackage (
   // {
     inherit cargoArtifacts;
 
+    nativeBuildInputs = commonArgs.nativeBuildInputs ++ [ makeWrapper ];
+
     # Only build the user-facing binary by default. Dev/bench bins stay behind
     # their feature gates and are not part of the public package.
     cargoExtraArgs = "--locked --bin jcode";
@@ -132,6 +136,13 @@ craneLib.buildPackage (
       # makes crane's later reference-stripping sed pass fail with EACCES. Make
       # the installed copy writable so post-build fixup can rewrite it.
       chmod -R u+w "$out/share/jcode/web/jcode-mobile"
+    '';
+
+    # The Reasonix provider launches the official ACP runtime by command name.
+    # Keep the pinned runtime in the package closure and on the wrapped PATH.
+    postFixup = ''
+      wrapProgram "$out/bin/jcode" \
+        --prefix PATH : ${lib.makeBinPath [ reasonix ]}
     '';
 
     meta = {

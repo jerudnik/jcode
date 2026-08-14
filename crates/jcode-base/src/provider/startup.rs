@@ -25,6 +25,18 @@ impl MultiProvider {
         external::instantiate_expected_external_provider(external::KIMI_CODE_ACP_RUNTIME)
     }
 
+    pub(super) fn reasonix_provider_for_auth_status(
+        auth_status: &auth::AuthStatus,
+    ) -> Option<Arc<dyn Provider>> {
+        if !auth_status
+            .assessment_for_provider(crate::provider_catalog::REASONIX_LOGIN_PROVIDER)
+            .is_available()
+        {
+            return None;
+        }
+        external::instantiate_expected_external_provider(external::REASONIX_RUNTIME)
+    }
+
     pub(super) fn spawn_post_auth_model_refresh(
         provider: Arc<dyn Provider>,
         provider_label: &'static str,
@@ -238,6 +250,8 @@ impl MultiProvider {
             Self::grok_build_provider_for_auth_status(provider_state.auth_status());
         let kimi_code_acp_provider =
             Self::kimi_code_acp_provider_for_auth_status(provider_state.auth_status());
+        let reasonix_provider =
+            Self::reasonix_provider_for_auth_status(provider_state.auth_status());
         let mut openai_compatible_profiles = HashMap::new();
         if let Some(grok) = grok_build_provider.as_ref() {
             openai_compatible_profiles.insert(GROK_BUILD_PROFILE_ID.to_string(), Arc::clone(grok));
@@ -246,6 +260,11 @@ impl MultiProvider {
             openai_compatible_profiles
                 .insert(KIMI_CODE_ACP_PROFILE_ID.to_string(), Arc::clone(kimi));
         }
+        if let Some(reasonix) = reasonix_provider.as_ref() {
+            openai_compatible_profiles
+                .insert(REASONIX_PROFILE_ID.to_string(), Arc::clone(reasonix));
+        }
+
         let copilot_premium_zero = matches!(
             std::env::var("JCODE_COPILOT_PREMIUM").ok().as_deref(),
             Some("0")

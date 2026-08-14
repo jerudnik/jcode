@@ -629,6 +629,17 @@ impl App {
                 ));
                 self.set_status_notice("Kimi Code ACP: use terminal login");
             }
+            crate::provider_catalog::LoginProviderTarget::Reasonix => {
+                crate::telemetry::record_auth_surface_blocked(
+                    provider.id,
+                    provider.auth_kind.label(),
+                );
+                self.push_display_message(DisplayMessage::system(
+                    "Reasonix setup is owned by its CLI. Run `jcode login reasonix` in a terminal, then reopen the model picker."
+                        .to_string(),
+                ));
+                self.set_status_notice("Reasonix: use terminal login");
+            }
             crate::provider_catalog::LoginProviderTarget::Copilot => self.start_copilot_login(),
             crate::provider_catalog::LoginProviderTarget::Gemini => self.start_gemini_login(),
             crate::provider_catalog::LoginProviderTarget::Antigravity => {

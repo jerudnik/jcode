@@ -45,6 +45,7 @@ fn test_provider_choice_arg_values() {
     assert_eq!(ProviderChoice::Xai.as_arg_value(), "xai");
     assert_eq!(ProviderChoice::GrokBuild.as_arg_value(), "grok-build");
     assert_eq!(ProviderChoice::KimiCodeAcp.as_arg_value(), "kimi-code-acp");
+    assert_eq!(ProviderChoice::Reasonix.as_arg_value(), "reasonix");
     assert_eq!(ProviderChoice::XiaomiMimo.as_arg_value(), "xiaomi-mimo");
     assert_eq!(ProviderChoice::Lmstudio.as_arg_value(), "lmstudio");
     assert_eq!(ProviderChoice::Ollama.as_arg_value(), "ollama");
