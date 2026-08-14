@@ -2912,11 +2912,20 @@ impl OpenRouterProvider {
     }
 
     async fn model_pricing(&self, model_id: &str) -> Option<ModelPricing> {
-        let cache = self.models_cache.read().await;
-        if cache.fetched
-            && let Some(model) = cache.models.iter().find(|m| m.id == model_id)
+        // Scope the read guard so it drops before the disk/fetch fallbacks.
+        // Holding it across `fetch_models().await` self-deadlocks: tokio's
+        // RwLock is write-preferring, so when a background catalog refresh
+        // queues a write while this task still holds the read, the fresh read
+        // inside `fetch_models` parks behind the writer, and the writer parks
+        // behind this guard. The agent turn then hangs forever before the
+        // stream ever opens.
         {
-            return Some(model.pricing.clone());
+            let cache = self.models_cache.read().await;
+            if cache.fetched
+                && let Some(model) = cache.models.iter().find(|m| m.id == model_id)
+            {
+                return Some(model.pricing.clone());
+            }
         }
 
         if let Some(cache_entry) = self.load_usable_model_disk_cache_entry() {
@@ -2926,10 +2935,15 @@ impl OpenRouterProvider {
                 .find(|m| m.id == model_id)
                 .map(|m| m.pricing.clone());
             if pricing.is_some() {
-                if let Ok(mut cache) = self.models_cache.try_write() {
-                    cache.models = models;
-                    cache.fetched = true;
-                }
+                // The read guard above is dropped, so this write can actually
+                // land. The previous `try_write` here could never succeed
+                // while the guard was alive, which also meant the in-memory
+                // cache stayed cold and every `complete()` re-read the disk
+                // cache.
+                let mut cache = self.models_cache.write().await;
+                cache.models = models;
+                cache.fetched = true;
+                cache.cached_at = current_unix_secs();
                 return pricing;
             }
         }

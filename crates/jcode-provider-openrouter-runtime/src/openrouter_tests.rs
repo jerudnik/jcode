@@ -3403,3 +3403,54 @@ fn wi4_openrouter_reasoning_preserves_contextual_aliases_and_fallbacks() {
         Some("xhigh")
     );
 }
+
+#[tokio::test]
+async fn model_pricing_disk_hit_populates_memory_cache() {
+    let _lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    let _key = EnvVarGuard::set("TEST_PRICING_GUARD_KEY", "test-key");
+
+    let api_base = "https://llm.example.com/v1";
+    let profile = jcode_base::config::NamedProviderConfig {
+        base_url: api_base.to_string(),
+        api_key_env: Some("TEST_PRICING_GUARD_KEY".to_string()),
+        model_catalog: true,
+        default_model: Some("cached-model".to_string()),
+        ..Default::default()
+    };
+    // The constructor sets JCODE_OPENROUTER_CACHE_NAMESPACE to the profile id,
+    // so the disk cache written below lands in this profile's namespace.
+    let provider = OpenRouterProvider::new_named_openai_compatible("pricing-guard", &profile)
+        .expect("named profile should initialize");
+
+    jcode_provider_openrouter::save_disk_cache_with_source(
+        &[jcode_provider_openrouter::ModelInfo {
+            id: "cached-model".to_string(),
+            name: String::new(),
+            context_length: None,
+            pricing: jcode_provider_openrouter::ModelPricing {
+                input_cache_read: Some("0.1".to_string()),
+                ..Default::default()
+            },
+            created: None,
+        }],
+        Some(api_base),
+    );
+
+    // Regression: model_pricing used to hold its models_cache read guard
+    // across the disk/fetch fallbacks. The `try_write` here could then never
+    // succeed (a read guard was still alive), so the in-memory cache stayed
+    // cold forever — and the same held guard self-deadlocked against a queued
+    // writer from a background catalog refresh, hanging the turn before the
+    // stream ever opened.
+    let pricing = provider.model_pricing("cached-model").await;
+    assert!(pricing.is_some(), "disk cache hit should yield pricing");
+
+    let cache = provider.models_cache.read().await;
+    assert!(
+        cache.fetched,
+        "disk hit must populate the in-memory models cache"
+    );
+    assert!(cache.models.iter().any(|m| m.id == "cached-model"));
+}
