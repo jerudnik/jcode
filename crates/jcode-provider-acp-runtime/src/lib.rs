@@ -36,8 +36,66 @@ use permission::normalize_permission;
 pub struct AcpProcessSpec {
     pub command: PathBuf,
     pub args: Vec<String>,
+    /// Extra variables applied on top of [`ACP_INHERITED_ENV_ALLOWLIST`].
+    /// These replace inherited values of the same name; they do not restore
+    /// the rest of the parent environment.
     pub env: BTreeMap<String, String>,
     pub cwd: Option<PathBuf>,
+}
+
+/// Parent-environment keys an ACP child may inherit.
+///
+/// Everything else is stripped so a vendor CLI cannot see jcode's or the
+/// user's unrelated tokens. Policy extras in [`AcpProcessSpec::env`] overlay
+/// this set and may add provider-specific keys.
+pub const ACP_INHERITED_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TZ",
+    "TERM",
+    "COLORTERM",
+    "XDG_RUNTIME_DIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "NIX_SSL_CERT_FILE",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+];
+
+fn is_inherited_acp_env_key(key: &str) -> bool {
+    ACP_INHERITED_ENV_ALLOWLIST
+        .iter()
+        .any(|allowed| key.eq_ignore_ascii_case(allowed))
+}
+
+/// Build the isolated child environment: allowlisted parent vars, then
+/// policy extras. Parent secrets not on the allowlist are dropped.
+pub fn isolated_acp_child_env(extras: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut env: BTreeMap<String, String> = std::env::vars()
+        .filter(|(key, _)| is_inherited_acp_env_key(key))
+        .collect();
+    env.extend(
+        extras
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    env
 }
 
 /// Bounds for ACP requests, prompts, diagnostics, and stream buffering.
@@ -711,7 +769,8 @@ where
     let mut command = Command::new(&process.command);
     command
         .args(&process.args)
-        .envs(&process.env)
+        .env_clear()
+        .envs(isolated_acp_child_env(&process.env))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1160,3 +1219,38 @@ fn mutex_lock<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod dependency_spike_tests;
+
+#[cfg(test)]
+mod isolated_env_tests {
+    use super::*;
+
+    #[test]
+    fn isolated_env_drops_unrelated_parent_secrets() {
+        let extras = BTreeMap::from([("JCODE_FAKE_ACP_SCENARIO".to_string(), "happy".to_string())]);
+        let env = isolated_acp_child_env(&extras);
+        assert_eq!(
+            env.get("JCODE_FAKE_ACP_SCENARIO").map(String::as_str),
+            Some("happy")
+        );
+        assert!(
+            !env.keys()
+                .any(|key| key.eq_ignore_ascii_case("OPENAI_API_KEY")
+                    || key.eq_ignore_ascii_case("ANTHROPIC_API_KEY")
+                    || key.eq_ignore_ascii_case("GITHUB_TOKEN")
+                    || key.eq_ignore_ascii_case("GH_TOKEN")
+                    || key.eq_ignore_ascii_case("AWS_SECRET_ACCESS_KEY")
+                    || key.eq_ignore_ascii_case("OPENROUTER_API_KEY")),
+            "isolated env leaked a parent secret: {env:?}"
+        );
+        if std::env::var_os("PATH").is_some() {
+            assert!(env.contains_key("PATH") || env.keys().any(|k| k.eq_ignore_ascii_case("PATH")));
+        }
+    }
+
+    #[test]
+    fn isolated_env_lets_policy_extras_override_allowlisted_keys() {
+        let extras = BTreeMap::from([("PATH".to_string(), "/policy/bin".to_string())]);
+        let env = isolated_acp_child_env(&extras);
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/policy/bin"));
+    }
+}

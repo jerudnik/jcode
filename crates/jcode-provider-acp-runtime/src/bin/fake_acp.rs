@@ -140,6 +140,7 @@ fn main() -> Result<()> {
             "args": std::env::args().skip(1).collect::<Vec<_>>(),
             "cwd": std::env::current_dir().context("fake ACP cwd")?,
             "marker": marker,
+            "sawParentSecret": std::env::var_os("JCODE_ACP_PARENT_SECRET").is_some(),
             "pid": std::process::id()
         }
     }))?;

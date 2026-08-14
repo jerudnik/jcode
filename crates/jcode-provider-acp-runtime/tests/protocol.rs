@@ -409,6 +409,23 @@ fn permission_reply(log: &[Value]) -> &Value {
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_init_auth_catalog_and_new_resume_lifecycle_work() {
+    let previous_secret = std::env::var_os("JCODE_ACP_PARENT_SECRET");
+    // Test-only env mutation: isolated to this process and restored on drop.
+    unsafe {
+        std::env::set_var("JCODE_ACP_PARENT_SECRET", "must-not-leak");
+    }
+    struct RestoreEnv(Option<std::ffi::OsString>);
+    impl Drop for RestoreEnv {
+        fn drop(&mut self) {
+            unsafe {
+                match self.0.take() {
+                    Some(value) => std::env::set_var("JCODE_ACP_PARENT_SECRET", value),
+                    None => std::env::remove_var("JCODE_ACP_PARENT_SECRET"),
+                }
+            }
+        }
+    }
+    let _restore = RestoreEnv(previous_secret);
     let policy = TestPolicy::new("happy").mutate_config();
     let log_path = policy.log_path.clone();
     let cwd = policy.process.cwd.clone().unwrap();
@@ -434,6 +451,11 @@ async fn process_init_auth_catalog_and_new_resume_lifecycle_work() {
     assert_eq!(process["args"], json!(["literal;not-a-shell"]));
     assert_eq!(process["cwd"], json!(fs::canonicalize(cwd).unwrap()));
     assert_eq!(process["marker"], json!("literal-env"));
+    assert_eq!(
+        process["sawParentSecret"],
+        json!(false),
+        "ACP child must not inherit parent secrets outside the allowlist"
+    );
     let initialize = prefetched
         .iter()
         .find(|entry| entry.get("method") == Some(&json!("initialize")))
