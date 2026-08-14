@@ -1783,6 +1783,12 @@ fn preview_render_cache_is_reused_across_scroll_and_rebuilt_on_selection_change(
 
     // Scrolling several times must not change the cache key (content unchanged):
     // the cache is reused and only the scroll offset + visible slice move.
+    // The content hash buckets wall-clock into ~15s windows for the relative
+    // "… ago" status label, so an unlucky run can cross one bucket boundary
+    // mid-test; that is a legitimate rebuild, not a scroll invalidation, so
+    // re-baseline at most once.
+    let mut key_after_build = key_after_build;
+    let mut rebaselined = false;
     for _ in 0..5 {
         picker.scroll_preview_up(1);
         render(&mut picker);
@@ -1791,10 +1797,14 @@ fn preview_render_cache_is_reused_across_scroll_and_rebuilt_on_selection_change(
             .as_ref()
             .map(|c| c.key.clone())
             .unwrap();
-        assert!(
-            key_now == key_after_build,
-            "scrolling must reuse the cached wrapped preview"
-        );
+        if key_now != key_after_build {
+            assert!(
+                !rebaselined,
+                "preview cache rebuilt twice during a scroll burst"
+            );
+            rebaselined = true;
+            key_after_build = key_now;
+        }
     }
 
     // Navigating to a different session changes the content hash, so the cache
