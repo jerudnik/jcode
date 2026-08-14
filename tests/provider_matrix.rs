@@ -7,9 +7,9 @@ use jcode::cli::provider_init::{
 use jcode::provider::Provider;
 use jcode::provider_catalog::{
     ApiKeyCredentialSource, LoginProviderDescriptor, LoginProviderTarget, OPENAI_COMPAT_PROFILE,
-    OpenAiCompatibleProfile, apply_openai_compatible_profile_env, load_api_key, login_providers,
-    openai_compatible_profile_is_configured, openai_compatible_profiles,
-    resolve_openai_compatible_profile, save_env_value_to_env_file,
+    OpenAiCompatibleAuthStrategy, OpenAiCompatibleProfile, apply_openai_compatible_profile_env,
+    load_api_key, login_providers, openai_compatible_profile_is_configured,
+    openai_compatible_profiles, resolve_openai_compatible_profile, save_env_value_to_env_file,
     server_bootstrap_login_providers,
 };
 use jcode_provider_openrouter_runtime::OpenRouterProvider;
@@ -240,6 +240,21 @@ fn login_provider_profile(provider: LoginProviderDescriptor) -> OpenAiCompatible
     }
 }
 
+/// Profiles that authenticate only through managed OAuth (no API-key
+/// fallback, e.g. grok-direct) cannot be activated by env/file API-key
+/// credentials or by auto-init without an OAuth login, so the API-key
+/// matrix cells do not apply to them. Their OAuth flows are covered by
+/// dedicated offline login tests instead.
+fn api_key_matrix_applies(profile: OpenAiCompatibleProfile) -> bool {
+    !matches!(
+        resolve_openai_compatible_profile(profile).auth_strategy,
+        OpenAiCompatibleAuthStrategy::ManagedOAuth {
+            api_key_fallback: false,
+            ..
+        }
+    )
+}
+
 fn write_profile_api_key_file(
     env: &TestEnv,
     profile: OpenAiCompatibleProfile,
@@ -430,7 +445,10 @@ fn assert_model_picker_has_profile_route(
 
 #[tokio::test]
 async fn provider_matrix_bootstrap_login_profile_survives_auto_daemon_state_space() -> Result<()> {
-    let providers = openai_compatible_login_providers(server_bootstrap_login_providers());
+    let providers: Vec<_> = openai_compatible_login_providers(server_bootstrap_login_providers())
+        .into_iter()
+        .filter(|provider| api_key_matrix_applies(login_provider_profile(*provider)))
+        .collect();
     assert!(
         !providers.is_empty(),
         "server bootstrap login surface should include compatible providers"
@@ -558,7 +576,10 @@ async fn provider_matrix_concurrent_auto_init_preserves_bootstrap_compatible_pro
 #[tokio::test]
 async fn provider_matrix_explicit_compatible_choice_overrides_stale_active_profile_state_space()
 -> Result<()> {
-    let providers = openai_compatible_login_providers(login_providers().iter().copied());
+    let providers: Vec<_> = openai_compatible_login_providers(login_providers().iter().copied())
+        .into_iter()
+        .filter(|provider| api_key_matrix_applies(login_provider_profile(*provider)))
+        .collect();
     assert!(
         providers.len() > 1,
         "provider catalog should include multiple compatible providers"
@@ -776,6 +797,9 @@ fn provider_matrix_env_credentials_activate_openrouter_runtime() -> Result<()> {
     let env = TestEnv::new()?;
 
     for &profile in openai_compatible_profiles() {
+        if !api_key_matrix_applies(profile) {
+            continue;
+        }
         env.clear_profile_keys();
         apply_openai_compatible_profile_env(Some(profile));
         let resolved = resolve_openai_compatible_profile(profile);
@@ -827,6 +851,9 @@ fn provider_matrix_file_credentials_activate_openrouter_runtime() -> Result<()> 
     let env = TestEnv::new()?;
 
     for &profile in openai_compatible_profiles() {
+        if !api_key_matrix_applies(profile) {
+            continue;
+        }
         env.clear_profile_keys();
         apply_openai_compatible_profile_env(Some(profile));
         let resolved = resolve_openai_compatible_profile(profile);
