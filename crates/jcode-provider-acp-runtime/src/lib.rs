@@ -136,6 +136,9 @@ pub trait AcpProviderPolicy: Send + Sync + 'static {
     fn prompt_blocks(&self, input: AcpPromptInput<'_>) -> Result<Vec<acp::ContentBlock>>;
     fn session_setup(&self, state: &AcpSessionState) -> Result<Vec<AcpSessionMutation>>;
     fn map_update(&self, update: acp::SessionUpdate) -> Vec<StreamEvent>;
+    fn supports_image_input(&self) -> bool {
+        false
+    }
     fn login_hint(&self, error: &anyhow::Error) -> String;
 }
 
@@ -342,6 +345,10 @@ impl<P: AcpProviderPolicy> Provider for AcpProvider<P> {
         read_lock(&self.catalog).available.clone()
     }
 
+    fn supports_image_input(&self) -> bool {
+        self.policy.supports_image_input()
+    }
+
     async fn prefetch_models(&self) -> Result<()> {
         let policy = Arc::clone(&self.policy);
         let engine = Arc::clone(&self.engine);
@@ -486,13 +493,17 @@ fn run_turn_thread<P: AcpProviderPolicy>(turn: TurnSpec<P>) -> Result<()> {
                     } else {
                         let Some(response) = until_cancelled(
                             &mut cancel_rx,
-                            timeout_request(
-                                &engine.config,
-                                "session/new",
-                                connection.new_session(
-                                    acp::NewSessionRequest::new(cwd).mcp_servers(Vec::new()),
-                                ),
-                            ),
+                            async {
+                                timeout_request(
+                                    &engine.config,
+                                    "session/new",
+                                    connection.new_session(
+                                        acp::NewSessionRequest::new(cwd).mcp_servers(Vec::new()),
+                                    ),
+                                )
+                                .await
+                                .map_err(|error| with_login_hint(policy.as_ref(), error))
+                            },
                         )
                         .await?
                         else {

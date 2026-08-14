@@ -58,6 +58,9 @@ fn model_state(current: &str) -> Value {
 }
 
 fn config_options(scenario: &str) -> Value {
+    if let Ok(Some(options)) = json_env("JCODE_FAKE_ACP_CONFIG_OPTIONS") {
+        return options;
+    }
     if scenario == "config_catalog" {
         json!([{
             "id":"model",
@@ -207,10 +210,11 @@ fn main() -> Result<()> {
                     id,
                     json!({
                         "protocolVersion": if scenario == "unsupported_version" { 999 } else { 1 },
-                        "agentCapabilities": {
-                            "loadSession": true,
-                            "sessionCapabilities": {"resume": {}}
-                        },
+                        "agentCapabilities": json_env("JCODE_FAKE_ACP_AGENT_CAPABILITIES")?
+                            .unwrap_or_else(|| json!({
+                                "loadSession": true,
+                                "sessionCapabilities": {"resume": {}}
+                            })),
                         "authMethods": auth_methods,
                         "agentInfo": {"name":"scriptable-fake-acp", "version":"1.0.0"},
                         "_meta": meta
@@ -219,6 +223,14 @@ fn main() -> Result<()> {
             }
             "authenticate" => response(id, json!({}))?,
             "session/new" => {
+                if scenario == "auth_required_new" {
+                    send(json!({
+                        "jsonrpc":"2.0",
+                        "id":id,
+                        "error":{"code":-32000, "message":"authentication required"}
+                    }))?;
+                    continue;
+                }
                 let mut result = json!({
                     "sessionId":"fake-session-new",
                     "configOptions": config_options(&scenario)

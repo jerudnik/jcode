@@ -441,6 +441,7 @@ async fn process_init_auth_catalog_and_new_resume_lifecycle_work() {
     assert_eq!(
         initialize.pointer("/params/clientCapabilities"),
         Some(&json!({
+            "auth":{"terminal":false},
             "fs":{"readTextFile":false,"writeTextFile":false},
             "terminal":false
         }))
