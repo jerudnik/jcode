@@ -83,7 +83,7 @@ struct ClientInfo {
 struct ModernRequestMeta {
     // Kept request-local for logging and attribution without introducing
     // connection-scoped protocol state.
-    _client_info: Option<ClientInfo>,
+    client_info: Option<ClientInfo>,
     _client_capabilities: serde_json::Map<String, Value>,
 }
 
@@ -94,12 +94,13 @@ enum ProtocolEra {
 
 impl ProtocolEra {
     fn is_modern(&self) -> bool {
+        matches!(self, Self::Modern(_))
+    }
+
+    fn client_info(&self) -> Option<&ClientInfo> {
         match self {
-            Self::Legacy => false,
-            Self::Modern(metadata) => {
-                let _request_metadata = metadata;
-                true
-            }
+            Self::Legacy => None,
+            Self::Modern(metadata) => metadata.client_info.as_ref(),
         }
     }
 }
@@ -408,6 +409,12 @@ where
             Ok(era) => era,
             Err(error) => return rpc_error_response(id, error),
         };
+        if let Some(client) = era.client_info() {
+            crate::logging::info(&format!(
+                "mcp-serve: modern {method} request from {} {}",
+                client.name, client.version
+            ));
+        }
         let modern = era.is_modern();
 
         let result = match method {
@@ -642,11 +649,19 @@ fn rpc_error_response(id: Value, error: RpcError) -> Value {
 }
 
 fn protocol_era(method: &str, params: &Value) -> std::result::Result<ProtocolEra, RpcError> {
-    let has_modern_version = params
+    let has_modern_metadata = params
         .get("_meta")
         .and_then(Value::as_object)
-        .is_some_and(|meta| meta.contains_key(MCP_PROTOCOL_VERSION_META_KEY));
-    if method == "server/discover" || has_modern_version {
+        .is_some_and(|meta| {
+            [
+                MCP_PROTOCOL_VERSION_META_KEY,
+                MCP_CLIENT_INFO_META_KEY,
+                MCP_CLIENT_CAPABILITIES_META_KEY,
+            ]
+            .iter()
+            .any(|key| meta.contains_key(*key))
+        });
+    if method == "server/discover" || has_modern_metadata {
         return validate_modern_request_meta(params).map(ProtocolEra::Modern);
     }
     Ok(ProtocolEra::Legacy)
@@ -704,7 +719,7 @@ fn validate_modern_request_meta(
     };
 
     Ok(ModernRequestMeta {
-        _client_info: client_info,
+        client_info,
         _client_capabilities: client_capabilities,
     })
 }
@@ -1123,6 +1138,42 @@ mod tests {
                 },
             }))
             .await;
+        assert_eq!(response["error"]["code"], JSONRPC_INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn modern_shaped_tools_request_missing_version_does_not_create_legacy_session() {
+        let server = server(None);
+        let response = server
+            .response_for_request(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {
+                    "_meta": {
+                        (MCP_CLIENT_CAPABILITIES_META_KEY): {},
+                    }
+                },
+            }))
+            .await;
+        assert_eq!(response["error"]["code"], MCP_UNSUPPORTED_PROTOCOL_VERSION);
+        assert_eq!(response["error"]["data"]["requested"], Value::Null);
+        assert!(server.backend.commands.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn legacy_progress_metadata_does_not_select_modern_era() {
+        let response = response_for_message(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "_meta": { "progressToken": "legacy-progress" },
+                "name": "bash",
+                "arguments": []
+            }
+        }))
+        .await;
         assert_eq!(response["error"]["code"], JSONRPC_INVALID_PARAMS);
     }
 
