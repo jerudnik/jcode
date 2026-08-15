@@ -196,7 +196,8 @@ fn run_cloud_sessions_helper_command(action: CloudSessionsSubcommand) -> Result<
     let mut command = ProcessCommand::new(&helper);
     command
         .args(&args)
-        .envs(helper_env)
+        .env_clear()
+        .envs(isolated_jade_child_env(&helper_env))
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
@@ -585,7 +586,8 @@ fn run_jade_upload(
 
     let output = ProcessCommand::new(helper)
         .args(&args)
-        .envs(helper_env.iter().cloned())
+        .env_clear()
+        .envs(isolated_jade_child_env(helper_env))
         .stdin(Stdio::null())
         .output()
         .map_err(|err| anyhow::anyhow!("failed to run {}: {err}", helper.display()))?;
@@ -815,6 +817,66 @@ pub(in crate::cli) fn cloud_sessions_helper_env(
     if let Some(api_token_id) = non_empty(config.api_token_id.clone()) {
         env.push(("JADE_API_TOKEN_ID", api_token_id));
     }
+    env
+}
+
+/// Parent-environment keys the Jade helper may inherit.
+///
+/// Everything else is stripped so a compromised or substituted helper script
+/// cannot see jcode's or the user's unrelated tokens. Same shape as the ACP
+/// vendor-CLI allowlist in `crates/jcode-provider-acp-runtime`.
+pub(in crate::cli) const JADE_INHERITED_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TZ",
+    "TERM",
+    "COLORTERM",
+    "XDG_RUNTIME_DIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "NIX_SSL_CERT_FILE",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+];
+
+fn is_jade_inherited_env_key(key: &str) -> bool {
+    JADE_INHERITED_ENV_ALLOWLIST
+        .iter()
+        .any(|allowed| key.eq_ignore_ascii_case(allowed))
+}
+
+/// Build the isolated child environment: allowlisted parent vars, then
+/// helper-supplied extras (currently only the JADE_API_* contract vars).
+/// Parent secrets not on the allowlist are dropped. Extras override any
+/// allowlisted key of the same name (case-insensitive).
+pub(in crate::cli) fn isolated_jade_child_env(
+    extras: &[(&'static str, String)],
+) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(key, _)| {
+            is_jade_inherited_env_key(key)
+                && !extras
+                    .iter()
+                    .any(|(extra_key, _)| key.eq_ignore_ascii_case(extra_key))
+        })
+        .collect();
+    env.extend(extras.iter().map(|(k, v)| ((*k).to_string(), v.clone())));
     env
 }
 

@@ -723,6 +723,15 @@ impl McpClient {
             name, config.command, config.args
         ));
 
+        // MCP servers are user-configured and user-trusted: the user explicitly
+        // declared this server in their MCP config, so the full parent
+        // environment is inherited by design. Unlike ACP vendor CLIs (see
+        // `ACP_INHERITED_ENV_ALLOWLIST`) and the Jade cloud-sessions helper
+        // (see `JADE_INHERITED_ENV_ALLOWLIST`), we do NOT strip the parent env
+        // here. If MCP trust semantics change (e.g. for a future standard that
+        // treats servers as less trusted than today), this spawn site and its
+        // callers must be revisited — env_clear() + an allowlist like ACP/Jade
+        // would be the shape of that change.
         let mut env: HashMap<String, String> = std::env::vars().collect();
         env.extend(config.env.clone());
         // The daemon owns this contract. A server config cannot spoof or erase
