@@ -491,8 +491,12 @@ async fn communicate_status_returns_busy_snapshot_for_running_member() {
     let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
     let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
 
-    let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
-        delay: Duration::from_millis(300),
+    // Gate the peer so it stays running until the status assertions below
+    // complete. A fixed delay races under nextest load: the peer can finish
+    // and flip back to "ready" before the comm_status snapshot arrives.
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let provider: Arc<dyn Provider> = Arc::new(GatedTestProvider {
+        gate: Arc::clone(&gate),
     });
     let server = Arc::new(Server::new(provider));
     let mut server_task = {
@@ -556,6 +560,7 @@ async fn communicate_status_returns_busy_snapshot_for_running_member() {
     assert!(output.output.contains("Lifecycle: running"));
     assert!(output.output.contains("Activity: busy"));
 
+    gate.add_permits(1);
     peer.wait_for_done(peer_message_id)
         .await
         .expect("peer message should finish");
