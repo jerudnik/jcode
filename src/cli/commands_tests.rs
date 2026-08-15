@@ -506,6 +506,84 @@ fn cloud_sessions_config_persists_secret_and_feeds_helper_env_without_args() {
 }
 
 #[test]
+fn isolated_jade_child_env_drops_unrelated_parent_secrets() {
+    let _guard = crate::storage::lock_test_env();
+    let _saved = SavedEnv::capture(&[
+        "JCODE_JADE_PARENT_SECRET",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GITHUB_TOKEN",
+    ]);
+    crate::env::set_var("JCODE_JADE_PARENT_SECRET", "must-not-leak");
+    crate::env::set_var("OPENAI_API_KEY", "sk-test");
+    crate::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test");
+    crate::env::set_var("GITHUB_TOKEN", "ghp-test");
+
+    let extras = vec![("JADE_API_TOKEN", "jade-tok".to_string())];
+    let env = isolated_jade_child_env(&extras);
+    assert!(
+        env.iter()
+            .any(|(k, v)| k == "JADE_API_TOKEN" && v == "jade-tok")
+    );
+    assert!(
+        !env.iter().any(|(k, _)| k == "JCODE_JADE_PARENT_SECRET"
+            || k == "OPENAI_API_KEY"
+            || k == "ANTHROPIC_API_KEY"
+            || k == "GITHUB_TOKEN"),
+        "isolated env leaked a parent secret: {env:?}"
+    );
+    if std::env::var_os("PATH").is_some() {
+        assert!(env.iter().any(|(k, _)| k == "PATH"));
+    }
+}
+
+#[test]
+fn isolated_jade_child_env_extras_override_allowlisted_keys() {
+    let _guard = crate::storage::lock_test_env();
+    let extras = vec![("PATH", "/policy/bin".to_string())];
+    let env = isolated_jade_child_env(&extras);
+    let paths: Vec<&String> = env
+        .iter()
+        .filter(|(k, _)| k == "PATH")
+        .map(|(_, v)| v)
+        .collect();
+    assert_eq!(paths.len(), 1);
+    assert_eq!(paths[0], "/policy/bin");
+}
+
+#[cfg(unix)]
+#[test]
+fn cloud_sessions_helper_spawn_drops_parent_secret() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::storage::lock_test_env();
+    let _saved = SavedEnv::capture(&["JCODE_JADE_PARENT_SECRET"]);
+    crate::env::set_var("JCODE_JADE_PARENT_SECRET", "must-not-leak");
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let helper = temp.path().join("fake_helper.sh");
+    std::fs::write(
+        &helper,
+        "#!/bin/sh\nif [ -n \"$JCODE_JADE_PARENT_SECRET\" ]; then echo SAW_SECRET; else echo NO_SECRET; fi\n",
+    )
+    .expect("write helper");
+    let mut perms = helper.metadata().expect("helper meta").permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&helper, perms).expect("chmod helper");
+
+    let output = std::process::Command::new(&helper)
+        .env_clear()
+        .envs(isolated_jade_child_env(&[]))
+        .output()
+        .expect("run helper");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("NO_SECRET"),
+        "isolated child env leaked JCODE_JADE_PARENT_SECRET: {stdout}"
+    );
+    assert!(!stdout.contains("SAW_SECRET"));
+}
+
+#[test]
 fn is_syncable_session_stem_filters_non_session_files() {
     assert!(is_syncable_session_stem("session_abc_123"));
     assert!(is_syncable_session_stem("imported_codex_456"));

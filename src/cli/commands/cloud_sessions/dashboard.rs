@@ -5,7 +5,8 @@ use std::process::{Command as ProcessCommand, Stdio};
 
 use super::{
     append_common_jade_args, cloud_sessions_helper_env, config_or_default_user_id,
-    expand_home_path, load_cloud_sessions_config, resolve_jade_sessions_helper,
+    expand_home_path, isolated_jade_child_env, load_cloud_sessions_config,
+    resolve_jade_sessions_helper,
 };
 
 pub(super) struct CloudSessionsDashboardRequest {
@@ -53,7 +54,8 @@ fn fetch_cloud_session_list_json(
 
     let output = ProcessCommand::new(helper)
         .args(&args)
-        .envs(helper_env.iter().cloned())
+        .env_clear()
+        .envs(isolated_jade_child_env(helper_env))
         .stdin(Stdio::null())
         .output()
         .map_err(|err| anyhow::anyhow!("failed to run {}: {err}", helper.display()))?;
@@ -343,7 +345,8 @@ fn generate_cloud_session_view_html(
 
     let output = ProcessCommand::new(helper)
         .args(&args)
-        .envs(helper_env.iter().cloned())
+        .env_clear()
+        .envs(isolated_jade_child_env(helper_env))
         .stdin(Stdio::null())
         .output()
         .map_err(|err| anyhow::anyhow!("failed to run {}: {err}", helper.display()))?;

@@ -53,9 +53,9 @@ pub(super) use cloud_sessions::{
     CloudSessionListItem, CloudSessionsSyncRequest, CloudSessionsSyncState,
     build_jade_sessions_args, build_jade_sessions_args_with_config, cloud_sessions_config_path,
     cloud_sessions_helper_env, cloud_sessions_sync_state_path, collect_sync_candidates,
-    dashboard_views_dir, is_syncable_session_stem, load_cloud_sessions_config,
-    load_cloud_sessions_sync_state, parse_cloud_session_list_json, relative_link,
-    render_cloud_sessions_dashboard_html, resolve_jade_sessions_helper,
+    dashboard_views_dir, is_syncable_session_stem, isolated_jade_child_env,
+    load_cloud_sessions_config, load_cloud_sessions_sync_state, parse_cloud_session_list_json,
+    relative_link, render_cloud_sessions_dashboard_html, resolve_jade_sessions_helper,
     run_cloud_sessions_configure, run_cloud_sessions_sync, sanitize_filename,
     save_cloud_sessions_sync_state,
 };
