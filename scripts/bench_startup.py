@@ -163,11 +163,19 @@ def measure_server_startup(binary: str, runs: int) -> list[float]:
     return times
 
 
-def require_script_binary() -> str:
+def require_script_binary() -> tuple[str, bool]:
     script_bin = shutil.which("script")
     if not script_bin:
         raise RuntimeError("'script' utility not found; required for TTY startup benchmark")
-    return script_bin
+    # util-linux script takes the command via `-c`; BSD/macOS script takes it
+    # as positional arguments after the typescript file and rejects `--version`.
+    probe = subprocess.run(
+        [script_bin, "--version"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return script_bin, probe.returncode == 0
 
 
 def parse_startup_profile(log_path: Path) -> StartupProfile:
@@ -206,7 +214,7 @@ def parse_startup_profile(log_path: Path) -> StartupProfile:
 
 
 def measure_cold_client_startup(binary: str, runs: int) -> list[StartupProfile]:
-    script_bin = require_script_binary()
+    script_bin, script_is_util_linux = require_script_binary()
     profiles: list[StartupProfile] = []
 
     for _ in range(runs):
@@ -214,12 +222,29 @@ def measure_cold_client_startup(binary: str, runs: int) -> list[StartupProfile]:
         env = isolated_env(root)
         log_path = Path(env["JCODE_HOME"]) / "logs" / f"jcode-{time.strftime('%Y-%m-%d')}.log"
         try:
-            command = (
-                f"{binary} --debug-socket "
-                f"--socket {env['JCODE_SOCKET']}"
-            )
+            if script_is_util_linux:
+                argv = [
+                    "timeout",
+                    "3s",
+                    script_bin,
+                    "-qefc",
+                    f"{binary} --debug-socket --socket {env['JCODE_SOCKET']}",
+                    "/dev/null",
+                ]
+            else:
+                argv = [
+                    "timeout",
+                    "3s",
+                    script_bin,
+                    "-q",
+                    "/dev/null",
+                    binary,
+                    "--debug-socket",
+                    "--socket",
+                    env["JCODE_SOCKET"],
+                ]
             subprocess.run(
-                ["timeout", "3s", script_bin, "-qefc", command, "/dev/null"],
+                argv,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 env=env,
