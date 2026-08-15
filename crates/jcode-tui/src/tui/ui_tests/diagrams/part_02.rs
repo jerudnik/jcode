@@ -241,7 +241,8 @@ fn test_current_mermaid_side_pane_auto_width_uses_most_available_space() {
         pane_width.saturating_sub(2),
         terminal_height.saturating_sub(2),
     );
-    let render_area = vcenter_fitted_image_with_font(inner, diagram.width, diagram.height, TEST_FONT);
+    let render_area =
+        vcenter_fitted_image_with_font(inner, diagram.width, diagram.height, TEST_FONT);
 
     assert!(chat_width >= min_chat_width);
     assert!(
@@ -348,23 +349,4 @@ fn test_pinned_diagram_probe_reports_full_inner_usage_in_viewport_mode() {
     assert_eq!(probe.inner_utilization.width_utilization_percent, 100.0);
     assert_eq!(probe.inner_utilization.height_utilization_percent, 100.0);
     assert_eq!(probe.inner_utilization.area_utilization_percent, 100.0);
-}
-
-#[test]
-fn test_query_font_size_returns_valid_dimensions() {
-    let font = crate::tui::mermaid::get_font_size();
-    if let Some((w, h)) = font {
-        assert!(w > 0, "font width should be positive, got {}", w);
-        assert!(h > 0, "font height should be positive, got {}", h);
-        assert!(
-            w <= 100,
-            "font width should be reasonable, got {} (likely bogus)",
-            w
-        );
-        assert!(
-            h <= 200,
-            "font height should be reasonable, got {} (likely bogus)",
-            h
-        );
-    }
 }

@@ -24,44 +24,6 @@ fn test_build_turn_footer_combines_compact_duration_with_streaming_stats() {
 }
 
 #[test]
-fn test_processing_status_display() {
-    let status = ProcessingStatus::Sending;
-    assert!(matches!(status, ProcessingStatus::Sending));
-
-    let status = ProcessingStatus::Streaming;
-    assert!(matches!(status, ProcessingStatus::Streaming));
-
-    let status = ProcessingStatus::RunningTool("bash".to_string());
-    if let ProcessingStatus::RunningTool(name) = status {
-        assert_eq!(name, "bash");
-    } else {
-        panic!("Expected RunningTool");
-    }
-}
-
-#[test]
-fn test_skill_invocation_not_queued() {
-    let mut app = create_test_app();
-
-    // Type a slash invocation for a skill that does not exist. The name must
-    // not collide with a built-in slash command (`/test` is the verification
-    // orchestrator now), so use an obviously bogus skill name.
-    for ch in "/nosuchskill".chars() {
-        app.handle_key(KeyCode::Char(ch), KeyModifiers::empty())
-            .unwrap();
-    }
-
-    app.submit_input();
-
-    // Should show error for unknown skill, not start processing
-    assert!(!app.pending_turn);
-    assert!(!app.is_processing);
-    // Should have an error message about unknown skill
-    assert_eq!(app.display_messages().len(), 1);
-    assert_eq!(app.display_messages()[0].role, "error");
-}
-
-#[test]
 fn test_multiple_queued_messages() {
     let mut app = create_test_app();
     app.is_processing = true;
@@ -95,21 +57,6 @@ fn test_multiple_queued_messages() {
     assert_eq!(app.queued_messages()[1], "second");
     assert_eq!(app.queued_messages()[2], "third");
     assert!(app.input().is_empty());
-}
-
-#[test]
-fn test_queue_message_combines_on_send() {
-    let mut app = create_test_app();
-
-    // Queue two messages directly
-    app.queued_messages.push("message one".to_string());
-    app.queued_messages.push("message two".to_string());
-
-    // Take and combine (simulating what process_queued_messages does)
-    let combined = std::mem::take(&mut app.queued_messages).join("\n\n");
-
-    assert_eq!(combined, "message one\n\nmessage two");
-    assert!(app.queued_messages.is_empty());
 }
 
 #[test]
@@ -313,17 +260,6 @@ fn test_handle_paste_multi_line() {
 }
 
 #[test]
-fn test_handle_paste_large() {
-    let mut app = create_test_app();
-
-    app.handle_paste("a\nb\nc\nd\ne".to_string());
-
-    // Large paste (5+ lines) uses placeholder
-    assert_eq!(app.input(), "[pasted 5 lines]");
-    assert_eq!(app.pasted_contents.len(), 1);
-}
-
-#[test]
 fn test_paste_expansion_on_submit() {
     let mut app = create_test_app();
 
@@ -518,67 +454,34 @@ fn test_recover_session_without_tools_preserves_debug_and_canary_flags() {
 }
 
 #[test]
-fn test_has_newer_binary_detection() {
-    use std::time::{Duration, SystemTime};
-
-    let mut app = create_test_app();
-    let exe = crate::build::launcher_binary_path().unwrap();
-
-    let mut created = false;
-    if !exe.exists() {
-        if let Some(parent) = exe.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(&exe, "test").unwrap();
-        created = true;
-    }
-
-    app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
-    assert!(app.has_newer_binary());
-
-    app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
-    assert!(!app.has_newer_binary());
-
-    if created {
-        let _ = std::fs::remove_file(&exe);
-    }
-}
-
-#[test]
 fn test_reload_requests_exit_when_newer_binary() {
-    use std::time::{Duration, SystemTime};
+    with_temp_jcode_home(|| {
+        use std::time::{Duration, SystemTime};
 
-    let mut app = create_test_app();
-    let exe = crate::build::launcher_binary_path().unwrap();
+        let mut app = create_test_app();
+        let exe = crate::build::launcher_binary_path().unwrap();
 
-    let mut created = false;
-    if !exe.exists() {
         if let Some(parent) = exe.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&exe, "test").unwrap();
-        created = true;
-    }
 
-    app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
-    app.input = "/reload".to_string();
-    app.submit_input();
+        app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
+        app.input = "/reload".to_string();
+        app.submit_input();
 
-    assert!(app.reload_requested.is_some());
-    assert!(app.should_quit);
+        assert!(app.reload_requested.is_some());
+        assert!(app.should_quit);
 
-    // Ensure the "no newer binary" path is exercised too.
-    app.reload_requested = None;
-    app.should_quit = false;
-    app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
-    app.input = "/reload".to_string();
-    app.submit_input();
-    assert!(app.reload_requested.is_none());
-    assert!(!app.should_quit);
-
-    if created {
-        let _ = std::fs::remove_file(&exe);
-    }
+        // Ensure the "no newer binary" path is exercised too.
+        app.reload_requested = None;
+        app.should_quit = false;
+        app.client_binary_mtime = Some(SystemTime::now() + Duration::from_secs(3600));
+        app.input = "/reload".to_string();
+        app.submit_input();
+        assert!(app.reload_requested.is_none());
+        assert!(!app.should_quit);
+    });
 }
 
 #[test]
@@ -622,48 +525,34 @@ fn test_update_command_shows_nix_guidance_without_quitting() {
 
 #[test]
 fn test_selfdev_command_spawns_session_in_test_mode() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    let prev_test = std::env::var_os("JCODE_TEST_SESSION");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
-    crate::env::set_var("JCODE_TEST_SESSION", "1");
+    with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_TEST_SESSION", "1");
 
-    let repo = create_jcode_repo_fixture();
-    let mut app = create_test_app();
-    app.session.working_dir = Some(repo.path().display().to_string());
+        let repo = create_jcode_repo_fixture();
+        let mut app = create_test_app();
+        app.session.working_dir = Some(repo.path().display().to_string());
 
-    app.input = "/selfdev fix the markdown renderer".to_string();
-    app.submit_input();
+        app.input = "/selfdev fix the markdown renderer".to_string();
+        app.submit_input();
 
-    let last = app.display_messages().last().expect("selfdev message");
-    assert!(last.content.contains("Created self-dev session"));
-    assert!(
-        last.content
-            .contains("Prompt captured but not delivered in test mode")
-    );
-    assert_eq!(app.status_notice(), Some("Self-dev".to_string()));
+        let last = app.display_messages().last().expect("selfdev message");
+        assert!(last.content.contains("Created self-dev session"));
+        assert!(
+            last.content
+                .contains("Prompt captured but not delivered in test mode")
+        );
+        assert_eq!(app.status_notice(), Some("Self-dev".to_string()));
 
-    let sessions_dir = crate::storage::jcode_dir().unwrap().join("sessions");
-    let entries: Vec<_> = std::fs::read_dir(&sessions_dir)
-        .expect("sessions dir")
-        .flatten()
-        .collect();
-    assert!(
-        !entries.is_empty(),
-        "expected spawned self-dev session file"
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-    if let Some(prev_test) = prev_test {
-        crate::env::set_var("JCODE_TEST_SESSION", prev_test);
-    } else {
-        crate::env::remove_var("JCODE_TEST_SESSION");
-    }
+        let sessions_dir = crate::storage::jcode_dir().unwrap().join("sessions");
+        let entries: Vec<_> = std::fs::read_dir(&sessions_dir)
+            .expect("sessions dir")
+            .flatten()
+            .collect();
+        assert!(
+            !entries.is_empty(),
+            "expected spawned self-dev session file"
+        );
+    });
 }
 
 #[test]

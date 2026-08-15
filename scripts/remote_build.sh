@@ -32,6 +32,7 @@ Behavior:
   - Sync-back defaults to ON for 'build', OFF for other subcommands
   - For build sync-back, copies target/{debug|release}/<artifact> from remote to local
     (artifact defaults to 'jcode', or '--bin <name>' when provided)
+  - Mutating 'fmt' commands are refused; run them locally with JCODE_REMOTE_CARGO=0
   - Default config file is ~/.config/jcode/remote-build.env
 EOF
 }
@@ -139,6 +140,12 @@ if [[ "$EXPECT_GLOBAL_VALUE" -eq 1 ]]; then
     exit 2
 fi
 
+if [[ "$SUBCOMMAND" == "fmt" ]]; then
+    echo "error: refusing to run cargo fmt remotely because formatted files are not synced back" >&2
+    echo "hint: rerun with JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt" >&2
+    exit 2
+fi
+
 if [[ "$REMOTE_DIR" == *" "* ]]; then
     echo "error: remote dir cannot contain spaces: $REMOTE_DIR" >&2
     exit 2
@@ -169,6 +176,19 @@ RSYNC_SSH_COMMAND="${JCODE_REMOTE_RSYNC_SSH:-$SSH_BIN -o BatchMode=yes -o Connec
 
 remote_ssh() {
     "$SSH_BIN" "${SSH_OPTS[@]}" "$REMOTE" "$@"
+}
+
+compute_sync_fingerprint() {
+    local head dirty_digest path
+    head="$(git -C "$LOCAL_DIR" rev-parse HEAD)"
+    dirty_digest="$({
+        git -C "$LOCAL_DIR" diff --binary --no-ext-diff HEAD --
+        while IFS= read -r -d '' path; do
+            printf 'untracked\0%s\0' "$path"
+            git hash-object --no-filters -- "$LOCAL_DIR/$path"
+        done < <(git -C "$LOCAL_DIR" ls-files -z --others --exclude-standard)
+    } | git -C "$LOCAL_DIR" hash-object --stdin)"
+    printf '%s:%s\n' "$head" "$dirty_digest"
 }
 
 CARGO_CMD=(cargo)
@@ -292,6 +312,7 @@ local_git_date=""
 local_git_tag=""
 local_git_dirty="0"
 local_changelog_raw=""
+local_sync_fingerprint=""
 if command -v git >/dev/null 2>&1 && git -C "$LOCAL_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     local_git_hash="$(git -C "$LOCAL_DIR" rev-parse --short HEAD 2>/dev/null || true)"
     local_git_date="$(git -C "$LOCAL_DIR" log -1 --format=%ci 2>/dev/null || true)"
@@ -300,6 +321,10 @@ if command -v git >/dev/null 2>&1 && git -C "$LOCAL_DIR" rev-parse --git-dir >/d
     if [[ -n "$(git -C "$LOCAL_DIR" status --porcelain 2>/dev/null || true)" ]]; then
         local_git_dirty="1"
     fi
+    local_sync_fingerprint="$(compute_sync_fingerprint)"
+else
+    echo "error: cannot compute source fingerprint because $LOCAL_DIR is not a Git worktree" >&2
+    exit 2
 fi
 
 echo "=== Remote Cargo on $REMOTE ==="
@@ -307,6 +332,12 @@ echo "Local:   $LOCAL_DIR"
 echo "Remote:  $REMOTE_DIR"
 echo "Command: ${CARGO_CMD[*]}"
 echo "Mode:    $build_mode"
+echo "Source fingerprint: $local_sync_fingerprint"
+if [[ "$SYNC_SOURCE" -eq 1 ]]; then
+    echo "Source sync: fresh"
+else
+    echo "Source sync: reuse requested"
+fi
 echo "SSH timeout: ${SSH_CONNECT_TIMEOUT}s"
 
 echo ""
@@ -317,6 +348,14 @@ if ! preflight_output="$(remote_ssh "printf 'jcode-remote-ok\\n'" 2>&1)"; then
     echo "hint: set JCODE_REMOTE_CARGO=0 to force local cargo, or fix JCODE_REMOTE_HOST/JCODE_REMOTE_CONNECT_TIMEOUT." >&2
     exit 75
 fi
+
+metadata_file=""
+fingerprint_file=""
+cleanup_temp_files() {
+    [[ -z "$metadata_file" ]] || rm -f "$metadata_file"
+    [[ -z "$fingerprint_file" ]] || rm -f "$fingerprint_file"
+}
+trap cleanup_temp_files EXIT
 
 if [[ "$SYNC_SOURCE" -eq 1 ]]; then
     echo ""
@@ -356,7 +395,6 @@ if [[ "$SYNC_SOURCE" -eq 1 ]]; then
     fi
 
     metadata_file="$(mktemp)"
-    trap 'rm -f "$metadata_file"' EXIT
     {
         printf 'git_hash=%s\n' "$local_git_hash"
         printf 'git_date=%s\n' "$local_git_date"
@@ -365,9 +403,17 @@ if [[ "$SYNC_SOURCE" -eq 1 ]]; then
         printf 'changelog_raw<<JCODE_CHANGELOG_EOF\n%s\nJCODE_CHANGELOG_EOF\n' "$local_changelog_raw"
     } > "$metadata_file"
     "$RSYNC_BIN" -avz -e "$RSYNC_SSH_COMMAND" "$metadata_file" "$REMOTE:$REMOTE_DIR/.jcode-build-meta"
+
+    fingerprint_file="$(mktemp)"
+    {
+        printf 'fingerprint=%s\n' "$local_sync_fingerprint"
+        printf 'synced_at=%s\n' "$(date +%s)"
+    } > "$fingerprint_file"
+    "$RSYNC_BIN" -avz -e "$RSYNC_SSH_COMMAND" \
+        "$fingerprint_file" "$REMOTE:$REMOTE_DIR/.jcode-sync-fingerprint"
 else
     echo ""
-    echo "[1/3] Skipping source sync (--no-sync)"
+    echo "[1/3] Skipping source sync (--no-sync); verifying retained fingerprint before Cargo"
 fi
 
 printf -v REMOTE_CARGO_CMD '%q ' "${CARGO_CMD[@]}"
@@ -383,9 +429,14 @@ if [[ -n "$remote_incremental" ]]; then
 fi
 printf -v REMOTE_ENV_CMD '%q ' "${REMOTE_ENV[@]}"
 printf -v REMOTE_PAYLOAD 'env %s%s' "$REMOTE_ENV_CMD" "$REMOTE_CARGO_CMD"
+REMOTE_VERIFY_SCRIPT='if [ ! -f "$marker_file" ]; then printf "remote_build: source fingerprint marker missing: %s/%s\n" "$PWD" "$marker_file" >&2; printf "remote_build: refusing to run Cargo; rerun without --no-sync to refresh the remote source\n" >&2; exit 86; fi; remote_fingerprint=$(sed -n "s/^fingerprint=//p" "$marker_file" | head -n 1); synced_at=$(sed -n "s/^synced_at=//p" "$marker_file" | head -n 1); if [ -z "$remote_fingerprint" ] || [ "$remote_fingerprint" != "$expected_fingerprint" ]; then printf "remote_build: source fingerprint mismatch\n  expected: %s\n  remote:   %s\n" "$expected_fingerprint" "${remote_fingerprint:-<missing>}" >&2; printf "remote_build: refusing to run Cargo; rerun without --no-sync to refresh the remote source\n" >&2; exit 86; fi; case "$synced_at" in ""|*[!0-9]*) printf "remote_build: invalid source fingerprint timestamp: %s\n" "${synced_at:-<missing>}" >&2; exit 86 ;; esac; if [ "$sync_source" = 0 ]; then now=$(date +%s); age=$((now - synced_at)); if [ "$age" -lt 0 ]; then age=0; fi; printf "remote_build: reusing source fingerprint %s (age %ss)\n" "$remote_fingerprint" "$age"; else printf "remote_build: verified source fingerprint %s\n" "$remote_fingerprint"; fi'
+printf -v REMOTE_VERIFY_CMD \
+    'expected_fingerprint=%q marker_file=%q sync_source=%q sh -c %q' \
+    "$local_sync_fingerprint" ".jcode-sync-fingerprint" "$SYNC_SOURCE" "$REMOTE_VERIFY_SCRIPT"
 printf -v REMOTE_INNER_CMD \
-    'cd %q && if command -v cargo >/dev/null 2>&1; then %s; elif command -v nix >/dev/null 2>&1; then nix develop . --command %s; elif [ -x /nix/var/nix/profiles/default/bin/nix ]; then /nix/var/nix/profiles/default/bin/nix develop . --command %s; else printf %q >&2; exit 127; fi' \
+    'cd %q && %s && if command -v cargo >/dev/null 2>&1; then %s; elif command -v nix >/dev/null 2>&1; then nix develop . --command %s; elif [ -x /nix/var/nix/profiles/default/bin/nix ]; then /nix/var/nix/profiles/default/bin/nix develop . --command %s; else printf %q >&2; exit 127; fi' \
     "$REMOTE_DIR" \
+    "$REMOTE_VERIFY_CMD" \
     "$REMOTE_PAYLOAD" \
     "$REMOTE_PAYLOAD" \
     "$REMOTE_PAYLOAD" \

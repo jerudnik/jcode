@@ -655,6 +655,12 @@ impl Provider for OpenAIProvider {
         "openai"
     }
 
+    fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        jcode_provider_core::ProviderCapabilities {
+            reasoning_context_replay: true,
+        }
+    }
+
     fn on_auth_changed(&self) {
         self.reload_credentials_now();
     }

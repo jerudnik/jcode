@@ -1,6 +1,62 @@
 use super::*;
 
 impl MultiProvider {
+    /// Push the bound session working directory into every installed
+    /// compatible profile. Workspace-scoped runtimes (ACP vendor CLIs) use it
+    /// as their subprocess workspace root; network providers ignore it. Called
+    /// when the binding changes and before each failover dispatch so profiles
+    /// installed later (model switches) are covered too.
+    pub(super) fn propagate_session_working_dir(&self) {
+        let dir = self
+            .session_working_dir
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let profiles = self
+            .openai_compatible_profiles
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for provider in profiles.values() {
+            provider.set_session_working_dir(dir.as_deref());
+        }
+    }
+
+    pub(super) fn grok_build_provider_for_auth_status(
+        auth_status: &auth::AuthStatus,
+    ) -> Option<Arc<dyn Provider>> {
+        if !auth_status
+            .assessment_for_provider(crate::provider_catalog::GROK_BUILD_LOGIN_PROVIDER)
+            .is_available()
+        {
+            return None;
+        }
+        external::instantiate_expected_external_provider(external::GROK_BUILD_RUNTIME)
+    }
+
+    pub(super) fn kimi_code_acp_provider_for_auth_status(
+        auth_status: &auth::AuthStatus,
+    ) -> Option<Arc<dyn Provider>> {
+        if !auth_status
+            .assessment_for_provider(crate::provider_catalog::KIMI_CODE_ACP_LOGIN_PROVIDER)
+            .is_available()
+        {
+            return None;
+        }
+        external::instantiate_expected_external_provider(external::KIMI_CODE_ACP_RUNTIME)
+    }
+
+    pub(super) fn reasonix_provider_for_auth_status(
+        auth_status: &auth::AuthStatus,
+    ) -> Option<Arc<dyn Provider>> {
+        if !auth_status
+            .assessment_for_provider(crate::provider_catalog::REASONIX_LOGIN_PROVIDER)
+            .is_available()
+        {
+            return None;
+        }
+        external::instantiate_expected_external_provider(external::REASONIX_RUNTIME)
+    }
+
     pub(super) fn spawn_post_auth_model_refresh(
         provider: Arc<dyn Provider>,
         provider_label: &'static str,
@@ -206,6 +262,29 @@ impl MultiProvider {
             None
         };
 
+        // Grok Build is an isolated ACP execution slot. Install it when the
+        // official CLI and cached subscription login are both available so a
+        // fresh session can discover its live model catalog. Do not mark the
+        // slot active here: login must not silently change the user's model.
+        let grok_build_provider =
+            Self::grok_build_provider_for_auth_status(provider_state.auth_status());
+        let kimi_code_acp_provider =
+            Self::kimi_code_acp_provider_for_auth_status(provider_state.auth_status());
+        let reasonix_provider =
+            Self::reasonix_provider_for_auth_status(provider_state.auth_status());
+        let mut openai_compatible_profiles = HashMap::new();
+        if let Some(grok) = grok_build_provider.as_ref() {
+            openai_compatible_profiles.insert(GROK_BUILD_PROFILE_ID.to_string(), Arc::clone(grok));
+        }
+        if let Some(kimi) = kimi_code_acp_provider.as_ref() {
+            openai_compatible_profiles
+                .insert(KIMI_CODE_ACP_PROFILE_ID.to_string(), Arc::clone(kimi));
+        }
+        if let Some(reasonix) = reasonix_provider.as_ref() {
+            openai_compatible_profiles
+                .insert(REASONIX_PROFILE_ID.to_string(), Arc::clone(reasonix));
+        }
+
         let copilot_premium_zero = matches!(
             std::env::var("JCODE_COPILOT_PREMIUM").ok().as_deref(),
             Some("0")
@@ -289,13 +368,14 @@ impl MultiProvider {
             cursor: RwLock::new(cursor_provider),
             bedrock: RwLock::new(bedrock_provider),
             openrouter: RwLock::new(openrouter),
-            openai_compatible_profiles: RwLock::new(HashMap::new()),
+            openai_compatible_profiles: RwLock::new(openai_compatible_profiles),
             active_openai_compatible_profile: RwLock::new(None),
             active: RwLock::new(active),
             use_claude_cli,
             startup_notices: RwLock::new(Vec::new()),
             forced_provider,
             routes_memo: Mutex::new(None),
+            session_working_dir: RwLock::new(None),
         };
 
         if let Some(model) = provider_state.default_model() {
@@ -313,6 +393,12 @@ impl MultiProvider {
 
         result.spawn_anthropic_catalog_refresh_if_needed();
         result.spawn_openai_catalog_refresh_if_needed();
+        if let Some(grok) = grok_build_provider {
+            Self::spawn_post_auth_model_refresh(grok, "Grok Build");
+        }
+        if let Some(kimi) = kimi_code_acp_provider {
+            Self::spawn_post_auth_model_refresh(kimi, "Kimi Code (official CLI)");
+        }
         result.auto_select_active_multi_account();
         crate::logging::info(&format!(
             "[TIMING] provider_init: claude={}, anthropic={}, openai={}, copilot={}, antigravity={}, gemini={}, cursor={}, bedrock={}, openrouter={}, total={}ms",

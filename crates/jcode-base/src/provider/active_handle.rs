@@ -66,6 +66,24 @@ pub fn stream_idle_timeout() -> std::time::Duration {
     std::time::Duration::from_secs(secs)
 }
 
+/// Provider-agnostic pre-stream watchdog: max seconds from request start until
+/// the provider hands back a response stream, after which the turn fails with
+/// a diagnostic instead of hanging forever. Covers the provider setup window:
+/// failover selection, lock acquisition, auth/token refresh, catalog/pricing
+/// lookups, and request build. Connect, response headers, and streaming run
+/// inside the provider's spawned stream task and are bounded by the
+/// response-header timeout and [`stream_idle_timeout`]. Resolved from
+/// `[provider] pre_stream_open_timeout_secs` / `JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS`
+/// (default 180). The generous default accommodates a worst-case OAuth refresh
+/// (3 x 30s attempts with backoff) plus a catalog fetch on cold start.
+pub fn pre_stream_open_timeout() -> std::time::Duration {
+    let secs = crate::config::config()
+        .provider
+        .pre_stream_open_timeout_secs
+        .max(1);
+    std::time::Duration::from_secs(secs)
+}
+
 /// Whether reasoning deltas should be persisted in session history for later
 /// provider context reconstruction.
 ///
@@ -73,12 +91,9 @@ pub fn stream_idle_timeout() -> std::time::Duration {
 /// when a provider request builder can safely send the stored block back in
 /// the provider-native shape. Anthropic is included only because we preserve
 /// its thinking signatures in `ContentBlock::AnthropicThinking`.
-pub fn stores_reasoning_content_for_context(provider_name: &str) -> bool {
+pub fn stores_reasoning_content_for_context(provider: &dyn Provider) -> bool {
     if !crate::config::config().provider.preserve_reasoning_context {
         return false;
     }
-    matches!(
-        provider_name.to_ascii_lowercase().as_str(),
-        "openrouter" | "anthropic" | "openai"
-    )
+    provider.capabilities().reasoning_context_replay
 }

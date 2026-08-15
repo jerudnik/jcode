@@ -241,23 +241,31 @@ mod tests {
     }
 
     #[test]
-    fn smart_paste_uses_image_only_when_no_text_is_available() {
-        let content = read_clipboard_for_paste_with(
-            &ClipboardPasteKind::Smart,
-            || None,
-            || Some(("image/png".to_string(), "base64".to_string())),
-            |_| None,
-        );
+    fn smart_paste_uses_image_when_text_is_absent_or_blank() {
+        // Image-only clipboards either report no text target at all or
+        // advertise a blank one; both must paste the image rather than
+        // producing a silent empty text paste.
+        for (case, text) in [
+            ("no text target", None),
+            ("blank text target", Some("   ".to_string())),
+        ] {
+            let content = read_clipboard_for_paste_with(
+                &ClipboardPasteKind::Smart,
+                || text.clone(),
+                || Some(("image/png".to_string(), "base64".to_string())),
+                |_| None,
+            );
 
-        match content {
-            ClipboardPasteContent::Image {
-                media_type,
-                base64_data,
-            } => {
-                assert_eq!(media_type, "image/png");
-                assert_eq!(base64_data, "base64");
+            match content {
+                ClipboardPasteContent::Image {
+                    media_type,
+                    base64_data,
+                } => {
+                    assert_eq!(media_type, "image/png", "{case}: media type");
+                    assert_eq!(base64_data, "base64", "{case}: payload");
+                }
+                other => panic!("{case}: expected image paste, got {other:?}"),
             }
-            other => panic!("expected image paste, got {other:?}"),
         }
     }
 
@@ -270,29 +278,6 @@ mod tests {
             matches!(content, ClipboardPasteContent::Empty),
             "expected empty paste, got {content:?}"
         );
-    }
-
-    #[test]
-    fn smart_paste_uses_image_when_text_target_is_blank() {
-        // Image-only clipboards can advertise an empty text target; the image
-        // must still be pasted instead of producing a silent empty text paste.
-        let content = read_clipboard_for_paste_with(
-            &ClipboardPasteKind::Smart,
-            || Some("   ".to_string()),
-            || Some(("image/png".to_string(), "base64".to_string())),
-            |_| None,
-        );
-
-        match content {
-            ClipboardPasteContent::Image {
-                media_type,
-                base64_data,
-            } => {
-                assert_eq!(media_type, "image/png");
-                assert_eq!(base64_data, "base64");
-            }
-            other => panic!("expected image paste, got {other:?}"),
-        }
     }
 
     #[test]
@@ -398,7 +383,10 @@ pub(in crate::tui::app) fn cut_input_line_to_clipboard(app: &mut App) -> bool {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-pub(in crate::tui::app) fn cut_input_line_to_clipboard_with<F>(app: &mut App, mut copy_text: F) -> bool
+pub(in crate::tui::app) fn cut_input_line_to_clipboard_with<F>(
+    app: &mut App,
+    mut copy_text: F,
+) -> bool
 where
     F: FnMut(&str) -> bool,
 {

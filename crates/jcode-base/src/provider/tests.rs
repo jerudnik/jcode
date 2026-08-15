@@ -205,6 +205,7 @@ fn test_multi_provider_with_openai() -> MultiProvider {
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
 }
 
@@ -772,6 +773,7 @@ struct StubExternalRuntime {
     models: &'static [&'static str],
     model: std::sync::RwLock<String>,
     credential_mode: std::sync::RwLock<jcode_provider_core::CredentialMode>,
+    prefetch_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl StubExternalRuntime {
@@ -788,7 +790,13 @@ impl StubExternalRuntime {
             models,
             model: std::sync::RwLock::new(models[0].to_string()),
             credential_mode: std::sync::RwLock::new(jcode_provider_core::CredentialMode::Auto),
+            prefetch_calls: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    fn prefetch_call_count(&self) -> usize {
+        self.prefetch_calls
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn cursor() -> Self {
@@ -815,6 +823,24 @@ impl StubExternalRuntime {
 
     fn gemini() -> Self {
         Self::new("gemini", "Gemini", "https", gemini::AVAILABLE_MODELS)
+    }
+
+    fn grok_build() -> Self {
+        Self::new(
+            "grok-build",
+            "Grok Build",
+            "grok-build-acp",
+            &["grok-4.6", "grok-4.5"],
+        )
+    }
+
+    fn reasonix() -> Self {
+        Self::new(
+            "reasonix",
+            "Reasonix",
+            "reasonix-acp",
+            &["reasonix-pro", "reasonix-fast"],
+        )
     }
 
     fn anthropic() -> Self {
@@ -881,6 +907,14 @@ impl Provider for StubExternalRuntime {
     }
     fn available_models_for_switching(&self) -> Vec<String> {
         self.available_models_display()
+    }
+    async fn prefetch_models(&self) -> anyhow::Result<()> {
+        self.prefetch_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+    fn handles_tools_internally(&self) -> bool {
+        self.name == "grok-build"
     }
     fn model_routes(&self) -> Vec<ModelRoute> {
         self.available_models_display()
@@ -956,7 +990,215 @@ fn test_multi_provider_with_isolated_slot(
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
+}
+
+fn test_multi_provider_with_grok_slot(active: bool) -> (MultiProvider, Arc<StubExternalRuntime>) {
+    let grok = Arc::new(StubExternalRuntime::grok_build());
+    test_multi_provider_with_compatible_profile(GROK_BUILD_PROFILE_ID, grok, active)
+}
+
+fn test_multi_provider_with_compatible_profile(
+    profile_id: &str,
+    runtime: Arc<StubExternalRuntime>,
+    active: bool,
+) -> (MultiProvider, Arc<StubExternalRuntime>) {
+    let runtime_provider: Arc<dyn Provider> = runtime.clone();
+    let mut profiles = std::collections::HashMap::new();
+    profiles.insert(profile_id.to_string(), runtime_provider);
+    let provider = MultiProvider {
+        claude: RwLock::new(None),
+        anthropic: RwLock::new(None),
+        openai: RwLock::new(None),
+        copilot_api: RwLock::new(None),
+        antigravity: RwLock::new(None),
+        gemini: RwLock::new(None),
+        cursor: RwLock::new(None),
+        bedrock: RwLock::new(None),
+        openrouter: RwLock::new(None),
+        openai_compatible_profiles: RwLock::new(profiles),
+        active_openai_compatible_profile: RwLock::new(active.then(|| profile_id.to_string())),
+        active: RwLock::new(if active {
+            ActiveProvider::OpenRouter
+        } else {
+            ActiveProvider::OpenAI
+        }),
+        use_claude_cli: false,
+        startup_notices: RwLock::new(Vec::new()),
+        forced_provider: None,
+        routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
+    };
+    (provider, runtime)
+}
+
+#[test]
+fn grok_build_startup_slot_requires_available_auth_status() {
+    external::register_external_provider(external::GROK_BUILD_RUNTIME, || {
+        Arc::new(StubExternalRuntime::grok_build())
+    });
+
+    assert!(
+        MultiProvider::grok_build_provider_for_auth_status(&auth::AuthStatus::default()).is_none()
+    );
+    let available = auth::AuthStatus {
+        grok_build: auth::AuthState::Available,
+        ..auth::AuthStatus::default()
+    };
+    let provider = MultiProvider::grok_build_provider_for_auth_status(&available)
+        .expect("available Grok auth should install the runtime slot");
+    assert_eq!(provider.name(), "grok-build");
+}
+
+#[test]
+fn kimi_code_acp_startup_slot_requires_available_auth_status() {
+    external::register_external_provider(external::KIMI_CODE_ACP_RUNTIME, || {
+        Arc::new(StubExternalRuntime::new(
+            "kimi-code-acp",
+            "Kimi Code (official CLI)",
+            "kimi-code-acp",
+            &["kimi-code/k3"],
+        ))
+    });
+
+    assert!(
+        MultiProvider::kimi_code_acp_provider_for_auth_status(&auth::AuthStatus::default())
+            .is_none()
+    );
+    let available = auth::AuthStatus {
+        kimi_code_acp: auth::AuthState::Available,
+        ..auth::AuthStatus::default()
+    };
+    let provider = MultiProvider::kimi_code_acp_provider_for_auth_status(&available)
+        .expect("available Kimi Code auth should install the runtime slot");
+    assert_eq!(provider.name(), "kimi-code-acp");
+}
+
+#[test]
+fn grok_build_slot_exposes_prefixed_advertised_routes_without_becoming_active() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        let _runtime_guard = runtime.enter();
+        let (provider, _) = test_multi_provider_with_grok_slot(false);
+        let active_before = provider.active_provider();
+        let routes = provider
+            .model_routes()
+            .into_iter()
+            .filter(|route| route.api_method == "grok-build-acp")
+            .collect::<Vec<_>>();
+
+        assert_eq!(provider.active_provider(), active_before);
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.model.as_str())
+                .collect::<Vec<_>>(),
+            ["grok-build:grok-4.6", "grok-build:grok-4.5"]
+        );
+        assert!(routes.iter().all(|route| route.provider == "Grok Build"));
+    });
+}
+
+#[test]
+fn grok_build_active_route_keeps_identity_when_forking() {
+    let (provider, _) = test_multi_provider_with_grok_slot(true);
+    assert_eq!(provider.provider_identity(), "grok-build");
+    assert_eq!(provider.model(), "grok-4.6");
+    assert!(provider.handles_tools_internally());
+    assert_eq!(
+        provider.fork_model_switch_request(provider.active_provider(), &provider.model()),
+        "grok-build:grok-4.6"
+    );
+}
+
+#[test]
+fn grok_build_catalog_refresh_runs_after_auth_changes() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        let _runtime_guard = runtime.enter();
+        let (provider, grok) = test_multi_provider_with_grok_slot(false);
+
+        provider.handle_auth_changed(false);
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while grok.prefetch_call_count() == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("Grok Build catalog refresh was not scheduled after auth change");
+        });
+    });
+}
+
+#[test]
+fn reasonix_startup_slot_requires_available_auth_status() {
+    external::register_external_provider(external::REASONIX_RUNTIME, || {
+        Arc::new(StubExternalRuntime::reasonix())
+    });
+
+    assert!(
+        MultiProvider::reasonix_provider_for_auth_status(&auth::AuthStatus::default()).is_none()
+    );
+    let available = auth::AuthStatus {
+        reasonix: auth::AuthState::Available,
+        ..auth::AuthStatus::default()
+    };
+    let provider = MultiProvider::reasonix_provider_for_auth_status(&available)
+        .expect("available Reasonix setup should install the runtime slot");
+    assert_eq!(provider.name(), "reasonix");
+}
+
+#[test]
+fn reasonix_slot_exposes_prefixed_routes_and_preserves_fork_identity() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        let _runtime_guard = runtime.enter();
+        let reasonix = Arc::new(StubExternalRuntime::reasonix());
+        let (provider, _) =
+            test_multi_provider_with_compatible_profile(REASONIX_PROFILE_ID, reasonix, true);
+        let routes = provider
+            .model_routes()
+            .into_iter()
+            .filter(|route| route.api_method == "reasonix-acp")
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            routes
+                .iter()
+                .map(|route| route.model.as_str())
+                .collect::<Vec<_>>(),
+            ["reasonix:reasonix-pro", "reasonix:reasonix-fast"]
+        );
+        assert!(routes.iter().all(|route| route.provider == "Reasonix"));
+        assert_eq!(
+            provider.fork_model_switch_request(provider.active_provider(), &provider.model()),
+            "reasonix:reasonix-pro"
+        );
+    });
+}
+
+#[test]
+fn reasonix_catalog_refresh_runs_after_auth_changes() {
+    with_clean_provider_test_env(|| {
+        let runtime = enter_test_runtime();
+        let _runtime_guard = runtime.enter();
+        let reasonix = Arc::new(StubExternalRuntime::reasonix());
+        let (provider, reasonix) =
+            test_multi_provider_with_compatible_profile(REASONIX_PROFILE_ID, reasonix, false);
+
+        provider.handle_auth_changed(false);
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while reasonix.prefetch_call_count() == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("Reasonix catalog refresh was not scheduled after auth change");
+        });
+    });
 }
 
 #[test]
@@ -1076,6 +1318,7 @@ fn test_multi_provider_with_cursor() -> MultiProvider {
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
 }
 

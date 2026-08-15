@@ -31,94 +31,53 @@ fn test_handle_server_event_service_tier_changed_mentions_next_request_when_stre
 
 #[test]
 fn test_reload_handoff_active_when_server_reload_flag_set() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let temp = tempfile::TempDir::new().expect("create temp dir");
+        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    let state = remote::RemoteRunState {
-        server_reload_in_progress: true,
-        ..Default::default()
-    };
+        let state = remote::RemoteRunState {
+            server_reload_in_progress: true,
+            ..Default::default()
+        };
 
-    assert!(remote::reload_handoff_active(&state));
-
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
+        assert!(remote::reload_handoff_active(&state));
+    });
 }
 
 #[test]
 fn test_reload_handoff_inactive_without_flag_or_marker() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let temp = tempfile::TempDir::new().expect("create temp dir");
+        crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    let state = remote::RemoteRunState::default();
+        let state = remote::RemoteRunState::default();
 
-    assert!(!remote::reload_handoff_active(&state));
-
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
+        assert!(!remote::reload_handoff_active(&state));
+    });
 }
 
 #[test]
-fn test_reload_handoff_active_when_reload_marker_present() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+fn test_reload_handoff_active_when_marker_present() {
+    // Every in-flight reload phase keeps the handoff active.
+    for (case, phase) in [
+        ("starting", crate::server::ReloadPhase::Starting),
+        ("socket ready", crate::server::ReloadPhase::SocketReady),
+    ] {
+        crate::tui::app::test_support::with_temp_jcode_home(|| {
+            let temp = tempfile::TempDir::new().expect("create temp dir");
+            crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
 
-    crate::server::write_reload_state(
-        "reload-marker-test",
-        "test-hash",
-        crate::server::ReloadPhase::Starting,
-        None,
-    );
+            crate::server::write_reload_state("reload-marker-test", "test-hash", phase, None);
 
-    let state = remote::RemoteRunState {
-        ..Default::default()
-    };
+            let state = remote::RemoteRunState::default();
 
-    assert!(remote::reload_handoff_active(&state));
+            assert!(
+                remote::reload_handoff_active(&state),
+                "{case}: handoff should be active"
+            );
 
-    crate::server::clear_reload_marker();
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
-}
-
-#[test]
-fn test_reload_handoff_active_when_socket_ready_marker_present() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
-
-    crate::server::write_reload_state(
-        "reload-marker-test",
-        "test-hash",
-        crate::server::ReloadPhase::SocketReady,
-        None,
-    );
-
-    let state = remote::RemoteRunState::default();
-
-    assert!(remote::reload_handoff_active(&state));
-
-    crate::server::clear_reload_marker();
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
+            crate::server::clear_reload_marker();
+        });
     }
 }
 
@@ -476,140 +435,32 @@ fn test_reload_persisted_background_tasks_note_mentions_running_task() {
 
 #[test]
 fn test_finalize_reload_reconnect_mentions_persisted_background_task() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let mut app = create_test_app();
-    let session_id = crate::id::new_id("ses_reload_bg");
-    let reload_ctx = crate::tool::selfdev::ReloadContext {
-        task_context: Some("Waiting for cargo build --release".to_string()),
-        version_before: "v0.1.100".to_string(),
-        version_after: "abc1234".to_string(),
-        session_id: session_id.clone(),
-        timestamp: chrono::Utc::now().to_rfc3339(),
-    };
-    reload_ctx.save().expect("save reload context");
-
-    let manager = crate::background::global();
-    let info = manager.reserve_task_info();
-    let started_at = chrono::Utc::now().to_rfc3339();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(manager.register_detached_task(
-        &info,
-        "bash",
-        None,
-        &session_id,
-        std::process::id(),
-        &started_at,
-        true,
-        false,
-    ));
-
-    remote::finalize_reload_reconnect(
-        &mut app,
-        Some(session_id.as_str()),
-        remote::ReloadReconnectHints {
-            reload_ctx_for_session: Some(reload_ctx.clone()),
-            has_client_reload_marker: false,
-        },
-        false,
-    );
-
-    assert_eq!(app.hidden_queued_system_messages.len(), 1);
-    let continuation = &app.hidden_queued_system_messages[0];
-    assert!(continuation.contains("Persisted background task(s)"));
-    assert!(continuation.contains(&info.task_id));
-    assert!(continuation.contains("Do not rerun those commands"));
-    assert!(continuation.contains("bg action=\"output\""));
-
-    cleanup_background_task_files(&info.task_id);
-    cleanup_reload_context_file(&session_id);
-}
-
-#[test]
-fn test_finalize_reload_reconnect_is_session_scoped_across_reconnect_order() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let mut app_a = create_test_app();
-    let mut app_b = create_test_app();
-    let session_a = crate::id::new_id("ses_reload_a");
-    let session_b = crate::id::new_id("ses_reload_b");
-
-    let ctx_a = crate::tool::selfdev::ReloadContext {
-        task_context: Some("resume session A".to_string()),
-        version_before: "old-a".to_string(),
-        version_after: "new-a".to_string(),
-        session_id: session_a.clone(),
-        timestamp: chrono::Utc::now().to_rfc3339(),
-    };
-    let ctx_b = crate::tool::selfdev::ReloadContext {
-        task_context: Some("resume session B".to_string()),
-        version_before: "old-b".to_string(),
-        version_after: "new-b".to_string(),
-        session_id: session_b.clone(),
-        timestamp: chrono::Utc::now().to_rfc3339(),
-    };
-    ctx_a.save().expect("save reload context a");
-    ctx_b.save().expect("save reload context b");
-
-    remote::finalize_reload_reconnect(
-        &mut app_b,
-        Some(session_b.as_str()),
-        remote::ReloadReconnectHints {
-            reload_ctx_for_session: Some(ctx_b.clone()),
-            has_client_reload_marker: false,
-        },
-        false,
-    );
-
-    assert_eq!(app_b.hidden_queued_system_messages.len(), 1);
-    assert!(app_b.hidden_queued_system_messages[0].contains("new-b"));
-    assert!(
-        crate::tool::selfdev::ReloadContext::peek_for_session(&session_a)
-            .expect("peek session a")
-            .is_some(),
-        "session A context should remain available after session B reconnects first"
-    );
-    assert!(
-        crate::tool::selfdev::ReloadContext::peek_for_session(&session_b)
-            .expect("peek session b")
-            .is_none(),
-        "session B context should be consumed by its own reconnect"
-    );
-
-    remote::finalize_reload_reconnect(
-        &mut app_a,
-        Some(session_a.as_str()),
-        remote::ReloadReconnectHints {
-            reload_ctx_for_session: Some(ctx_a.clone()),
-            has_client_reload_marker: false,
-        },
-        false,
-    );
-
-    assert_eq!(app_a.hidden_queued_system_messages.len(), 1);
-    assert!(app_a.hidden_queued_system_messages[0].contains("new-a"));
-    assert!(
-        crate::tool::selfdev::ReloadContext::peek_for_session(&session_a)
-            .expect("peek session a after consume")
-            .is_none(),
-        "session A context should be consumed only by session A reconnect"
-    );
-}
-
-#[test]
-fn test_finalize_reload_reconnect_supports_repeated_reload_cycles_for_same_session() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let session_id = crate::id::new_id("ses_reload_loop");
-
-    for cycle in 0..3 {
+    with_temp_jcode_home(|| {
         let mut app = create_test_app();
-        let version_after = format!("loop-build-{}", cycle);
+        let session_id = crate::id::new_id("ses_reload_bg");
         let reload_ctx = crate::tool::selfdev::ReloadContext {
-            task_context: Some(format!("reload loop cycle {}", cycle)),
-            version_before: format!("loop-prev-{}", cycle),
-            version_after: version_after.clone(),
+            task_context: Some("Waiting for cargo build --release".to_string()),
+            version_before: "v0.1.100".to_string(),
+            version_after: "abc1234".to_string(),
             session_id: session_id.clone(),
             timestamp: chrono::Utc::now().to_rfc3339(),
         };
-        reload_ctx.save().expect("save loop reload context");
+        reload_ctx.save().expect("save reload context");
+
+        let manager = crate::background::global();
+        let info = manager.reserve_task_info();
+        let started_at = chrono::Utc::now().to_rfc3339();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(manager.register_detached_task(
+            &info,
+            "bash",
+            None,
+            &session_id,
+            std::process::id(),
+            &started_at,
+            true,
+            false,
+        ));
 
         remote::finalize_reload_reconnect(
             &mut app,
@@ -622,14 +473,125 @@ fn test_finalize_reload_reconnect_supports_repeated_reload_cycles_for_same_sessi
         );
 
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
-        assert!(app.hidden_queued_system_messages[0].contains(&version_after));
-        assert!(
-            crate::tool::selfdev::ReloadContext::peek_for_session(&session_id)
-                .expect("peek loop reload context")
-                .is_none(),
-            "reload context should be consumed each cycle"
+        let continuation = &app.hidden_queued_system_messages[0];
+        assert!(continuation.contains("Persisted background task(s)"));
+        assert!(continuation.contains(&info.task_id));
+        assert!(continuation.contains("Do not rerun those commands"));
+        assert!(continuation.contains("bg action=\"output\""));
+
+        cleanup_background_task_files(&info.task_id);
+        cleanup_reload_context_file(&session_id);
+    });
+}
+
+#[test]
+fn test_finalize_reload_reconnect_is_session_scoped_across_reconnect_order() {
+    with_temp_jcode_home(|| {
+        let mut app_a = create_test_app();
+        let mut app_b = create_test_app();
+        let session_a = crate::id::new_id("ses_reload_a");
+        let session_b = crate::id::new_id("ses_reload_b");
+
+        let ctx_a = crate::tool::selfdev::ReloadContext {
+            task_context: Some("resume session A".to_string()),
+            version_before: "old-a".to_string(),
+            version_after: "new-a".to_string(),
+            session_id: session_a.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        let ctx_b = crate::tool::selfdev::ReloadContext {
+            task_context: Some("resume session B".to_string()),
+            version_before: "old-b".to_string(),
+            version_after: "new-b".to_string(),
+            session_id: session_b.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        ctx_a.save().expect("save reload context a");
+        ctx_b.save().expect("save reload context b");
+
+        remote::finalize_reload_reconnect(
+            &mut app_b,
+            Some(session_b.as_str()),
+            remote::ReloadReconnectHints {
+                reload_ctx_for_session: Some(ctx_b.clone()),
+                has_client_reload_marker: false,
+            },
+            false,
         );
-    }
+
+        assert_eq!(app_b.hidden_queued_system_messages.len(), 1);
+        assert!(app_b.hidden_queued_system_messages[0].contains("new-b"));
+        assert!(
+            crate::tool::selfdev::ReloadContext::peek_for_session(&session_a)
+                .expect("peek session a")
+                .is_some(),
+            "session A context should remain available after session B reconnects first"
+        );
+        assert!(
+            crate::tool::selfdev::ReloadContext::peek_for_session(&session_b)
+                .expect("peek session b")
+                .is_none(),
+            "session B context should be consumed by its own reconnect"
+        );
+
+        remote::finalize_reload_reconnect(
+            &mut app_a,
+            Some(session_a.as_str()),
+            remote::ReloadReconnectHints {
+                reload_ctx_for_session: Some(ctx_a.clone()),
+                has_client_reload_marker: false,
+            },
+            false,
+        );
+
+        assert_eq!(app_a.hidden_queued_system_messages.len(), 1);
+        assert!(app_a.hidden_queued_system_messages[0].contains("new-a"));
+        assert!(
+            crate::tool::selfdev::ReloadContext::peek_for_session(&session_a)
+                .expect("peek session a after consume")
+                .is_none(),
+            "session A context should be consumed only by session A reconnect"
+        );
+    });
+}
+
+#[test]
+fn test_finalize_reload_reconnect_supports_repeated_reload_cycles_for_same_session() {
+    with_temp_jcode_home(|| {
+        let session_id = crate::id::new_id("ses_reload_loop");
+
+        for cycle in 0..3 {
+            let mut app = create_test_app();
+            let version_after = format!("loop-build-{}", cycle);
+            let reload_ctx = crate::tool::selfdev::ReloadContext {
+                task_context: Some(format!("reload loop cycle {}", cycle)),
+                version_before: format!("loop-prev-{}", cycle),
+                version_after: version_after.clone(),
+                session_id: session_id.clone(),
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+            reload_ctx.save().expect("save loop reload context");
+
+            remote::finalize_reload_reconnect(
+                &mut app,
+                Some(session_id.as_str()),
+                remote::ReloadReconnectHints {
+                    reload_ctx_for_session: Some(reload_ctx.clone()),
+                    has_client_reload_marker: false,
+                },
+                false,
+            );
+
+            assert_eq!(app.hidden_queued_system_messages.len(), 1);
+            assert!(app.hidden_queued_system_messages[0].contains(&version_after));
+            assert!(
+                crate::tool::selfdev::ReloadContext::peek_for_session(&session_id)
+                    .expect("peek loop reload context")
+                    .is_none(),
+                "reload context should be consumed each cycle"
+            );
+        }
+    });
 }
 
 #[test]
@@ -703,59 +665,63 @@ fn test_handle_server_event_history_restores_side_panel_snapshot() {
 
 #[test]
 fn test_handle_server_event_history_restores_active_resume_processing_state() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let mut app = App::new_for_remote(Some("ses_resume_active".to_string()));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    with_temp_jcode_home(|| {
+        let mut app = App::new_for_remote(Some("ses_resume_active".to_string()));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    let needs_redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "ses_resume_active".to_string(),
-            messages: vec![],
-            images: vec![],
-            provider_name: Some("openai".to_string()),
-            provider_model: Some("gpt-5.4".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec![],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec![],
-            client_count: None,
-            is_canary: None,
-            server_version: None,
-            server_name: None,
-            server_icon: None,
-            server_has_update: None,
-            was_interrupted: None,
-            reload_recovery: None,
-            connection_type: Some("websocket".to_string()),
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: Some(crate::protocol::SessionActivitySnapshot {
-                is_processing: true,
-                current_tool_name: Some("batch".to_string()),
-            }),
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let needs_redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "ses_resume_active".to_string(),
+                messages: vec![],
+                images: vec![],
+                provider_name: Some("openai".to_string()),
+                provider_model: Some("gpt-5.4".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec![],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec![],
+                client_count: None,
+                is_canary: None,
+                server_version: None,
+                server_name: None,
+                server_icon: None,
+                server_has_update: None,
+                was_interrupted: None,
+                reload_recovery: None,
+                connection_type: Some("websocket".to_string()),
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: Some(crate::protocol::SessionActivitySnapshot {
+                    is_processing: true,
+                    current_tool_name: Some("batch".to_string()),
+                }),
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    assert!(needs_redraw, "resumed session history must redraw immediately");
-    assert!(app.is_processing());
-    assert!(app.processing_started.is_some());
-    assert!(app.time_since_activity().is_some());
-    assert!(matches!(app.status, ProcessingStatus::RunningTool(ref name) if name == "batch"));
+        assert!(
+            needs_redraw,
+            "resumed session history must redraw immediately"
+        );
+        assert!(app.is_processing());
+        assert!(app.processing_started.is_some());
+        assert!(app.time_since_activity().is_some());
+        assert!(matches!(app.status, ProcessingStatus::RunningTool(ref name) if name == "batch"));
+    });
 }
 
 #[test]
@@ -804,72 +770,64 @@ fn test_handle_server_event_side_panel_state_updates_snapshot() {
 
 #[test]
 fn test_remote_swarm_status_does_not_clobber_newer_session_history_on_disk() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_remote_preserve_history";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote preserve history".to_string()),
+        );
+        session.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: "older on-disk message".to_string(),
+                cache_control: None,
+            }],
+        );
+        session.save().expect("save initial session");
 
-    let session_id = "session_remote_preserve_history";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote preserve history".to_string()),
-    );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "older on-disk message".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.save().expect("save initial session");
+        let mut app = App::new_for_remote(Some(session_id.to_string()));
+        app.remote_session_id = Some(session_id.to_string());
+        app.swarm_enabled = true;
 
-    let mut app = App::new_for_remote(Some(session_id.to_string()));
-    app.remote_session_id = Some(session_id.to_string());
-    app.swarm_enabled = true;
+        // Simulate the shared server advancing the authoritative session file after the
+        // remote client already loaded its shadow copy.
+        let mut fresher = crate::session::Session::load(session_id).expect("load fresher session");
+        fresher.add_message(
+            Role::Assistant,
+            vec![ContentBlock::Text {
+                text: "newer server-side message".to_string(),
+                cache_control: None,
+            }],
+        );
+        fresher.save().expect("save fresher session");
 
-    // Simulate the shared server advancing the authoritative session file after the
-    // remote client already loaded its shadow copy.
-    let mut fresher = crate::session::Session::load(session_id).expect("load fresher session");
-    fresher.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "newer server-side message".to_string(),
-            cache_control: None,
-        }],
-    );
-    fresher.save().expect("save fresher session");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        app.handle_server_event(
+            crate::protocol::ServerEvent::SwarmStatus { members: vec![] },
+            &mut remote,
+        );
 
-    app.handle_server_event(
-        crate::protocol::ServerEvent::SwarmStatus { members: vec![] },
-        &mut remote,
-    );
-
-    let persisted = crate::session::Session::load(session_id).expect("reload persisted session");
-    assert_eq!(
-        persisted.messages.len(),
-        2,
-        "remote UI persistence should not roll back newer server-written messages"
-    );
-    let last_text = persisted
-        .messages
-        .last()
-        .and_then(|msg| {
-            msg.content.iter().find_map(|block| match block {
-                ContentBlock::Text { text, .. } => Some(text.as_str()),
-                _ => None,
+        let persisted =
+            crate::session::Session::load(session_id).expect("reload persisted session");
+        assert_eq!(
+            persisted.messages.len(),
+            2,
+            "remote UI persistence should not roll back newer server-written messages"
+        );
+        let last_text = persisted
+            .messages
+            .last()
+            .and_then(|msg| {
+                msg.content.iter().find_map(|block| match block {
+                    ContentBlock::Text { text, .. } => Some(text.as_str()),
+                    _ => None,
+                })
             })
-        })
-        .expect("last message text");
-    assert_eq!(last_text, "newer server-side message");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+            .expect("last message text");
+        assert_eq!(last_text, "newer server-side message");
+    });
 }

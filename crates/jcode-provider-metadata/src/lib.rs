@@ -34,6 +34,9 @@ pub enum LoginProviderTarget {
     Azure,
     OpenAiCompatible(OpenAiCompatibleProfile),
     Cursor,
+    GrokBuild,
+    KimiCodeAcp,
+    Reasonix,
     Copilot,
     Gemini,
     Antigravity,
@@ -53,7 +56,46 @@ pub enum LoginProviderAuthStateKey {
     Gemini,
     Antigravity,
     Cursor,
+    GrokDirect,
+    GrokBuild,
+    KimiCodeAcp,
+    Reasonix,
     Google,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagedOAuthProvider {
+    Kimi,
+    GrokDirect,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenAiCompatibleAuthStrategy {
+    ApiKey {
+        required: bool,
+    },
+    ManagedOAuth {
+        provider: ManagedOAuthProvider,
+        api_key_fallback: bool,
+    },
+}
+
+impl OpenAiCompatibleAuthStrategy {
+    pub const fn requires_api_key(self) -> bool {
+        match self {
+            Self::ApiKey { required } => required,
+            Self::ManagedOAuth {
+                api_key_fallback, ..
+            } => api_key_fallback,
+        }
+    }
+
+    pub const fn managed_oauth_provider(self) -> Option<ManagedOAuthProvider> {
+        match self {
+            Self::ManagedOAuth { provider, .. } => Some(provider),
+            Self::ApiKey { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -128,6 +170,9 @@ pub struct OpenAiCompatibleProfile {
     pub env_file: &'static str,
     pub setup_url: &'static str,
     pub default_model: Option<&'static str>,
+    pub auth_strategy: OpenAiCompatibleAuthStrategy,
+    /// Compatibility projection for existing callers. New auth decisions should
+    /// use [`Self::auth_strategy`].
     pub requires_api_key: bool,
 }
 
@@ -141,10 +186,12 @@ pub struct ResolvedOpenAiCompatibleProfile {
     pub env_file: String,
     pub setup_url: String,
     pub default_model: Option<String>,
+    pub auth_strategy: OpenAiCompatibleAuthStrategy,
     pub requires_api_key: bool,
 }
 
 mod catalog;
+mod compat_profiles;
 
 pub use catalog::*;
 use catalog::{LOGIN_PROVIDERS, OPENAI_COMPAT_PROFILES};
@@ -416,6 +463,22 @@ mod tests {
     }
 
     #[test]
+    fn zai_login_identifies_coding_plan_subscription_key() {
+        let provider = resolve_login_provider("zai").expect("Z.AI provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::ApiKey);
+        assert_eq!(provider.menu_detail, "Coding Plan subscription API key");
+
+        let LoginProviderTarget::OpenAiCompatible(profile) = provider.target else {
+            panic!("Z.AI must use its OpenAI-compatible Coding Plan endpoint");
+        };
+        assert_eq!(profile.api_base, "https://api.z.ai/api/coding/paas/v4");
+        assert_eq!(profile.setup_url, "https://docs.z.ai/devpack/quick-start");
+        assert_eq!(profile.default_model, Some("glm-5.2"));
+        assert_eq!(profile.api_key_env, "ZHIPU_API_KEY");
+        assert_eq!(profile.api_key_aliases, &["ZAI_API_KEY"]);
+    }
+
+    #[test]
     fn resolve_login_provider_loose_matches_id_alias_and_display_name() {
         // id
         assert_eq!(
@@ -469,6 +532,12 @@ mod tests {
     fn minimax_profile_uses_official_openai_compatible_configuration() {
         assert_eq!(MINIMAX_PROFILE.api_base, "https://api.minimax.io/v1");
         assert_eq!(MINIMAX_PROFILE.api_key_env, "MINIMAX_API_KEY");
+        assert_eq!(MINIMAX_PROFILE.default_model, Some("MiniMax-M3"));
+        assert_eq!(MINIMAX_LOGIN_PROVIDER.menu_detail, MINIMAX_CREDENTIAL_LABEL);
+        assert_eq!(
+            MINIMAX_LOGIN_PROVIDER.auth_status_method,
+            MINIMAX_CREDENTIAL_LABEL
+        );
         assert_eq!(
             openai_compatible_profiles()
                 .iter()
@@ -635,7 +704,11 @@ mod tests {
         );
         assert_eq!(
             resolve_login_provider("grok").map(|provider| provider.id),
-            Some("xai")
+            Some("grok-build")
+        );
+        assert_eq!(
+            resolve_login_provider("grok-subscription").map(|provider| provider.id),
+            Some("grok-build")
         );
         assert_eq!(
             resolve_login_provider("lm-studio").map(|provider| provider.id),
@@ -664,6 +737,118 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn grok_build_is_cli_subscription_auth_not_xai_api_key_auth() {
+        let provider = resolve_login_provider("grok-build").expect("Grok Build provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::Cli);
+        assert_eq!(
+            provider.auth_state_key,
+            LoginProviderAuthStateKey::GrokBuild
+        );
+        assert_eq!(provider.target, LoginProviderTarget::GrokBuild);
+        assert!(
+            cli_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            auth_status_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            !tui_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id),
+            "Grok Build login must stay terminal-owned"
+        );
+
+        let xai = resolve_login_provider("xai").expect("xAI API-key provider");
+        assert_eq!(xai.id, "xai");
+        assert_eq!(xai.auth_kind, LoginProviderAuthKind::ApiKey);
+    }
+
+    #[test]
+    fn grok_direct_is_distinct_managed_oauth_profile() {
+        let direct = resolve_login_provider("grok-direct").expect("Grok Direct provider");
+        assert_eq!(direct.auth_kind, LoginProviderAuthKind::DeviceCode);
+        assert_eq!(direct.auth_state_key, LoginProviderAuthStateKey::GrokDirect);
+        assert_eq!(
+            direct.target,
+            LoginProviderTarget::OpenAiCompatible(GROK_DIRECT_PROFILE)
+        );
+        assert!(direct.menu_detail.contains("Experimental"));
+        assert_eq!(
+            GROK_DIRECT_PROFILE.auth_strategy,
+            OpenAiCompatibleAuthStrategy::ManagedOAuth {
+                provider: ManagedOAuthProvider::GrokDirect,
+                api_key_fallback: false,
+            }
+        );
+        assert_eq!(GROK_DIRECT_PROFILE.default_model, Some("grok-4.5"));
+        assert_eq!(
+            resolve_login_provider("grok").map(|provider| provider.id),
+            Some("grok-build")
+        );
+        assert_ne!(direct.id, XAI_LOGIN_PROVIDER.id);
+        assert_ne!(direct.id, GROK_BUILD_LOGIN_PROVIDER.id);
+    }
+
+    #[test]
+    fn kimi_code_acp_is_terminal_owned_cli_auth_not_kimi_api_auth() {
+        let provider = resolve_login_provider("kimi-code-acp").expect("Kimi Code ACP provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::Cli);
+        assert_eq!(
+            provider.auth_state_key,
+            LoginProviderAuthStateKey::KimiCodeAcp
+        );
+        assert_eq!(provider.target, LoginProviderTarget::KimiCodeAcp);
+        assert!(
+            cli_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            auth_status_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            !tui_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id),
+            "Kimi Code ACP login must stay terminal-owned"
+        );
+
+        let kimi_api = resolve_login_provider("kimi").expect("Kimi API provider");
+        assert_eq!(kimi_api.id, "kimi");
+        assert_ne!(kimi_api.target, LoginProviderTarget::KimiCodeAcp);
+    }
+
+    #[test]
+    fn reasonix_is_terminal_owned_cli_setup_auth() {
+        let provider = resolve_login_provider("reasonix").expect("Reasonix provider");
+        assert_eq!(provider.auth_kind, LoginProviderAuthKind::Cli);
+        assert_eq!(provider.auth_state_key, LoginProviderAuthStateKey::Reasonix);
+        assert_eq!(provider.target, LoginProviderTarget::Reasonix);
+        assert!(
+            cli_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            auth_status_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id)
+        );
+        assert!(
+            !tui_login_providers()
+                .iter()
+                .any(|candidate| candidate.id == provider.id),
+            "Reasonix setup must stay terminal-owned"
+        );
     }
 
     #[test]

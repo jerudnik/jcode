@@ -406,6 +406,16 @@ impl Agent {
             agent.allowed_tools.clone(),
             agent.disabled_tools.clone(),
         );
+        // Bind the session workspace to workspace-scoped provider runtimes
+        // (ACP vendor CLIs) so their subprocess cwd is this session's
+        // directory, not the daemon process cwd.
+        agent.provider.set_session_working_dir(
+            agent
+                .session
+                .working_dir
+                .as_deref()
+                .map(std::path::Path::new),
+        );
         agent
     }
 

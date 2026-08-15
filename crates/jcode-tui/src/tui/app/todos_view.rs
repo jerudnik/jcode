@@ -656,6 +656,9 @@ impl App {
     /// or the list is genuinely done and the poke stands down. Returns whether a
     /// followup was queued.
     pub(super) fn settle_completed_todo_list(&mut self, todos: &[TodoItem]) -> bool {
+        // Settling or removing a list ends its poke cycle. Equivalent work that
+        // appears later is a new cycle and deserves one fresh nudge.
+        self.last_auto_poke_fingerprint = None;
         if todos.is_empty() {
             self.auto_poke_incomplete_todos = false;
             return false;

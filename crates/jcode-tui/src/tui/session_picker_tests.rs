@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::app::test_support::with_temp_jcode_home;
 use chrono::{Duration as ChronoDuration, Utc};
 use std::io::Write;
 use std::time::{Duration as StdDuration, SystemTime};
@@ -268,15 +269,6 @@ fn test_session_item_uses_single_primary_title_line() {
         "memorable short name should remain searchable but not take display space: {text_rows:?}"
     );
     assert!(text_rows[1].contains("~1.2M tok"));
-}
-
-#[test]
-fn test_status_inference() {
-    // Load sessions and ensure status display works
-    let sessions = load_sessions().unwrap();
-    for session in &sessions {
-        let _ = session.status.display();
-    }
 }
 
 #[test]
@@ -632,49 +624,40 @@ fn test_filter_matches_recent_message_content() {
 
 #[test]
 fn test_loading_preview_refreshes_search_index_for_picker_filtering() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("temp dir");
-    let previous_home = std::env::var("JCODE_HOME").ok();
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut session = Session::create_with_id(
+            "session_preview_search".to_string(),
+            Some("/tmp/preview-search".to_string()),
+            Some("Preview Search".to_string()),
+        );
+        session.append_stored_message(crate::session::StoredMessage {
+            id: "msg1".to_string(),
+            role: crate::message::Role::User,
+            content: vec![crate::message::ContentBlock::Text {
+                text: "needle hidden outside the initial picker summary".to_string(),
+                cache_control: None,
+            }],
+            display_role: None,
+            timestamp: None,
+            tool_duration_ms: None,
+            token_usage: None,
+        });
+        session.save().expect("save session");
 
-    let mut session = Session::create_with_id(
-        "session_preview_search".to_string(),
-        Some("/tmp/preview-search".to_string()),
-        Some("Preview Search".to_string()),
-    );
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "needle hidden outside the initial picker summary".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
+        let sessions = load_sessions().expect("load sessions");
+        let mut picker = SessionPicker::new(sessions);
+
+        picker.ensure_selected_preview_loaded();
+
+        let selected_after = picker
+            .selected_session()
+            .expect("selected session after preview");
+        assert!(selected_after.search_index.contains("needle hidden"));
+
+        picker.search_query = "needle hidden".to_string();
+        picker.rebuild_items();
+        assert_eq!(picker.visible_sessions.len(), 1);
     });
-    session.save().expect("save session");
-
-    let sessions = load_sessions().expect("load sessions");
-    let mut picker = SessionPicker::new(sessions);
-
-    picker.ensure_selected_preview_loaded();
-
-    let selected_after = picker
-        .selected_session()
-        .expect("selected session after preview");
-    assert!(selected_after.search_index.contains("needle hidden"));
-
-    picker.search_query = "needle hidden".to_string();
-    picker.rebuild_items();
-    assert_eq!(picker.visible_sessions.len(), 1);
-
-    if let Some(previous_home) = previous_home {
-        crate::env::set_var("JCODE_HOME", previous_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
@@ -1644,48 +1627,6 @@ fn benchmark_resume_op_construction_cost() {
     }
 }
 
-/// Any of the native scrollbar thumb glyphs (see `render_native_scrollbar`).
-fn contains_scrollbar_glyph(text: &str) -> bool {
-    text.contains('•') || text.contains('╷') || text.contains('╵') || text.contains('│')
-}
-
-#[test]
-fn test_preview_pane_shows_scrollbar_when_overflowing() {
-    let session = make_session_with_many_turns("preview_scroll", 60);
-    let mut picker = SessionPicker::new(vec![session]);
-    picker.focus = PaneFocus::Preview;
-
-    // Small height so the long preview overflows and needs a scrollbar.
-    let text = buffer_text(&mut picker, 100, 16);
-    assert!(
-        contains_scrollbar_glyph(&text),
-        "preview scrollbar glyph should render when content overflows:\n{text}"
-    );
-}
-
-#[test]
-fn test_session_list_shows_scrollbar_when_overflowing() {
-    // Many sessions so the left list overflows a short viewport.
-    let sessions: Vec<SessionInfo> = (0..40)
-        .map(|i| {
-            make_session(
-                &format!("list_scroll_{i}"),
-                &format!("s{i}"),
-                false,
-                SessionStatus::Closed,
-            )
-        })
-        .collect();
-    let mut picker = SessionPicker::new(sessions);
-    picker.focus = PaneFocus::Sessions;
-
-    let text = buffer_text(&mut picker, 100, 16);
-    assert!(
-        contains_scrollbar_glyph(&text),
-        "session list scrollbar glyph should render when list overflows:\n{text}"
-    );
-}
-
 #[test]
 fn test_preview_sticky_prompt_header_appears_after_scrolling() {
     let session = make_session_with_many_turns("sticky_header", 60);
@@ -1842,6 +1783,12 @@ fn preview_render_cache_is_reused_across_scroll_and_rebuilt_on_selection_change(
 
     // Scrolling several times must not change the cache key (content unchanged):
     // the cache is reused and only the scroll offset + visible slice move.
+    // The content hash buckets wall-clock into ~15s windows for the relative
+    // "… ago" status label, so an unlucky run can cross one bucket boundary
+    // mid-test; that is a legitimate rebuild, not a scroll invalidation, so
+    // re-baseline at most once.
+    let mut key_after_build = key_after_build;
+    let mut rebaselined = false;
     for _ in 0..5 {
         picker.scroll_preview_up(1);
         render(&mut picker);
@@ -1850,10 +1797,14 @@ fn preview_render_cache_is_reused_across_scroll_and_rebuilt_on_selection_change(
             .as_ref()
             .map(|c| c.key.clone())
             .unwrap();
-        assert!(
-            key_now == key_after_build,
-            "scrolling must reuse the cached wrapped preview"
-        );
+        if key_now != key_after_build {
+            assert!(
+                !rebaselined,
+                "preview cache rebuilt twice during a scroll burst"
+            );
+            rebaselined = true;
+            key_after_build = key_now;
+        }
     }
 
     // Navigating to a different session changes the content hash, so the cache

@@ -337,6 +337,9 @@ jcode works with subscription-backed OAuth flows and many provider integrations,
 - **OpenAI / ChatGPT / Codex** (`jcode login --provider openai`)
 - **Google Gemini** (`jcode login --provider gemini`)
 - **GitHub Copilot** (`jcode login --provider copilot`)
+- **Grok Build subscription** (`jcode login grok`)
+- **Kimi Code subscription** (`jcode login --provider kimi-code-acp`)
+- **Reasonix ACP runtime** (`jcode login --provider reasonix`)
 - **Azure OpenAI** (`jcode login --provider azure`)
 - **Alibaba Cloud Coding Plan** (`jcode login --provider alibaba-coding-plan`)
 - **Fireworks** (`jcode login --provider fireworks`)
@@ -346,6 +349,37 @@ jcode works with subscription-backed OAuth flows and many provider integrations,
 - **Custom OpenAI-compatible endpoint** (`jcode login --provider openai-compatible`)
 
 For custom OpenAI-compatible endpoints, jcode now prompts for the API base and supports local localhost servers without requiring an API key.
+
+Grok Build uses the official Grok CLI and your Grok subscription over ACP. jcode does not import an xAI API key or read the CLI's credential contents. Install the CLI, let it complete authentication, then use the subscription model directly:
+
+```bash
+NIXPKGS_ALLOW_UNFREE=1 nix profile install --impure nixpkgs#grok-build
+jcode login grok
+jcode --provider grok run 'hello'
+```
+
+Grok Build models are discovered live from the authenticated CLI. Run `grok models` to see the subscription model IDs available to your account, then choose one in `/model` or with `--model`. `grok-code-fast-1` is an xAI developer API model used through `--provider xai`; it is not a Grok Build subscription model in the current CLI.
+
+If `grok` is outside `PATH`, set `JCODE_GROK_CLI_PATH=/absolute/path/to/grok` or `acp.grok_cli_path` in `~/.jcode/config.toml`. The Grok Build subscription slot appears after that executable is discoverable and the CLI-owned login cache exists.
+
+Kimi Code uses the official `kimi acp` runtime and the CLI's managed OAuth login. jcode never asks for, copies, or stores a Kimi API key for this provider:
+
+```bash
+nix profile install github:numtide/llm-agents.nix#kimi-code
+jcode login --provider kimi-code-acp
+jcode --provider kimi-code-acp run 'hello'
+```
+
+The login opens Kimi's OAuth flow and uses the Kimi Code subscription associated with that account. A signed-in Kimi web or desktop session can satisfy the browser authorization, but the app session itself is not read as a credential and does not replace the `kimi` ACP executable. If the CLI is outside `PATH`, set `JCODE_KIMI_CLI_PATH=/absolute/path/to/kimi` or `acp.kimi_cli_path` in `~/.jcode/config.toml`.
+
+Reasonix runs through its official ACP server in workspace-only mode. The Nix `jcode` package includes the pinned Reasonix runtime. Configure providers and credentials in Reasonix itself, then select any model it exposes:
+
+```bash
+jcode login --provider reasonix
+jcode --provider reasonix run 'hello'
+```
+
+Jcode does not copy Reasonix provider keys or flatten its model, effort, preset, and approval settings. `reasonix setup` owns credentials and provider configuration; Jcode only selects the requested model for the ACP session. For source builds or a custom runtime, set `JCODE_REASONIX_CLI_PATH=/absolute/path/to/reasonix` or `acp.reasonix_cli_path` in `~/.jcode/config.toml`.
 
 ### Config-file setup for self-hosted endpoints and MCP
 

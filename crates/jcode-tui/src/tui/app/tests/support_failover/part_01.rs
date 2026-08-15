@@ -31,6 +31,7 @@ struct MockProvider;
 struct NamedMockProvider {
     name: &'static str,
     model: &'static str,
+    identity: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -82,6 +83,10 @@ impl Provider for NamedMockProvider {
 
     fn model(&self) -> String {
         self.model.to_string()
+    }
+
+    fn provider_identity(&self) -> String {
+        self.identity.unwrap_or(self.name).to_string()
     }
 
     fn fork(&self) -> Arc<dyn Provider> {
@@ -193,7 +198,27 @@ fn create_named_provider_test_app(
     name: &'static str,
     model: &'static str,
 ) -> App {
-    let provider: Arc<dyn Provider> = Arc::new(NamedMockProvider { name, model });
+    let provider: Arc<dyn Provider> = Arc::new(NamedMockProvider {
+        name,
+        model,
+        identity: None,
+    });
+    crate::tui::app::test_support::create_test_app_with(provider, |app| {
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    })
+}
+
+fn create_identified_provider_test_app(
+    name: &'static str,
+    model: &'static str,
+    identity: &'static str,
+) -> App {
+    let provider: Arc<dyn Provider> = Arc::new(NamedMockProvider {
+        name,
+        model,
+        identity: Some(identity),
+    });
     crate::tui::app::test_support::create_test_app_with(provider, |app| {
         app.queue_mode = false;
         app.diff_mode = crate::config::DiffDisplayMode::Inline;

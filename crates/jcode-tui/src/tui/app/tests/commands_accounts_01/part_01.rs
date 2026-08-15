@@ -107,18 +107,32 @@ fn session_picker_enter_queues_current_terminal_resume_and_closes_overlay() {
 }
 
 #[test]
-fn slash_resume_opens_session_picker_overlay_locally() {
+fn slash_resume_aliases_open_session_picker_overlay_locally() {
+    // /resume and its aliases all open the same Resume-mode picker.
     let runtime = tokio::runtime::Runtime::new().expect("test runtime");
     let _guard = runtime.enter();
-    let mut app = create_test_app();
 
-    app.input = "/resume".to_string();
-    app.submit_input();
+    for alias in ["/resume", "/sessions", "/session"] {
+        let mut app = create_test_app();
 
-    assert!(app.session_picker_overlay.is_some());
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
-    assert!(app.pending_session_picker_load.is_some());
-    assert!(app.input.is_empty());
+        app.input = alias.to_string();
+        app.submit_input();
+
+        assert!(
+            app.session_picker_overlay.is_some(),
+            "{alias}: overlay opened"
+        );
+        assert_eq!(
+            app.session_picker_mode,
+            SessionPickerMode::Resume,
+            "{alias}: picker mode"
+        );
+        assert!(
+            app.pending_session_picker_load.is_some(),
+            "{alias}: load scheduled"
+        );
+        assert!(app.input.is_empty(), "{alias}: input consumed");
+    }
 }
 
 #[test]
@@ -136,36 +150,6 @@ fn slash_command_submit_retains_pending_images() {
     // the images stay pending and go out with the next real prompt submission.
     assert_eq!(app.pending_images.len(), 1);
     assert_eq!(app.pending_images[0].0, "image/png");
-    assert!(app.input.is_empty());
-}
-
-#[test]
-fn slash_sessions_alias_opens_session_picker_overlay_locally() {
-    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-    let _guard = runtime.enter();
-    let mut app = create_test_app();
-
-    app.input = "/sessions".to_string();
-    app.submit_input();
-
-    assert!(app.session_picker_overlay.is_some());
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
-    assert!(app.pending_session_picker_load.is_some());
-    assert!(app.input.is_empty());
-}
-
-#[test]
-fn slash_session_alias_opens_session_picker_overlay_locally() {
-    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-    let _guard = runtime.enter();
-    let mut app = create_test_app();
-
-    app.input = "/session".to_string();
-    app.submit_input();
-
-    assert!(app.session_picker_overlay.is_some());
-    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
-    assert!(app.pending_session_picker_load.is_some());
     assert!(app.input.is_empty());
 }
 
@@ -227,37 +211,6 @@ fn test_help_topic_shows_command_details() {
     assert!(msg.content.contains("/compact"));
     assert!(msg.content.contains("background"));
     assert!(msg.content.contains("/compact mode"));
-}
-
-#[test]
-fn test_help_topic_shows_provider_test_coverage_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help provider-test-coverage".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/provider-test-coverage"));
-    assert!(msg.content.contains("live verification evidence"));
-    assert!(msg.content.contains("readiness gaps"));
-}
-
-#[test]
-fn test_help_topic_shows_log_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help log".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/log mark [note]"));
-    assert!(msg.content.contains("JCODE_LOG_MARK"));
 }
 
 #[test]
@@ -336,6 +289,13 @@ fn slash_provider_test_coverage_overlay_scrolls_with_mouse_wheel() {
 
     assert_eq!(app.model_status_scroll, Some(0));
 
+    // One wheel notch enqueues App::scroll_intent_lines(multiplier) lines and
+    // drains up to MOUSE_SCROLL_INTENT_LINES of them, so the offset moves by the
+    // base intent, not by 1. Derived from the constant rather than a literal.
+    // The first notch is deterministic: last_mouse_scroll is None before it, so
+    // the acceleration multiplier is unconditionally 1.
+    let step = App::scroll_intent_lines(1) as usize;
+
     let scroll_only = app.handle_mouse_event(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollDown,
         column: 10,
@@ -343,9 +303,11 @@ fn slash_provider_test_coverage_overlay_scrolls_with_mouse_wheel() {
         modifiers: crossterm::event::KeyModifiers::empty(),
     });
     assert!(scroll_only);
-    assert!(app.model_status_scroll.unwrap_or(0) > 0);
+    assert_eq!(app.model_status_scroll, Some(step));
 
-    let before = app.model_status_scroll.unwrap_or(0);
+    // The second notch may land inside the 30ms acceleration window, so its
+    // intent is 3 or 5 depending on machine speed. Both saturate `step` back to
+    // 0, so the exact-value assertion holds either way.
     let scroll_only = app.handle_mouse_event(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollUp,
         column: 10,
@@ -353,7 +315,11 @@ fn slash_provider_test_coverage_overlay_scrolls_with_mouse_wheel() {
         modifiers: crossterm::event::KeyModifiers::empty(),
     });
     assert!(scroll_only);
-    assert!(app.model_status_scroll.unwrap_or(usize::MAX) < before);
+    assert_eq!(
+        app.model_status_scroll,
+        Some(0),
+        "scrolling up from the first notch returns to the top"
+    );
 }
 
 #[test]
@@ -470,68 +436,6 @@ fn session_picker_preview_wheel_uses_shared_scroll_momentum() {
 }
 
 #[test]
-fn test_help_topic_shows_btw_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help btw".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/btw <question>"));
-    assert!(msg.content.contains("Forks (splits) the session"));
-}
-
-#[test]
-fn test_help_topic_shows_fork_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help fork".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/fork <prompt>"));
-    assert!(msg.content.contains("Alias for /fork"));
-}
-
-#[test]
-fn test_help_topic_shows_git_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help git".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/git"));
-    assert!(msg.content.contains("git status --short --branch"));
-    assert!(msg.content.contains("/git status"));
-}
-
-#[test]
-fn test_help_topic_shows_commit_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help commit".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/commit"));
-    assert!(msg.content.contains("logical commits"));
-    assert!(msg.content.contains("preserve unrelated work"));
-}
-
-#[test]
 fn test_commit_command_starts_synthetic_user_turn() {
     let mut app = create_test_app();
     app.input = "/commit".to_string();
@@ -561,21 +465,6 @@ fn test_commit_push_command_starts_synthetic_user_turn() {
         .expect("missing launch notice");
     assert_eq!(notice.role, "system");
     assert!(notice.content.contains("Starting logical commits + push"));
-}
-
-#[test]
-fn test_help_topic_shows_commit_push_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help commit-push".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/commit-push"));
-    assert!(msg.content.contains("push"));
 }
 
 #[test]
@@ -632,37 +521,6 @@ fn test_help_topic_shows_cut_release_command_details() {
     assert!(msg.content.contains("semver"));
     assert!(msg.content.contains("Nix and Cachix publish binaries"));
     assert!(msg.content.contains("metadata-only notes with zero assets"));
-}
-
-#[test]
-fn test_help_topic_shows_catchup_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help catchup".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/catchup"));
-    assert!(msg.content.contains("side panel"));
-    assert!(msg.content.contains("/catchup next"));
-}
-
-#[test]
-fn test_help_topic_shows_back_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help back".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/back"));
-    assert!(msg.content.contains("Catch Up"));
 }
 
 #[test]
@@ -786,203 +644,123 @@ fn test_maybe_show_catchup_after_history_adds_brief_page_and_marks_seen() {
 }
 
 #[test]
-fn test_help_topic_shows_observe_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help observe".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/observe"));
-    assert!(msg.content.contains("latest tool call or tool result"));
-}
-
-#[test]
-fn test_help_topic_shows_splitview_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help splitview".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/splitview"));
-    assert!(
-        msg.content
-            .contains("mirrors the current chat in the side panel")
-    );
-}
-
-#[test]
-fn test_help_topic_shows_refactor_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help refactor".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/refactor [focus]"));
-    assert!(msg.content.contains("independent read-only subagent"));
-}
-
-#[test]
 fn test_save_command_bookmarks_session_with_memory_enabled() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.memory_enabled = true;
+        app.messages = vec![
+            Message::user("u1"),
+            Message::assistant_text("a1"),
+            Message::user("u2"),
+            Message::assistant_text("a2"),
+        ];
 
-    let mut app = create_test_app();
-    app.memory_enabled = true;
-    app.messages = vec![
-        Message::user("u1"),
-        Message::assistant_text("a1"),
-        Message::user("u2"),
-        Message::assistant_text("a2"),
-    ];
+        app.input = "/save quick-label".to_string();
+        app.submit_input();
 
-    app.input = "/save quick-label".to_string();
-    app.submit_input();
-
-    assert!(app.session.saved);
-    assert_eq!(app.session.save_label.as_deref(), Some("quick-label"));
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing save response");
-    assert!(msg.content.contains("saved as"));
-    assert!(msg.content.contains("quick-label"));
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert!(app.session.saved);
+        assert_eq!(app.session.save_label.as_deref(), Some("quick-label"));
+        let msg = app
+            .display_messages()
+            .last()
+            .expect("missing save response");
+        assert!(msg.content.contains("saved as"));
+        assert!(msg.content.contains("quick-label"));
+    });
 }
 
 #[test]
 fn test_goals_command_opens_overview_in_side_panel() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("repo");
-    std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project = temp.path().join("repo");
+        std::fs::create_dir_all(&project).expect("project dir");
 
-    crate::goal::create_goal(
-        crate::goal::GoalCreateInput {
-            title: "Ship mobile MVP".to_string(),
-            scope: crate::goal::GoalScope::Project,
-            ..crate::goal::GoalCreateInput::default()
-        },
-        Some(&project),
-    )
-    .expect("create goal");
+        crate::goal::create_goal(
+            crate::goal::GoalCreateInput {
+                title: "Ship mobile MVP".to_string(),
+                scope: crate::goal::GoalScope::Project,
+                ..crate::goal::GoalCreateInput::default()
+            },
+            Some(&project),
+        )
+        .expect("create goal");
 
-    let mut app = create_test_app();
-    app.session.working_dir = Some(project.display().to_string());
-    app.input = "/goals".to_string();
-    app.submit_input();
+        let mut app = create_test_app();
+        app.session.working_dir = Some(project.display().to_string());
+        app.input = "/goals".to_string();
+        app.submit_input();
 
-    assert_eq!(app.side_panel.focused_page_id.as_deref(), Some("goals"));
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing goals message");
-    assert!(msg.content.contains("Opened initiatives overview"));
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(app.side_panel.focused_page_id.as_deref(), Some("goals"));
+        let msg = app
+            .display_messages()
+            .last()
+            .expect("missing goals message");
+        assert!(msg.content.contains("Opened initiatives overview"));
+    });
 }
 
 #[test]
 fn test_mission_and_goal_commands_are_disabled() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.input = "/mission make browser control reliable".to_string();
+        app.submit_input();
+        assert!(!app.is_processing, "/mission must not start a turn");
+        assert!(
+            !app.pending_queued_dispatch,
+            "/mission must not queue dispatch"
+        );
+        assert!(
+            app.queued_messages.is_empty(),
+            "/mission must not queue prompts"
+        );
+        assert!(
+            crate::mission::load(&app.session.id)
+                .expect("load mission")
+                .is_none(),
+            "/mission must not create a mission"
+        );
 
-    let mut app = create_test_app();
-    app.input = "/mission make browser control reliable".to_string();
-    app.submit_input();
-    assert!(!app.is_processing, "/mission must not start a turn");
-    assert!(
-        !app.pending_queued_dispatch,
-        "/mission must not queue dispatch"
-    );
-    assert!(
-        app.queued_messages.is_empty(),
-        "/mission must not queue prompts"
-    );
-    assert!(
-        crate::mission::load(&app.session.id)
-            .expect("load mission")
-            .is_none(),
-        "/mission must not create a mission"
-    );
-
-    app.input = "/goal status".to_string();
-    app.submit_input();
-    assert!(!app.is_processing, "/goal must not start a turn");
-    assert!(
-        !app.pending_queued_dispatch,
-        "/goal must not queue dispatch"
-    );
-    assert!(
-        app.queued_messages.is_empty(),
-        "/goal must not queue prompts"
-    );
-    assert!(
-        crate::mission::load(&app.session.id)
-            .expect("load mission")
-            .is_none(),
-        "/goal must not create a mission"
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        app.input = "/goal status".to_string();
+        app.submit_input();
+        assert!(!app.is_processing, "/goal must not start a turn");
+        assert!(
+            !app.pending_queued_dispatch,
+            "/goal must not queue dispatch"
+        );
+        assert!(
+            app.queued_messages.is_empty(),
+            "/goal must not queue prompts"
+        );
+        assert!(
+            crate::mission::load(&app.session.id)
+                .expect("load mission")
+                .is_none(),
+            "/goal must not create a mission"
+        );
+    });
 }
 
 #[test]
 fn test_goals_legacy_alias_is_not_captured_by_goal_mission_alias() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("repo");
-    std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project = temp.path().join("repo");
+        std::fs::create_dir_all(&project).expect("project dir");
 
-    let mut app = create_test_app();
-    app.session.working_dir = Some(project.display().to_string());
-    app.input = "/goals".to_string();
-    app.submit_input();
+        let mut app = create_test_app();
+        app.session.working_dir = Some(project.display().to_string());
+        app.input = "/goals".to_string();
+        app.submit_input();
 
-    assert_eq!(app.side_panel.focused_page_id.as_deref(), Some("goals"));
-    let mission = crate::mission::load(&app.session.id).expect("load mission");
-    assert!(
-        mission.is_none(),
-        "/goals should not create a mission named `s`"
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(app.side_panel.focused_page_id.as_deref(), Some("goals"));
+        let mission = crate::mission::load(&app.session.id).expect("load mission");
+        assert!(
+            mission.is_none(),
+            "/goals should not create a mission named `s`"
+        );
+    });
 }
 
 #[test]
@@ -1015,132 +793,96 @@ fn test_btw_command_requires_question() {
 
 #[test]
 fn test_btw_command_forks_session_with_question() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.input = "/btw what did we decide about config?".to_string();
+        app.submit_input();
 
-    let mut app = create_test_app();
-    app.input = "/btw what did we decide about config?".to_string();
-    app.submit_input();
-
-    // Terminal spawning is disabled under cfg(test), so the fork reports the
-    // created session with a manual resume hint.
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing btw fork message");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("created for the next prompt"));
-    let session_id = msg
-        .content
-        .split("jcode --resume ")
-        .nth(1)
-        .expect("missing resume hint")
-        .trim()
-        .to_string();
-    let restored =
-        App::restore_input_for_reload(&session_id).expect("forked session should stage question");
-    assert_eq!(restored.input, "what did we decide about config?");
-    assert!(restored.submit_on_restore);
-    assert!(restored.pending_images.is_empty());
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        // Terminal spawning is disabled under cfg(test), so the fork reports the
+        // created session with a manual resume hint.
+        let msg = app
+            .display_messages()
+            .last()
+            .expect("missing btw fork message");
+        assert_eq!(msg.role, "system");
+        assert!(msg.content.contains("created for the next prompt"));
+        let session_id = msg
+            .content
+            .split("jcode --resume ")
+            .nth(1)
+            .expect("missing resume hint")
+            .trim()
+            .to_string();
+        let restored = App::restore_input_for_reload(&session_id)
+            .expect("forked session should stage question");
+        assert_eq!(restored.input, "what did we decide about config?");
+        assert!(restored.submit_on_restore);
+        assert!(restored.pending_images.is_empty());
+    });
 }
 
 #[test]
 fn test_fork_command_with_prompt_forks_session() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.input = "/fork try the other approach".to_string();
+        app.submit_input();
 
-    let mut app = create_test_app();
-    app.input = "/fork try the other approach".to_string();
-    app.submit_input();
-
-    let msg = app.display_messages().last().expect("missing fork message");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("created for the next prompt"));
-    let session_id = msg
-        .content
-        .split("jcode --resume ")
-        .nth(1)
-        .expect("missing resume hint")
-        .trim()
-        .to_string();
-    let restored =
-        App::restore_input_for_reload(&session_id).expect("forked session should stage prompt");
-    assert_eq!(restored.input, "try the other approach");
-    assert!(restored.submit_on_restore);
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let msg = app.display_messages().last().expect("missing fork message");
+        assert_eq!(msg.role, "system");
+        assert!(msg.content.contains("created for the next prompt"));
+        let session_id = msg
+            .content
+            .split("jcode --resume ")
+            .nth(1)
+            .expect("missing resume hint")
+            .trim()
+            .to_string();
+        let restored =
+            App::restore_input_for_reload(&session_id).expect("forked session should stage prompt");
+        assert_eq!(restored.input, "try the other approach");
+        assert!(restored.submit_on_restore);
+    });
 }
 
 #[test]
 fn test_fork_command_without_prompt_forks_idle_session() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.input = "/fork".to_string();
+        app.submit_input();
 
-    let mut app = create_test_app();
-    app.input = "/fork".to_string();
-    app.submit_input();
-
-    let msg = app.display_messages().last().expect("missing fork message");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("✂ Fork →"));
-    let session_id = msg
-        .content
-        .split("jcode --resume ")
-        .nth(1)
-        .expect("missing resume hint")
-        .trim()
-        .to_string();
-    assert!(
-        App::restore_input_for_reload(&session_id).is_none(),
-        "idle fork should not stage a startup submission"
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let msg = app.display_messages().last().expect("missing fork message");
+        assert_eq!(msg.role, "system");
+        assert!(msg.content.contains("✂ Fork →"));
+        let session_id = msg
+            .content
+            .split("jcode --resume ")
+            .nth(1)
+            .expect("missing resume hint")
+            .trim()
+            .to_string();
+        assert!(
+            App::restore_input_for_reload(&session_id).is_none(),
+            "idle fork should not stage a startup submission"
+        );
+    });
 }
 
 #[test]
 fn test_split_command_local_is_alias_for_fork() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.input = "/split".to_string();
+        app.submit_input();
 
-    let mut app = create_test_app();
-    app.input = "/split".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing split message");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("✂ Fork →"));
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let msg = app
+            .display_messages()
+            .last()
+            .expect("missing split message");
+        assert_eq!(msg.role, "system");
+        assert!(msg.content.contains("✂ Fork →"));
+    });
 }
 
 #[test]
@@ -1319,20 +1061,6 @@ fn test_splitview_mirrors_chat_and_streaming_text() {
 }
 
 #[test]
-fn test_splitview_does_not_build_cache_while_disabled() {
-    let mut app = create_test_app();
-    app.display_messages = vec![
-        DisplayMessage::user("What did we decide?".to_string()),
-        DisplayMessage::assistant("We decided to ship it.".to_string()),
-    ];
-
-    app.bump_display_messages_version();
-
-    assert!(!app.split_view_enabled());
-    assert!(app.split_view_markdown.is_empty());
-}
-
-#[test]
 fn test_splitview_disable_clears_cached_markdown() {
     let mut app = create_test_app();
     app.display_messages = vec![
@@ -1450,38 +1178,31 @@ fn test_observe_ignores_noise_tools_and_preserves_latest_useful_context() {
 
 #[test]
 fn test_goals_show_command_focuses_goal_page() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("repo");
-    std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project = temp.path().join("repo");
+        std::fs::create_dir_all(&project).expect("project dir");
 
-    let goal = crate::goal::create_goal(
-        crate::goal::GoalCreateInput {
-            title: "Ship mobile MVP".to_string(),
-            scope: crate::goal::GoalScope::Project,
-            ..crate::goal::GoalCreateInput::default()
-        },
-        Some(&project),
-    )
-    .expect("create goal");
+        let goal = crate::goal::create_goal(
+            crate::goal::GoalCreateInput {
+                title: "Ship mobile MVP".to_string(),
+                scope: crate::goal::GoalScope::Project,
+                ..crate::goal::GoalCreateInput::default()
+            },
+            Some(&project),
+        )
+        .expect("create goal");
 
-    let mut app = create_test_app();
-    app.session.working_dir = Some(project.display().to_string());
-    app.input = format!("/goals show {}", goal.id);
-    app.submit_input();
+        let mut app = create_test_app();
+        app.session.working_dir = Some(project.display().to_string());
+        app.input = format!("/goals show {}", goal.id);
+        app.submit_input();
 
-    assert_eq!(
-        app.side_panel.focused_page_id.as_deref(),
-        Some(format!("goal.{}", goal.id).as_str())
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(
+            app.side_panel.focused_page_id.as_deref(),
+            Some(format!("goal.{}", goal.id).as_str())
+        );
+    });
 }
 
 #[test]

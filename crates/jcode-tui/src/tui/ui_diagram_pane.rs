@@ -730,10 +730,23 @@ pub(crate) fn is_diagram_poor_fit(
     area: Rect,
     position: crate::config::DiagramPanePosition,
 ) -> bool {
+    // The picker global is a process-wide OnceLock that any test or startup
+    // path can initialize, so tests should call the explicit-font variant
+    // instead of depending on this read.
+    let font_size = super::super::mermaid::get_font_size();
+    is_diagram_poor_fit_with_font(diagram, area, position, font_size)
+}
+
+pub(crate) fn is_diagram_poor_fit_with_font(
+    diagram: &info_widget::DiagramInfo,
+    area: Rect,
+    position: crate::config::DiagramPanePosition,
+    font_size: Option<(u16, u16)>,
+) -> bool {
     if diagram.width == 0 || diagram.height == 0 || area.width < 5 || area.height < 3 {
         return false;
     }
-    let (cell_w, cell_h) = super::super::mermaid::get_font_size().unwrap_or((8, 16));
+    let (cell_w, cell_h) = font_size.unwrap_or((8, 16));
     let cell_w = cell_w.max(1) as f64;
     let cell_h = cell_h.max(1) as f64;
     let inner_w = area.width.saturating_sub(2).max(1) as f64 * cell_w;

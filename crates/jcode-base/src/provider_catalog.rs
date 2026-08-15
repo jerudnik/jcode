@@ -29,6 +29,7 @@ fn set_active_openai_compatible_profile(profile: Option<ResolvedOpenAiCompatible
 }
 
 pub const OPENAI_COMPAT_LOCAL_ENABLED_ENV: &str = "JCODE_OPENAI_COMPAT_LOCAL_ENABLED";
+pub const MINIMAX_REGION_ENV: &str = "JCODE_MINIMAX_REGION";
 pub const MINIMAX_CHINA_API_BASE: &str = "https://api.minimaxi.com/v1";
 pub const MINIMAX_CHINA_SETUP_URL: &str = "https://platform.minimaxi.com/docs/llms.txt";
 
@@ -69,10 +70,11 @@ pub fn resolve_openai_compatible_profile_with_api_key_hint(
         env_file: profile.env_file.to_string(),
         setup_url: profile.setup_url.to_string(),
         default_model: profile.default_model.map(ToString::to_string),
+        auth_strategy: profile.auth_strategy,
         requires_api_key: profile.requires_api_key,
     };
 
-    apply_profile_key_based_endpoint_overrides(profile, &mut resolved, api_key_hint);
+    apply_profile_endpoint_overrides(profile, &mut resolved, api_key_hint);
 
     if profile.id != OPENAI_COMPAT_PROFILE.id {
         if let Some(newest_model) =
@@ -236,37 +238,24 @@ fn openai_compatible_model_quality_tier(model_id: &str) -> u8 {
     1
 }
 
-fn apply_profile_key_based_endpoint_overrides(
+fn apply_profile_endpoint_overrides(
     profile: OpenAiCompatibleProfile,
     resolved: &mut ResolvedOpenAiCompatibleProfile,
-    api_key_hint: Option<&str>,
+    _api_key_hint: Option<&str>,
 ) {
     if profile.id != MINIMAX_PROFILE.id {
         return;
     }
 
-    let key = api_key_hint
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .map(ToString::to_string)
-        .or_else(|| load_api_key(&ApiKeyCredentialSource::from_catalog_profile(profile)));
-
-    // The `sk-cp-` prefix is a coarse region signal, not a guarantee: MiniMax
-    // issues `sk-cp-` keys for the international (`api.minimax.io`) platform too.
-    // Let an explicit region override win so a config that pins the global
-    // endpoint is not silently rewritten to the China host (which 401s an
-    // international key). `JCODE_MINIMAX_REGION=international|global` opts out;
-    // `=china` forces the China host regardless of prefix.
-    let region_override = std::env::var("JCODE_MINIMAX_REGION")
-        .ok()
+    // MiniMax issues the same key prefixes on both platforms, so region must be
+    // an explicit user choice. International is the safe default; the China
+    // endpoint is selected only by a stored or process-level region override.
+    let region_override = load_env_value_from_env_or_config(MINIMAX_REGION_ENV, profile.env_file)
         .map(|value| value.trim().to_ascii_lowercase());
     let force_china = match region_override.as_deref() {
         Some("international") | Some("global") | Some("io") => false,
         Some("china") | Some("cn") => true,
-        _ => key
-            .as_deref()
-            .map(|key| key.trim_start().starts_with("sk-cp-"))
-            .unwrap_or(false),
+        _ => false,
     };
 
     if force_china {
@@ -397,8 +386,12 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("qwen3.5-plus");
         }
         "zai" => {
-            push("glm-4.5");
+            // Current Coding Plan roster first; older entries remain available
+            // for stored sessions and endpoint compatibility.
+            push("glm-5.2");
+            push("glm-5-turbo");
             push("glm-4.7");
+            push("glm-4.5");
             push("glm-5");
             push("glm-5.1");
             push("glm-4.7-flash");
@@ -447,12 +440,16 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("Llama-3.3-70B-Instruct");
         }
         "kimi" => {
+            push("k3");
+            push("k3-256k");
             push("kimi-for-coding");
+            push("kimi-for-coding-highspeed");
             push("kimi-k2.5");
             push("kimi-k2.6");
             push("kimi-k2-thinking");
             push("kimi-k2-thinking-turbo");
         }
+        "grok-direct" => push("grok-4.5"),
         "firmware" => {
             push("kimi-k2.5");
             push("zai-glm-5-1");
@@ -537,6 +534,7 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
         // before the picker/routes are rebuilt. Keep the documented text models
         // selectable immediately after saving a key.
         "minimax" => {
+            push("MiniMax-M3");
             push("MiniMax-M2.7");
             push("MiniMax-M2.7-highspeed");
             push("MiniMax-M2.5");
@@ -587,6 +585,7 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
     let model = model.trim().to_ascii_lowercase();
 
     match profile_id.as_str() {
+        "grok-direct" if model == "grok-4.5" => Some(500_000),
         // DeepSeek V4 direct API models advertise a 1M token context window. The
         // direct profile runs through the OpenRouter/OpenAI-compatible provider
         // implementation, whose live catalog can be unavailable during startup.
@@ -893,8 +892,11 @@ pub fn openai_compatible_profile_is_configured(profile: OpenAiCompatibleProfile)
         return configured;
     }
 
-    if profile.id == KIMI_PROFILE.id {
-        return crate::auth::kimi::is_configured();
+    if let Some(provider) = profile.auth_strategy.managed_oauth_provider() {
+        return match provider {
+            ManagedOAuthProvider::Kimi => crate::auth::kimi::is_configured(),
+            ManagedOAuthProvider::GrokDirect => crate::auth::grok_direct::is_configured(),
+        };
     }
 
     let resolved = resolve_openai_compatible_profile(profile);

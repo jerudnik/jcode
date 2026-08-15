@@ -476,7 +476,7 @@ pub fn build_chat_messages(
     for (idx, mut msg) in api_messages.into_iter().enumerate() {
         let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
         if role == "assistant"
-            && allow_reasoning
+            && include_reasoning_content
             && msg.get("tool_calls").and_then(|v| v.as_array()).is_some()
         {
             let needs_reasoning = match msg.get("reasoning_content") {

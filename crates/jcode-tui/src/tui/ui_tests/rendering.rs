@@ -84,196 +84,181 @@ fn test_render_rounded_box_long_title_keeps_body_width_in_sync() {
 
 #[test]
 fn test_render_direct_message_as_compact_agent_row() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::swarm("DM from fox", "Can you take parser tests?");
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::swarm("DM from fox", "Can you take parser tests?");
 
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered, vec!["🦊 Can you take parser tests?"]);
-    assert!(
-        rendered
-            .iter()
-            .all(|line| !line.contains('│') && !line.contains('✉')),
-        "direct messages should render without rails or type icons: {:?}",
-        rendered
-    );
-}
-
-#[test]
-fn test_render_swarm_message_matches_exact_compact_snapshot() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::swarm("Task · sheep", "Implement compaction asymptotic fixes");
-
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
-
-    assert_eq!(
-        rendered,
-        vec!["🐑 Implement compaction asymptotic fixes".to_string()]
-    );
+        assert_eq!(rendered, vec!["🦊 Can you take parser tests?"]);
+        assert!(
+            rendered
+                .iter()
+                .all(|line| !line.contains('│') && !line.contains('✉')),
+            "direct messages should render without rails or type icons: {:?}",
+            rendered
+        );
+    });
 }
 
 #[test]
 fn test_render_swarm_await_as_compact_rail_free_summary() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::swarm("🐝 Swarm await", "✓ 2/2");
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::swarm("🐝 Swarm await", "✓ 2/2");
 
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered, vec!["🐝 ✓ 2/2"]);
-    assert!(rendered.iter().all(|line| !line.contains('│')));
+        assert_eq!(rendered, vec!["🐝 ✓ 2/2"]);
+        assert!(rendered.iter().all(|line| !line.contains('│')));
+    });
 }
 
 #[test]
 fn test_render_swarm_await_wake_message_as_compact_rail_free_summary() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::background_task(
-        "🐝 **Swarm await finished**\n\nAll members done. All 1 members are done: sabertooth\n\nMember statuses:\n  ✓ sabertooth (completed)\n\nCompletion reports:\n\n--- sabertooth (completed) ---\nAwait UI demo complete."
-            .to_string(),
-    );
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::background_task(
+            "🐝 **Swarm await finished**\n\nAll members done. All 1 members are done: sabertooth\n\nMember statuses:\n  ✓ sabertooth (completed)\n\nCompletion reports:\n\n--- sabertooth (completed) ---\nAwait UI demo complete."
+                .to_string(),
+        );
 
-    let lines = render_background_task_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_background_task_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered, vec!["🐝 ✓ 1/1"]);
-    assert!(rendered.iter().all(|line| !line.contains('│')));
-    assert!(!rendered.join("\n").contains("sabertooth"));
+        assert_eq!(rendered, vec!["🐝 ✓ 1/1"]);
+        assert!(rendered.iter().all(|line| !line.contains('│')));
+        assert!(!rendered.join("\n").contains("sabertooth"));
+    });
 }
 
 #[test]
 fn test_render_swarm_message_trims_extra_newlines() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::swarm("Broadcast · coordinator", "\n\nPlan updated\n\n");
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::swarm("Broadcast · coordinator", "\n\nPlan updated\n\n");
 
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered, vec!["💫 📣 Plan updated"]);
-    assert!(rendered.iter().all(|line| !line.contains('│')));
+        assert_eq!(rendered, vec!["💫 📣 Plan updated"]);
+        assert!(rendered.iter().all(|line| !line.contains('│')));
+    });
 }
 
 #[test]
 fn test_render_channel_and_shared_context_as_compact_agent_rows() {
-    crate::tui::markdown::set_center_code_blocks(false);
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let channel = DisplayMessage::swarm("#dev · fox", "Can someone review this?");
+        let context = DisplayMessage::swarm("Shared context · fox", "branch = feature/auth");
 
-    let channel = DisplayMessage::swarm("#dev · fox", "Can someone review this?");
-    let context = DisplayMessage::swarm("Shared context · fox", "branch = feature/auth");
+        let channel_lines = render_swarm_message(&channel, 80, crate::config::DiffDisplayMode::Off)
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>();
+        let context_lines = render_swarm_message(&context, 80, crate::config::DiffDisplayMode::Off)
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>();
 
-    let channel_lines = render_swarm_message(&channel, 80, crate::config::DiffDisplayMode::Off)
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>();
-    let context_lines = render_swarm_message(&context, 80, crate::config::DiffDisplayMode::Off)
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>();
-
-    assert_eq!(channel_lines, vec!["🦊 #dev · Can someone review this?"]);
-    assert_eq!(context_lines, vec!["🦊 🧠 branch · feature/auth"]);
+        assert_eq!(channel_lines, vec!["🦊 #dev · Can someone review this?"]);
+        assert_eq!(context_lines, vec!["🦊 🧠 branch · feature/auth"]);
+    });
 }
 
 #[test]
 fn test_render_file_activity_as_collapsible_compact_row() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let content = jcode_tui_messages::encode_collapsible_swarm_content(
-        "src/auth.rs · modified",
-        "```text\n-old\n+new\n```",
-    );
-    let msg = DisplayMessage::swarm("File activity · fox", content);
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let content = jcode_tui_messages::encode_collapsible_swarm_content(
+            "src/auth.rs · modified",
+            "```text\n-old\n+new\n```",
+        );
+        let msg = DisplayMessage::swarm("File activity · fox", content);
 
-    let rendered = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off)
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>();
+        let rendered = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off)
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>();
 
-    assert_eq!(rendered, vec!["🦊 ✎ src/auth.rs · modified  ▸ diff"]);
-    assert!(rendered.iter().all(|line| !line.contains('│')));
+        assert_eq!(rendered, vec!["🦊 ✎ src/auth.rs · modified  ▸ diff"]);
+        assert!(rendered.iter().all(|line| !line.contains('│')));
+    });
 }
 
 #[test]
 fn test_render_file_conflict_places_warning_before_agent() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::swarm("File conflict · fox", "src/auth.rs · concurrent edits");
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::swarm("File conflict · fox", "src/auth.rs · concurrent edits");
 
-    let rendered = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off)
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>();
+        let rendered = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off)
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>();
 
-    assert_eq!(rendered, vec!["⚠ 🦊 src/auth.rs · concurrent edits"]);
+        assert_eq!(rendered, vec!["⚠ 🦊 src/auth.rs · concurrent edits"]);
+    });
 }
 
 #[test]
 fn test_render_swarm_message_uses_agent_emoji_for_assignments() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::swarm("Task · sheep", "Implement compaction asymptotic fixes");
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::swarm("Task · sheep", "Implement compaction asymptotic fixes");
 
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered, vec!["🐑 Implement compaction asymptotic fixes"]);
+        assert_eq!(rendered, vec!["🐑 Implement compaction asymptotic fixes"]);
+    });
 }
 
 #[test]
 fn test_render_swarm_message_centered_mode_left_aligns_with_shared_padding() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::swarm("Plan · sheep", "4 items · v1");
+        let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    let msg = DisplayMessage::swarm("Plan · sheep", "4 items · v1");
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        assert_eq!(rendered.len(), 1, "expected one compact plan row");
 
-    assert_eq!(rendered.len(), 1, "expected one compact plan row");
-
-    let header_pad = rendered[0].chars().take_while(|c| *c == ' ').count();
-    assert!(
-        header_pad > 0,
-        "centered swarm header should be padded: {rendered:?}"
-    );
-    assert_eq!(rendered[0].trim_start(), "🐝 Plan · 4 items · v1");
-    assert!(!rendered[0].contains('│'));
-    for line in &lines {
-        assert_eq!(
-            line.alignment,
-            Some(ratatui::layout::Alignment::Left),
-            "centered swarm lines should be left-aligned after padding"
+        let header_pad = rendered[0].chars().take_while(|c| *c == ' ').count();
+        assert!(
+            header_pad > 0,
+            "centered swarm header should be padded: {rendered:?}"
         );
-    }
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert_eq!(rendered[0].trim_start(), "🐝 Plan · 4 items · v1");
+        assert!(!rendered[0].contains('│'));
+        for line in &lines {
+            assert_eq!(
+                line.alignment,
+                Some(ratatui::layout::Alignment::Left),
+                "centered swarm lines should be left-aligned after padding"
+            );
+        }
+    });
 }
 
 #[test]
 fn test_render_swarm_message_centered_mode_keeps_task_icon_and_padding() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::swarm("Task · sheep", "Implement compaction asymptotic fixes");
+        let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    let msg = DisplayMessage::swarm("Task · sheep", "Implement compaction asymptotic fixes");
-    let lines = render_swarm_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
-
-    assert!(
-        rendered[0].starts_with(' '),
-        "centered task header should be padded: {rendered:?}"
-    );
-    assert_eq!(
-        rendered[0].trim_start(),
-        "🐑 Implement compaction asymptotic fixes"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(
+            rendered[0].starts_with(' '),
+            "centered task header should be padded: {rendered:?}"
+        );
+        assert_eq!(
+            rendered[0].trim_start(),
+            "🐑 Implement compaction asymptotic fixes"
+        );
+    });
 }
 
 #[test]
 fn test_render_swarm_message_centered_mode_keeps_file_activity_preview_centered_when_diff_wraps() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-
-    let msg = DisplayMessage::swarm(
-        "File activity · rose",
-        "`…/jcode/src/server/comm_sync.rs`
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::swarm(
+            "File activity · rose",
+            "`…/jcode/src/server/comm_sync.rs`
 
 Modified via apply_patch
 
@@ -281,30 +266,29 @@ Modified via apply_patch
 331-             persist_swarm_state_for(&swarm_id, swarm_state.clone()).await;
 331+             persist_swarm_state_for(&swarm_id, swarm_state).await;
 ```",
-    );
+        );
 
-    let lines = render_swarm_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
-    let first_pad = rendered[0].chars().take_while(|c| *c == ' ').count();
+        let lines = render_swarm_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let first_pad = rendered[0].chars().take_while(|c| *c == ' ').count();
 
-    assert!(
-        first_pad >= 8,
-        "centered file activity notification should preserve a visible left gutter: {rendered:?}"
-    );
-    assert!(
-        rendered
-            .iter()
-            .all(|line| line.is_empty() || line.starts_with(&" ".repeat(first_pad))),
-        "wrapped file activity preview should keep one shared left pad: {rendered:?}"
-    );
-    assert!(
-        rendered
-            .iter()
-            .any(|line| line.contains("persist_swarm_state_for")),
-        "expected diff preview to remain visible after wrapping: {rendered:?}"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(
+            first_pad >= 8,
+            "centered file activity notification should preserve a visible left gutter: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .all(|line| line.is_empty() || line.starts_with(&" ".repeat(first_pad))),
+            "wrapped file activity preview should keep one shared left pad: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("persist_swarm_state_for")),
+            "expected diff preview to remain visible after wrapping: {rendered:?}"
+        );
+    });
 }
 
 #[test]

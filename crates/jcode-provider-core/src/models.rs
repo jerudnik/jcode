@@ -284,12 +284,23 @@ pub fn open_weight_family_context_limit(model: &str) -> Option<usize> {
         return Some(131_072);
     }
 
+    // --- Moonshot/Kimi K3 family: 1M, except the explicit 256K variant ---
+    if m.ends_with("k3-256k") {
+        return Some(262_144);
+    }
+    if m == "k3" || m.contains("kimi-k3") || m.ends_with("/k3") {
+        return Some(1_000_000);
+    }
+
     // --- Moonshot Kimi K2 family: 256K context ---
     if m.contains("kimi") {
         return Some(262_144);
     }
 
-    // --- MiniMax M2 family: 204,800 context ---
+    // --- MiniMax M3: 1M context; legacy M2.x remains 204,800 ---
+    if m == "minimax-m3" {
+        return Some(1_000_000);
+    }
     if m.contains("minimax") {
         return Some(204_800);
     }
@@ -436,6 +447,31 @@ mod tests {
             context_limit_for_model_with_provider("claude-sonnet-4.6", Some("claude")),
             Some(200_000)
         );
+    }
+
+    #[test]
+    fn minimax_m3_uses_one_million_context_without_changing_m2() {
+        assert_eq!(context_limit_for_model("MiniMax-M3"), Some(1_000_000));
+        assert_eq!(
+            open_weight_family_context_limit("minimax-m3"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            open_weight_family_context_limit("minimax-m2.7"),
+            Some(204_800)
+        );
+    }
+
+    #[test]
+    fn kimi_k3_context_distinguishes_one_million_and_256k_variants() {
+        assert_eq!(context_limit_for_model("k3"), Some(1_000_000));
+        assert_eq!(open_weight_family_context_limit("kimi-k3"), Some(1_000_000));
+        assert_eq!(open_weight_family_context_limit("k3-256k"), Some(262_144));
+        assert_eq!(
+            open_weight_family_context_limit("kimi-k3-256k"),
+            Some(262_144)
+        );
+        assert_eq!(open_weight_family_context_limit("kimi-k2.5"), Some(262_144));
     }
 
     #[test]

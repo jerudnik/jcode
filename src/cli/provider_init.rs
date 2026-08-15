@@ -88,8 +88,15 @@ pub enum ProviderChoice {
     Fireworks,
     #[value(alias = "minimax-ai", alias = "minimaxi")]
     Minimax,
-    #[value(alias = "x.ai", alias = "x-ai", alias = "grok")]
+    #[value(alias = "x.ai", alias = "x-ai")]
     Xai,
+    GrokDirect,
+    #[value(alias = "grok", alias = "grok-subscription")]
+    GrokBuild,
+    #[value(alias = "kimi-acp")]
+    KimiCodeAcp,
+    #[value(alias = "reasonix-acp")]
+    Reasonix,
     #[value(alias = "nvidia", alias = "nim")]
     NvidiaNim,
     #[value(alias = "xiaomi", alias = "mimo", alias = "xiaomi-mimo-api")]
@@ -161,6 +168,10 @@ impl ProviderChoice {
             Self::Fireworks => "fireworks",
             Self::Minimax => "minimax",
             Self::Xai => "xai",
+            Self::GrokDirect => "grok-direct",
+            Self::GrokBuild => "grok-build",
+            Self::KimiCodeAcp => "kimi-code-acp",
+            Self::Reasonix => "reasonix",
             Self::NvidiaNim => "nvidia-nim",
             Self::XiaomiMimo => "xiaomi-mimo",
             Self::Lmstudio => "lmstudio",
@@ -313,6 +324,22 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::Xai,
         crate::provider_catalog::XAI_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::GrokDirect,
+        crate::provider_catalog::GROK_DIRECT_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::GrokBuild,
+        crate::provider_catalog::GROK_BUILD_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::KimiCodeAcp,
+        crate::provider_catalog::KIMI_CODE_ACP_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::Reasonix,
+        crate::provider_catalog::REASONIX_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::NvidiaNim,
@@ -1254,6 +1281,31 @@ pub async fn login_and_bootstrap_provider(
             disable_subscription_runtime_mode();
             Arc::new(provider::MultiProvider::with_preference(true))
         }
+        LoginProviderTarget::GrokBuild => {
+            disable_subscription_runtime_mode();
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::GROK_BUILD_RUNTIME,
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!("Grok Build runtime is not registered or authenticated")
+            })?
+        }
+        LoginProviderTarget::KimiCodeAcp => {
+            disable_subscription_runtime_mode();
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::KIMI_CODE_ACP_RUNTIME,
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!("Kimi Code ACP runtime is not registered or authenticated")
+            })?
+        }
+        LoginProviderTarget::Reasonix => {
+            disable_subscription_runtime_mode();
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::REASONIX_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Reasonix runtime is not registered or configured"))?
+        }
         LoginProviderTarget::OpenAiApiKey => {
             disable_subscription_runtime_mode();
             lock_model_provider("openai");
@@ -1471,6 +1523,59 @@ async fn init_provider_with_options(
             crate::env::set_var("JCODE_ACTIVE_PROVIDER", "gemini");
             Arc::new(jcode_provider_gemini_runtime::GeminiProvider::new())
         }
+        ProviderChoice::GrokBuild => {
+            disable_subscription_runtime_mode();
+            if !crate::auth::grok_build::cli_available() {
+                anyhow::bail!(crate::auth::grok_build::runtime_not_installed_hint());
+            }
+            if !crate::auth::grok_build::has_cached_login() {
+                anyhow::bail!(
+                    "Grok Build subscription login not found. Run `jcode login grok` first."
+                );
+            }
+            init_notice("Using Grok Build subscription via the authenticated Grok CLI");
+            unlock_model_provider();
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "grok-build");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::GROK_BUILD_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Grok Build runtime is not registered"))?
+        }
+        ProviderChoice::KimiCodeAcp => {
+            disable_subscription_runtime_mode();
+            if !crate::auth::kimi_code_acp::cli_available() {
+                anyhow::bail!(crate::auth::kimi_code_acp::runtime_not_installed_hint());
+            }
+            if !crate::auth::kimi_code_acp::has_cli_owned_state() {
+                anyhow::bail!(crate::auth::kimi_code_acp::authentication_required_hint());
+            }
+            init_notice("Using Kimi Code through the authenticated official CLI ACP runtime");
+            unlock_model_provider();
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "kimi-code-acp");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::KIMI_CODE_ACP_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Kimi Code ACP runtime is not registered"))?
+        }
+        ProviderChoice::Reasonix => {
+            disable_subscription_runtime_mode();
+            if !crate::auth::reasonix::cli_available() {
+                anyhow::bail!(crate::auth::reasonix::runtime_not_installed_hint());
+            }
+            if !crate::auth::reasonix::config_presence().any() {
+                anyhow::bail!(crate::auth::reasonix::setup_required_hint());
+            }
+            init_notice("Using Reasonix through its workspace-only ACP runtime");
+            unlock_model_provider();
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", "reasonix");
+            crate::env::set_var("JCODE_ACTIVE_PROVIDER", "openrouter");
+            crate::provider::external::instantiate_external_provider(
+                crate::provider::external::REASONIX_RUNTIME,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Reasonix runtime is not registered"))?
+        }
         ProviderChoice::Openrouter => {
             disable_subscription_runtime_mode();
             ensure_external_api_key_auth_allowed_for_explicit_choice("OPENROUTER_API_KEY")?;
@@ -1518,6 +1623,7 @@ async fn init_provider_with_options(
         | ProviderChoice::Fireworks
         | ProviderChoice::Minimax
         | ProviderChoice::Xai
+        | ProviderChoice::GrokDirect
         | ProviderChoice::NvidiaNim
         | ProviderChoice::XiaomiMimo
         | ProviderChoice::Lmstudio

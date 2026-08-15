@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::auth;
 use crate::provider_catalog::{
-    LoginProviderDescriptor, LoginProviderTarget, OPENAI_COMPAT_LOCAL_ENABLED_ENV,
-    OpenAiCompatibleProfile, resolve_openai_compatible_profile,
+    LoginProviderDescriptor, LoginProviderTarget, ManagedOAuthProvider,
+    OPENAI_COMPAT_LOCAL_ENABLED_ENV, OpenAiCompatibleProfile, resolve_openai_compatible_profile,
 };
 
 use super::provider_init::{ProviderChoice, login_provider_for_choice, save_named_api_key};
@@ -111,6 +111,15 @@ enum PendingScriptableLogin {
         expires_in: Option<u64>,
         interval: u64,
     },
+    #[serde(rename = "grok-direct")]
+    GrokDirect {
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        verification_uri_complete: Option<String>,
+        expires_in: Option<u64>,
+        interval: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +138,7 @@ impl PendingScriptableLogin {
             Self::Google { .. } => "google",
             Self::Copilot { .. } => "copilot",
             Self::Kimi { .. } => "kimi",
+            Self::GrokDirect { .. } => "grok-direct",
         }
     }
 
@@ -296,6 +306,15 @@ pub async fn run_login_provider(
             LoginProviderTarget::OpenAiApiKey => {
                 login_openai_api_key_flow().map(|_| LoginFlowOutcome::Completed)
             }
+            LoginProviderTarget::GrokBuild => login_grok_build_flow(options.no_browser)
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::KimiCodeAcp => login_kimi_code_acp_flow()
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::Reasonix => login_reasonix_flow()
+                .await
+                .map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenRouter => {
                 login_openrouter_flow().map(|_| LoginFlowOutcome::Completed)
             }
@@ -304,10 +323,22 @@ pub async fn run_login_provider(
             }
             LoginProviderTarget::Azure => login_azure_flow().map(|_| LoginFlowOutcome::Completed),
             LoginProviderTarget::OpenAiCompatible(profile)
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                    && options.openai_compatible_api_key.is_none() =>
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(ManagedOAuthProvider::Kimi)
+                ) && options.openai_compatible_api_key.is_none() =>
             {
                 login_kimi_flow(options.no_browser)
+                    .await
+                    .map(|_| LoginFlowOutcome::Completed)
+            }
+            LoginProviderTarget::OpenAiCompatible(profile)
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(ManagedOAuthProvider::GrokDirect)
+                ) =>
+            {
+                login_grok_direct_flow(options.no_browser)
                     .await
                     .map(|_| LoginFlowOutcome::Completed)
             }
@@ -409,6 +440,94 @@ pub async fn run_login_provider(
     );
     maybe_persist_default_provider_after_login(provider, &options);
     notify_running_server_auth_changed_best_effort(Some(provider.id)).await;
+    Ok(())
+}
+
+async fn login_grok_build_flow(device_auth: bool) -> Result<()> {
+    if !crate::auth::grok_build::cli_available() {
+        anyhow::bail!(crate::auth::grok_build::runtime_not_installed_hint());
+    }
+    let cli = crate::auth::grok_build::cli_path();
+    let mut command = tokio::process::Command::new(&cli);
+    command.args(grok_build_login_args(device_auth));
+    let status = command
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to launch '{}'. {}",
+                cli.display(),
+                crate::auth::grok_build::runtime_not_installed_hint()
+            )
+        })?;
+    if !status.success() {
+        let suffix = if device_auth { " --device-auth" } else { "" };
+        anyhow::bail!(
+            "`{} login{suffix}` exited with status {status}",
+            cli.display()
+        );
+    }
+    Ok(())
+}
+
+fn grok_build_login_args(device_auth: bool) -> &'static [&'static str] {
+    if device_auth {
+        &["login", "--device-auth"]
+    } else {
+        &["login"]
+    }
+}
+
+async fn login_kimi_code_acp_flow() -> Result<()> {
+    if !crate::auth::kimi_code_acp::cli_available() {
+        anyhow::bail!(crate::auth::kimi_code_acp::runtime_not_installed_hint());
+    }
+    let cli = crate::auth::kimi_code_acp::cli_path();
+    let status = tokio::process::Command::new(&cli)
+        .arg("login")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to launch '{} login'. {}",
+                cli.display(),
+                crate::auth::kimi_code_acp::runtime_not_installed_hint()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("`{} login` exited with status {status}", cli.display());
+    }
+    Ok(())
+}
+
+async fn login_reasonix_flow() -> Result<()> {
+    if !crate::auth::reasonix::cli_available() {
+        anyhow::bail!(crate::auth::reasonix::runtime_not_installed_hint());
+    }
+    let cli = crate::auth::reasonix::cli_path();
+    let status = tokio::process::Command::new(&cli)
+        .arg("setup")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to launch '{} setup'. {}",
+                cli.display(),
+                crate::auth::reasonix::runtime_not_installed_hint()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("`{} setup` exited with status {status}", cli.display());
+    }
     Ok(())
 }
 
@@ -683,6 +802,43 @@ async fn login_kimi_flow(no_browser: bool) -> Result<()> {
     Ok(())
 }
 
+async fn login_grok_direct_flow(no_browser: bool) -> Result<()> {
+    eprintln!("Logging in to Grok Direct with xAI device authorization...");
+    eprintln!(
+        "Use your Grok subscription. This does not log into the Grok Build CLI and does not create or consume an xAI API key."
+    );
+    let device = auth::grok_direct::request_device_authorization().await?;
+    let verification_url = device.verification_url().to_string();
+    eprintln!("Verification URL: {}", verification_url);
+    eprintln!("User code: {}", device.user_code);
+    if maybe_open_browser(&verification_url, no_browser) {
+        eprintln!("Opened the verification URL in your browser.");
+    } else {
+        eprintln!("Open the verification URL above to continue.");
+    }
+    eprintln!("Waiting for xAI authorization... Press Ctrl-C to cancel.");
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let credentials = tokio::select! {
+        result = auth::grok_direct::poll_for_credentials_with_cancellation(
+            &device,
+            std::sync::Arc::clone(&cancelled),
+        ) => result?,
+        signal = tokio::signal::ctrl_c() => {
+            signal.context("failed to listen for Ctrl-C during Grok Direct login")?;
+            cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+            anyhow::bail!("Grok Direct device authorization was cancelled");
+        }
+    };
+    auth::grok_direct::save_credentials(&credentials)?;
+    eprintln!("Authenticated with Grok Direct.");
+    eprintln!(
+        "Credentials saved to {}",
+        auth::grok_direct::credentials_path()?.display()
+    );
+    crate::telemetry::record_auth_success("grok-direct", "oauth_device_code");
+    Ok(())
+}
+
 fn login_bedrock_flow() -> Result<()> {
     eprintln!("Setting up AWS Bedrock...");
     eprintln!(
@@ -821,6 +977,30 @@ fn login_openai_compatible_flow(
     let mut resolved = resolve_openai_compatible_profile(*profile);
 
     eprintln!("Setting up {}...", resolved.display_name);
+    if profile.id == crate::provider_catalog::MINIMAX_PROFILE.id {
+        let default_region = std::env::var(crate::provider_catalog::MINIMAX_REGION_ENV)
+            .ok()
+            .and_then(|value| canonical_minimax_region(&value).ok())
+            .unwrap_or("international");
+        let input = if io::stdin().is_terminal() {
+            read_line_trimmed(&format!(
+                "MiniMax platform region (international/china) [{default_region}]: "
+            ))?
+        } else {
+            String::new()
+        };
+        let region = if input.is_empty() {
+            default_region
+        } else {
+            canonical_minimax_region(&input)?
+        };
+        crate::provider_catalog::save_env_value_to_env_file(
+            crate::provider_catalog::MINIMAX_REGION_ENV,
+            &resolved.env_file,
+            Some(region),
+        )?;
+        resolved = resolve_openai_compatible_profile(*profile);
+    }
     let setup_url_depends_on_key = profile.id == crate::provider_catalog::MINIMAX_PROFILE.id;
     if !setup_url_depends_on_key {
         eprintln!("See setup details: {}\n", resolved.setup_url);
@@ -903,7 +1083,13 @@ fn login_openai_compatible_flow(
         let key = match options.openai_compatible_api_key.as_deref() {
             Some(value) => value.trim().to_string(),
             None => {
-                eprint!("Paste your {} API key: ", resolved.display_name);
+                let credential_label = if profile.id == crate::provider_catalog::MINIMAX_PROFILE.id
+                {
+                    crate::provider_catalog::MINIMAX_CREDENTIAL_LABEL
+                } else {
+                    resolved.display_name.as_str()
+                };
+                eprint!("Paste your {credential_label}: ");
                 io::stdout().flush()?;
                 read_secret_line()?
             }
@@ -929,7 +1115,14 @@ fn login_openai_compatible_flow(
         if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
             auth::kimi::set_auth_mode(Some(auth::kimi::KimiAuthMode::ApiKey))?;
         }
-        eprintln!("\nSuccessfully saved {} API key!", resolved.display_name);
+        if profile.id == crate::provider_catalog::MINIMAX_PROFILE.id {
+            eprintln!(
+                "\nSuccessfully saved {}!",
+                crate::provider_catalog::MINIMAX_CREDENTIAL_LABEL
+            );
+        } else {
+            eprintln!("\nSuccessfully saved {} API key!", resolved.display_name);
+        }
         "api_key"
     } else {
         eprintln!("Endpoint: {}", resolved.api_base);
@@ -1007,6 +1200,14 @@ fn login_openai_compatible_flow(
     }
     crate::telemetry::record_auth_success(&resolved.id, auth_method);
     Ok(())
+}
+
+fn canonical_minimax_region(raw: &str) -> Result<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "international" | "global" | "io" => Ok("international"),
+        "china" | "cn" => Ok("china"),
+        _ => anyhow::bail!("Invalid MiniMax region. Choose `international` or `china`."),
+    }
 }
 
 pub use crate::secret_input::read_secret_line;

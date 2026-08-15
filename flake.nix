@@ -12,6 +12,12 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Exact llm-agents.nix revision that packages Reasonix 1.25.0.
+    llm-agents-nix = {
+      url = "github:numtide/llm-agents.nix/992cb15d15053edbffb07d17f36fcc3f16cec6ed";
+      inputs.flake-parts.follows = "flake-parts";
+    };
   };
 
   # Public, safe-to-share binary cache for prebuilt outputs.
@@ -186,6 +192,7 @@
 
           jcode = pkgs.callPackage ./nix/package.nix {
             inherit craneLib version;
+            reasonix = inputs.llm-agents-nix.packages.${system}.reasonix;
           };
 
           sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";

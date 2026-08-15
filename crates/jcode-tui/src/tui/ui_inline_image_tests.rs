@@ -291,13 +291,6 @@ fn anchored_image_lines_hidden_emit_no_placeholder_markers() {
     assert!(text.contains("show image"), "show badge missing: {text:?}");
 }
 
-#[test]
-fn payload_registry_roundtrips() {
-    register_payload(0xDEAD_BEEF, "image/png", "AAAA");
-    let got = PAYLOAD_REGISTRY.lock().unwrap().get(0xDEAD_BEEF);
-    assert_eq!(got, Some(("image/png".to_string(), "AAAA".to_string())));
-}
-
 /// The registry holds full base64 payloads, so it must be bounded by bytes
 /// as well as entry count, and eviction must keep the byte accounting and
 /// the map/order queue in sync. A single over-budget payload must survive

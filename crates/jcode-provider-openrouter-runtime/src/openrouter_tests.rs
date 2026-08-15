@@ -78,6 +78,27 @@ fn write_test_api_key(env_file: &str, env_key: &str, value: &str) {
         .expect("write test api key");
 }
 
+fn write_fresh_grok_direct_credentials(access_token: &str) {
+    let config_dir = jcode_base::storage::app_config_dir().expect("temporary app config dir");
+    let credentials_dir = config_dir.join("grok-direct");
+    std::fs::create_dir_all(&credentials_dir).expect("create Grok Direct credentials dir");
+    let credentials = serde_json::json!({
+        "version": jcode_base::auth::grok_direct::CREDENTIAL_VERSION,
+        "access_token": access_token,
+        "refresh_token": "test-refresh-token",
+        "expires_at_ms": i64::MAX,
+        "token_type": "Bearer",
+        "scope": ["api:access"],
+        "issuer": jcode_base::auth::grok_direct::ISSUER,
+        "client_id": jcode_base::auth::grok_direct::CLIENT_ID,
+    });
+    std::fs::write(
+        credentials_dir.join("credentials.json"),
+        serde_json::to_vec_pretty(&credentials).expect("serialize Grok Direct credentials"),
+    )
+    .expect("write Grok Direct credentials");
+}
+
 fn isolate_openrouter_autodetect_env() -> Vec<EnvVarGuard> {
     let mut guards = vec![
         EnvVarGuard::remove("JCODE_OPENROUTER_API_BASE"),
@@ -426,6 +447,57 @@ fn direct_deepseek_profile_omits_image_url_parts() {
     );
 }
 
+#[test]
+fn direct_zai_profile_rejects_image_input() {
+    let _lock = ENV_LOCK.lock();
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("zai".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("glm-5.2".to_string())),
+        ..make_custom_compatible_provider()
+    };
+    assert!(!provider.supports_image_input());
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![
+            ContentBlock::Text {
+                text: "describe this".to_string(),
+                cache_control: None,
+            },
+            ContentBlock::Image {
+                media_type: "image/png".to_string(),
+                data: "aW1hZ2U=".to_string(),
+            },
+        ],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    assert!(!request.contains(r#""type":"image_url""#));
+    assert!(request.contains("Image omitted"));
+}
+
 /// Extract the JSON request body from a captured raw HTTP request.
 fn parse_captured_request_body(request: &str) -> serde_json::Value {
     let body = request
@@ -437,8 +509,8 @@ fn parse_captured_request_body(request: &str) -> serde_json::Value {
 }
 
 /// Regression for issue #321: when an assistant turn is interrupted mid-thinking
-/// on a direct OpenAI-compatible provider that does not support reasoning replay
-/// (e.g. DeepSeek), the persisted assistant message contains only a `Reasoning`
+/// on a direct OpenAI-compatible provider/model pair that does not support
+/// reasoning replay, the persisted assistant message contains only a `Reasoning`
 /// block. The request builder must not emit an assistant message that has
 /// neither `content` nor `tool_calls`, otherwise the provider rejects the whole
 /// request with 400 "Invalid assistant message: content or tool_calls must be
@@ -449,12 +521,11 @@ fn interrupted_reasoning_only_assistant_message_is_not_sent_empty() {
     let (api_base, request_rx) = spawn_single_response_chat_server();
     let provider = OpenRouterProvider {
         api_base,
-        profile_id: Some("deepseek".to_string()),
+        profile_id: Some("custom".to_string()),
         supports_provider_features: false,
         supports_model_catalog: false,
         ..make_custom_compatible_provider()
     };
-
     let messages = vec![
         Message {
             role: Role::User,
@@ -641,6 +712,7 @@ fn kimi_for_coding_tool_call_message_includes_reasoning_content() {
         model: Arc::new(RwLock::new("kimi-for-coding".to_string())),
         ..make_custom_compatible_provider()
     };
+    assert!(provider.capabilities().reasoning_context_replay);
 
     let messages = vec![
         Message {
@@ -714,6 +786,199 @@ fn kimi_for_coding_tool_call_message_includes_reasoning_content() {
     assert!(
         reasoning.is_some_and(|value| value.as_str().is_some_and(|s| !s.is_empty())),
         "Kimi coding endpoint requires reasoning_content on assistant tool-call messages (issue #322); got: {assistant}"
+    );
+}
+
+#[test]
+fn direct_deepseek_two_tool_continuation_replays_exact_reasoning_content() {
+    let _lock = ENV_LOCK.lock();
+    let _thinking = EnvVarGuard::remove("JCODE_OPENROUTER_THINKING");
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("opencode-zen".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("deepseek-v4-pro".to_string())),
+        ..make_custom_compatible_provider()
+    };
+    assert!(provider.capabilities().reasoning_context_replay);
+    provider
+        .set_reasoning_effort("medium")
+        .expect("direct DeepSeek model should accept reasoning effort");
+
+    let messages = vec![
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: "inspect, then verify".to_string(),
+                cache_control: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "First I need the exact file contents.\nDo not alter this spacing."
+                        .to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_read".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({"path": "src/lib.rs"}),
+                    thought_signature: None,
+                },
+            ],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "call_read".to_string(),
+                content: "pub fn answer() -> u8 { 42 }".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentBlock::Reasoning {
+                    text: "Now I should run the focused test exactly once.".to_string(),
+                },
+                ContentBlock::ToolUse {
+                    id: "call_test".to_string(),
+                    name: "bash".to_string(),
+                    input: serde_json::json!({"command": "cargo test answer"}),
+                    thought_signature: None,
+                },
+            ],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "call_test".to_string(),
+                content: "test result: ok".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+    ];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    let assistant_reasoning = body["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .filter(|message| message.get("role").and_then(|value| value.as_str()) == Some("assistant"))
+        .map(|message| {
+            message
+                .get("reasoning_content")
+                .and_then(|value| value.as_str())
+                .expect("DeepSeek tool continuation must replay returned reasoning")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        assistant_reasoning,
+        vec![
+            "First I need the exact file contents.\nDo not alter this spacing.",
+            "Now I should run the focused test exactly once.",
+        ]
+    );
+    assert_eq!(body["thinking"]["type"], "enabled");
+    assert_eq!(body["reasoning_effort"], "high");
+}
+
+#[test]
+fn direct_deepseek_does_not_synthesize_blank_reasoning_content() {
+    let _lock = ENV_LOCK.lock();
+    let _thinking = EnvVarGuard::remove("JCODE_OPENROUTER_THINKING");
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        profile_id: Some("deepseek".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("deepseek-v4-flash".to_string())),
+        ..make_custom_compatible_provider()
+    };
+
+    let messages = vec![
+        Message {
+            role: Role::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_1".to_string(),
+                name: "read".to_string(),
+                input: serde_json::json!({"path": "README.md"}),
+                thought_signature: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+        Message {
+            role: Role::User,
+            content: vec![ContentBlock::ToolResult {
+                tool_use_id: "call_1".to_string(),
+                content: "contents".to_string(),
+                is_error: None,
+            }],
+            timestamp: None,
+            tool_duration_ms: None,
+        },
+    ];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    let assistant = body["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .find(|message| message.get("role").and_then(|value| value.as_str()) == Some("assistant"))
+        .expect("assistant tool-call message");
+    assert!(
+        assistant.get("reasoning_content").is_none(),
+        "DeepSeek must not inherit Kimi's blank reasoning compatibility field: {assistant}"
     );
 }
 
@@ -1032,7 +1297,7 @@ fn autodetected_profile_seeds_default_model_and_cache_namespace() {
     write_test_api_key(&zai.env_file, &zai.api_key_env, "test-zai-key");
 
     let provider = OpenRouterProvider::new().expect("provider");
-    assert_eq!(provider.model.blocking_read().clone(), "glm-4.5");
+    assert_eq!(provider.model.blocking_read().clone(), "glm-5.2");
     assert_eq!(
         std::env::var("JCODE_OPENROUTER_CACHE_NAMESPACE")
             .ok()
@@ -1300,6 +1565,34 @@ fn spawn_single_response_chat_server() -> (String, mpsc::Receiver<String>) {
     (format!("http://{addr}/v1"), request_rx)
 }
 
+fn spawn_single_json_response_server(body: &str) -> (String, mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let addr = listener.local_addr().expect("fake provider address");
+    let (request_tx, request_rx) = mpsc::channel();
+    let body = body.to_string();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept fake provider request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set read timeout");
+        let mut request = vec![0u8; 16384];
+        let n = stream.read(&mut request).unwrap_or(0);
+        let request = String::from_utf8_lossy(&request[..n]).into_owned();
+        let _ = request_tx.send(request);
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write fake provider response");
+    });
+
+    (format!("http://{addr}/v1"), request_rx)
+}
+
 #[test]
 fn direct_deepseek_profile_exposes_max_reasoning_effort() {
     let provider = OpenRouterProvider {
@@ -1324,6 +1617,293 @@ fn direct_deepseek_profile_exposes_max_reasoning_effort() {
         .set_reasoning_effort("max")
         .expect("DeepSeek direct profile should accept max effort");
     assert_eq!(provider.reasoning_effort().as_deref(), Some("max"));
+}
+
+#[test]
+fn kimi_k3_exposes_only_supported_reasoning_efforts() {
+    let provider = OpenRouterProvider {
+        model: Arc::new(RwLock::new("k3".to_string())),
+        profile_id: Some("kimi".to_string()),
+        supports_provider_features: false,
+        ..make_custom_compatible_provider()
+    };
+
+    assert_eq!(
+        provider.available_efforts(),
+        vec!["low", "high", "max", "swarm", "swarm-deep"]
+    );
+    provider
+        .set_reasoning_effort("medium")
+        .expect("Kimi K3 should accept the medium alias");
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("high"));
+    provider.set_model("kimi-for-coding").unwrap();
+    assert!(provider.available_efforts().is_empty());
+}
+
+#[test]
+fn grok_direct_reasoning_uses_strict_xai_vocabulary() {
+    let provider = OpenRouterProvider {
+        model: Arc::new(RwLock::new("grok-4.5".to_string())),
+        profile_id: Some("grok-direct".to_string()),
+        supports_provider_features: false,
+        ..make_custom_compatible_provider()
+    };
+
+    assert_eq!(
+        provider.available_efforts(),
+        vec!["low", "medium", "high", "xhigh"]
+    );
+    provider
+        .set_reasoning_effort("max")
+        .expect("max should map to xhigh for internal swarm compatibility");
+    assert_eq!(provider.reasoning_effort().as_deref(), Some("xhigh"));
+    assert!(provider.set_reasoning_effort("none").is_err());
+    assert!(provider.set_reasoning_effort("extreme").is_err());
+}
+
+#[test]
+fn grok_direct_chat_uses_managed_bearer_truthful_user_agent_and_top_level_reasoning() {
+    let _env_lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    write_fresh_grok_direct_credentials("grok-test-access-token");
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        auth: ProviderAuth::ManagedOAuth {
+            provider: ManagedOAuthProvider::GrokDirect,
+            label: "Grok Direct OAuth".to_string(),
+        },
+        model: Arc::new(RwLock::new("grok-4.5".to_string())),
+        profile_id: Some("grok-direct".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    provider
+        .set_reasoning_effort("xhigh")
+        .expect("xhigh is supported by Grok Direct");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake Grok Direct chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake Grok Direct request");
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer grok-test-access-token")
+    );
+    assert!(
+        request.contains(&format!(
+            "user-agent: {}",
+            jcode_base::auth::grok_direct::user_agent()
+        )) || request.contains(&format!(
+            "User-Agent: {}",
+            jcode_base::auth::grok_direct::user_agent()
+        ))
+    );
+    assert!(!request.contains("HTTP-Referer:"));
+    assert!(!request.contains("X-Title:"));
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["reasoning_effort"], "xhigh");
+    assert!(body.get("reasoning").is_none());
+}
+
+#[test]
+fn grok_direct_models_discovery_uses_managed_bearer_and_replaces_seed() {
+    let _env_lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    let _cache_namespace = EnvVarGuard::set("JCODE_OPENROUTER_CACHE_NAMESPACE", "grok-direct");
+    write_fresh_grok_direct_credentials("grok-models-access-token");
+    let (api_base, request_rx) =
+        spawn_single_json_response_server(r#"{"data":[{"id":"grok-4.5"},{"id":"grok-4.6"}]}"#);
+    let provider = OpenRouterProvider {
+        api_base,
+        auth: ProviderAuth::ManagedOAuth {
+            provider: ManagedOAuthProvider::GrokDirect,
+            label: "Grok Direct OAuth".to_string(),
+        },
+        model: Arc::new(RwLock::new("grok-4.5".to_string())),
+        profile_id: Some("grok-direct".to_string()),
+        supports_provider_features: false,
+        static_models: vec!["grok-4.5".to_string()],
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let models = rt
+        .block_on(provider.fetch_models())
+        .expect("authenticated Grok Direct /models request");
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["grok-4.5", "grok-4.6"]
+    );
+    assert!(!provider.should_merge_static_models_with_live_catalog());
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake Grok Direct models request");
+    assert!(request.starts_with("GET /v1/models "));
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer grok-models-access-token")
+    );
+}
+
+#[test]
+fn kimi_k3_request_sends_top_level_supported_reasoning_effort() {
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        model: Arc::new(RwLock::new("k3-256k".to_string())),
+        profile_id: Some("kimi".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    provider
+        .set_reasoning_effort("xhigh")
+        .expect("Kimi K3 should map xhigh to max");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["reasoning_effort"], "max");
+    assert!(body.get("thinking").is_none());
+}
+
+#[test]
+fn direct_deepseek_request_effort_mapping_uses_supported_values() {
+    assert_eq!(
+        [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "max",
+            "swarm",
+            "swarm-deep"
+        ]
+        .map(OpenRouterProvider::normalize_deepseek_request_effort),
+        ["none", "low", "high", "high", "max", "max", "max"]
+    );
+}
+
+#[test]
+fn direct_zai_request_sends_supported_effort_and_thinking() {
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        model: Arc::new(RwLock::new("glm-5.2".to_string())),
+        profile_id: Some("zai".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        send_openrouter_headers: false,
+        ..make_custom_compatible_provider()
+    };
+    assert_eq!(
+        [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "swarm",
+            "swarm-deep"
+        ]
+        .map(OpenRouterProvider::normalize_zai_request_effort),
+        ["none", "low", "high", "high", "max", "max", "max"]
+    );
+    provider
+        .set_reasoning_effort("xhigh")
+        .expect("Z.AI profile should accept internal xhigh effort");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["thinking"]["type"], "enabled");
+    assert_eq!(body["reasoning_effort"], "max");
+    assert_ne!(body["reasoning_effort"], "xhigh");
 }
 
 #[test]
@@ -1409,6 +1989,58 @@ fn openrouter_chat_request_sends_unified_reasoning_effort() {
     assert!(
         !request.contains(r#""thinking":{"type":"enabled"}"#),
         "unified reasoning should supersede legacy thinking override: {request}"
+    );
+}
+
+#[test]
+fn openrouter_deepseek_model_does_not_receive_direct_reasoning_fields() {
+    let (api_base, request_rx) = spawn_single_response_chat_server();
+    let provider = OpenRouterProvider {
+        api_base,
+        model: Arc::new(RwLock::new("deepseek/deepseek-v4-pro".to_string())),
+        supports_model_catalog: false,
+        ..make_provider()
+    };
+    provider
+        .set_reasoning_effort("high")
+        .expect("OpenRouter unified reasoning should accept high effort");
+
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+        timestamp: None,
+        tool_duration_ms: None,
+    }];
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    rt.block_on(async {
+        let mut stream = provider
+            .complete(&messages, &[], "", None)
+            .await
+            .expect("fake chat request should start");
+        while let Some(event) = stream.next().await {
+            event.expect("stream event should parse");
+        }
+    });
+
+    let request = request_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("capture fake provider request");
+    let body = parse_captured_request_body(&request);
+    assert_eq!(body["reasoning"]["effort"], "high");
+    assert!(
+        body.get("reasoning_effort").is_none(),
+        "real OpenRouter must not receive direct DeepSeek reasoning_effort: {body}"
+    );
+    assert!(
+        body.get("thinking").is_none(),
+        "real OpenRouter must not receive direct DeepSeek thinking config: {body}"
     );
 }
 
@@ -1574,6 +2206,10 @@ fn direct_deepseek_chat_request_sends_reasoning_effort() {
     assert!(
         request.contains(r#""reasoning_effort":"max""#),
         "DeepSeek request should include max reasoning effort: {request}"
+    );
+    assert!(
+        request.contains(r#""thinking":{"type":"enabled"}"#),
+        "DeepSeek request should explicitly enable thinking: {request}"
     );
 }
 
@@ -2182,8 +2818,13 @@ async fn kimi_api_key_request_uses_bearer_auth_and_jcode_user_agent() {
 
 #[test]
 fn kimi_oauth_unauthorized_refreshes_exactly_once() {
-    let oauth = ProviderAuth::KimiOAuth {
+    let oauth = ProviderAuth::ManagedOAuth {
+        provider: ManagedOAuthProvider::Kimi,
         label: "Kimi OAuth".to_string(),
+    };
+    let grok_oauth = ProviderAuth::ManagedOAuth {
+        provider: ManagedOAuthProvider::GrokDirect,
+        label: "Grok Direct OAuth".to_string(),
     };
     let api_key = ProviderAuth::AuthorizationBearer {
         token: "sk-kimi-test".to_string(),
@@ -2198,6 +2839,16 @@ fn kimi_oauth_unauthorized_refreshes_exactly_once() {
     assert!(!should_refresh_after_unauthorized(
         reqwest::StatusCode::UNAUTHORIZED,
         &oauth,
+        true,
+    ));
+    assert!(should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &grok_oauth,
+        false,
+    ));
+    assert!(!should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &grok_oauth,
         true,
     ));
     assert!(!should_refresh_after_unauthorized(
@@ -2334,6 +2985,20 @@ fn strict_openai_schema_endpoint_detects_mistral_profile() {
 }
 
 #[test]
+fn strict_mistral_profile_does_not_advertise_reasoning_context_replay() {
+    let provider = OpenRouterProvider {
+        api_base: "https://api.mistral.ai/v1".to_string(),
+        profile_id: Some("mistral".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        model: Arc::new(RwLock::new("magistral-medium-latest".to_string())),
+        ..make_custom_compatible_provider()
+    };
+
+    assert!(!provider.capabilities().reasoning_context_replay);
+}
+
+#[test]
 fn strict_openai_schema_endpoint_detects_mistral_api_base() {
     assert!(OpenRouterProvider::strict_openai_schema_endpoint(
         None,
@@ -2380,6 +3045,8 @@ fn runtime_display_name_for_profile_runtime_instance() {
     .expect("build nvidia-nim runtime");
     assert_eq!(nim.runtime_display_name(), "NVIDIA NIM");
     assert_eq!(Provider::name(&nim), "openrouter");
+    assert_eq!(Provider::provider_identity(&nim), "nvidia-nim");
+    assert!(!Provider::capabilities(&nim).reasoning_context_replay);
 }
 
 #[test]
@@ -2939,4 +3606,55 @@ fn wi4_openrouter_reasoning_preserves_contextual_aliases_and_fallbacks() {
         OpenRouterProvider::normalize_unified_reasoning_effort("bogus-wi4-unified").as_deref(),
         Some("xhigh")
     );
+}
+
+#[tokio::test]
+async fn model_pricing_disk_hit_populates_memory_cache() {
+    let _lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    let _key = EnvVarGuard::set("TEST_PRICING_GUARD_KEY", "test-key");
+
+    let api_base = "https://llm.example.com/v1";
+    let profile = jcode_base::config::NamedProviderConfig {
+        base_url: api_base.to_string(),
+        api_key_env: Some("TEST_PRICING_GUARD_KEY".to_string()),
+        model_catalog: true,
+        default_model: Some("cached-model".to_string()),
+        ..Default::default()
+    };
+    // The constructor sets JCODE_OPENROUTER_CACHE_NAMESPACE to the profile id,
+    // so the disk cache written below lands in this profile's namespace.
+    let provider = OpenRouterProvider::new_named_openai_compatible("pricing-guard", &profile)
+        .expect("named profile should initialize");
+
+    jcode_provider_openrouter::save_disk_cache_with_source(
+        &[jcode_provider_openrouter::ModelInfo {
+            id: "cached-model".to_string(),
+            name: String::new(),
+            context_length: None,
+            pricing: jcode_provider_openrouter::ModelPricing {
+                input_cache_read: Some("0.1".to_string()),
+                ..Default::default()
+            },
+            created: None,
+        }],
+        Some(api_base),
+    );
+
+    // Regression: model_pricing used to hold its models_cache read guard
+    // across the disk/fetch fallbacks. The `try_write` here could then never
+    // succeed (a read guard was still alive), so the in-memory cache stayed
+    // cold forever — and the same held guard self-deadlocked against a queued
+    // writer from a background catalog refresh, hanging the turn before the
+    // stream ever opened.
+    let pricing = provider.model_pricing("cached-model").await;
+    assert!(pricing.is_some(), "disk cache hit should yield pricing");
+
+    let cache = provider.models_cache.read().await;
+    assert!(
+        cache.fetched,
+        "disk hit must populate the in-memory models cache"
+    );
+    assert!(cache.models.iter().any(|m| m.id == "cached-model"));
 }

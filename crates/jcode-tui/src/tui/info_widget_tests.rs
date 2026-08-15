@@ -314,11 +314,17 @@ fn swarm_plan_todos_preserve_blockers_and_assignee_and_flow_to_renderer() {
     blocked.blocked_by = vec!["audit-y".to_string()];
     let mut running = plan_item("audit-y", "running");
     running.assigned_to = Some("worker-1".to_string());
-    let items = vec![blocked, running];
+    let mut gate = plan_item("audit-y::gate", "queued");
+    gate.content = "Critique the work of 'audit-y' adversarially.".to_string();
+    gate.blocked_by = vec!["audit-y".to_string()];
+    gate.assigned_to = Some("reviewer-1".to_string());
+    let items = vec![blocked, running, gate];
 
     let todos = swarm_plan_todos(&items);
     assert_eq!(todos[0].blocked_by, vec!["audit-y".to_string()]);
     assert_eq!(todos[1].assigned_to.as_deref(), Some("worker-1"));
+    assert_eq!(todos[2].blocked_by, vec!["audit-y".to_string()]);
+    assert_eq!(todos[2].assigned_to.as_deref(), Some("reviewer-1"));
 
     let data = InfoWidgetData {
         todos,
@@ -328,6 +334,10 @@ fn swarm_plan_todos_preserve_blockers_and_assignee_and_flow_to_renderer() {
     // Blocked items get the dependency marker and suffix.
     assert!(text.contains("⊳"), "blocked glyph missing: {text}");
     assert!(text.contains("(blocked)"), "blocked suffix missing: {text}");
+    assert!(
+        text.contains("Critique the work"),
+        "gate content missing: {text}"
+    );
     // The running item sorts first as in_progress.
     let running_idx = text.find("task audit-y").unwrap();
     let blocked_idx = text.find("task audit-x").unwrap();
@@ -509,23 +519,6 @@ fn hill_suffix_renders_safely_at_tiny_sizes() {
         let _ = render_todos_expanded(&data, rect);
         let _ = render_todos_compact(&data, rect);
     }
-}
-
-#[test]
-fn swarm_plan_gate_items_render_like_normal_items() {
-    // Deep-mode critique gates share the plan item shape; only the id differs.
-    let mut gate = plan_item("explore-root::gate", "queued");
-    gate.content = "Critique the work of 'explore-root' adversarially.".to_string();
-    gate.blocked_by = vec!["explore-root".to_string()];
-    let items = vec![plan_item("explore-root", "running"), gate];
-
-    let data = InfoWidgetData {
-        todos: swarm_plan_todos(&items),
-        ..Default::default()
-    };
-    let text = lines_text(&render_todos_expanded(&data, Rect::new(0, 0, 80, 14)));
-    assert!(text.contains("Critique the work"), "{text}");
-    assert!(text.contains("(blocked)"), "gate blocked on parent: {text}");
 }
 
 #[test]

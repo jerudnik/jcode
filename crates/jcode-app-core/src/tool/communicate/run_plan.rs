@@ -12,7 +12,6 @@ use super::*;
 ///
 /// Pure and side-effect free so the concurrency contract is unit-testable
 /// without a live swarm.
-
 pub(super) fn resolve_run_plan_concurrency(
     requested: Option<usize>,
     is_deep: bool,

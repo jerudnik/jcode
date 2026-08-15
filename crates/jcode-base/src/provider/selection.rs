@@ -97,6 +97,9 @@ impl MultiProvider {
             LoginProviderTarget::AutoImport
             | LoginProviderTarget::Jcode
             | LoginProviderTarget::Azure
+            | LoginProviderTarget::GrokBuild
+            | LoginProviderTarget::KimiCodeAcp
+            | LoginProviderTarget::Reasonix
             | LoginProviderTarget::Google => None,
         }
     }

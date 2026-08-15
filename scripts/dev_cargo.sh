@@ -1078,6 +1078,11 @@ while IFS= read -r -d '' arg; do
 done < <(build_cargo_argv "$@")
 
 if [[ "${JCODE_REMOTE_CARGO:-0}" == "1" ]]; then
+  if [[ "$(cargo_subcommand "${cargo_argv[@]}")" == "fmt" ]]; then
+    log "refusing to run cargo fmt remotely because formatted files are not synced back"
+    log "rerun with JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt"
+    exit 2
+  fi
   if remote_cargo_preflight; then
     log "using remote cargo via scripts/remote_build.sh"
     exec "$repo_root/scripts/remote_build.sh" "${cargo_argv[@]}"

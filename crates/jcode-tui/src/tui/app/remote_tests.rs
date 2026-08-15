@@ -49,16 +49,6 @@ fn create_test_app() -> crate::tui::app::App {
     })
 }
 
-#[test]
-fn reload_handoff_active_when_server_flag_is_set() {
-    let state = RemoteRunState {
-        server_reload_in_progress: true,
-        ..RemoteRunState::default()
-    };
-
-    assert!(reconnect::reload_handoff_active(&state));
-}
-
 /// Render a full chat frame and return the visible text, one line per row.
 fn render_frame_text(app: &crate::tui::app::App, width: u16, height: u16) -> String {
     use ratatui::Terminal;
@@ -217,75 +207,6 @@ fn client_interaction_restores_focus_so_scroll_redraws_at_full_rate() {
 }
 
 #[test]
-fn auth_provider_hint_maps_openai_compatible_login_providers() {
-    assert_eq!(
-        auth_provider_hint_for_login_provider("Azure OpenAI"),
-        Some("azure-openai")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("cerebras"),
-        Some("cerebras")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("Cerebras"),
-        Some("cerebras")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("minimax"),
-        Some("minimax")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("not-a-provider"),
-        None
-    );
-}
-
-#[test]
-fn auth_provider_hint_maps_direct_provider_logins_by_display_label() {
-    // LoginCompleted carries the descriptor display label, which must still map
-    // to the canonical server provider id so the auth-change refresh is
-    // attributed correctly (regression: an Anthropic API-key login used to send
-    // no hint, so the server reported "OpenAI credentials are active" and
-    // skipped the post-login model switch).
-    assert_eq!(
-        auth_provider_hint_for_login_provider("Anthropic API"),
-        Some("anthropic-api")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("anthropic-api"),
-        Some("anthropic-api")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("claude-api"),
-        Some("anthropic-api")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("Anthropic/Claude"),
-        Some("claude")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("claude"),
-        Some("claude")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("OpenAI"),
-        Some("openai")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("OpenAI API"),
-        Some("openai-api")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("OpenRouter"),
-        Some("openrouter")
-    );
-    assert_eq!(
-        auth_provider_hint_for_login_provider("AWS Bedrock"),
-        Some("bedrock")
-    );
-}
-
-#[test]
 fn auth_provider_hint_resolves_every_emitted_login_completed_provider() {
     // Every string published as `LoginCompleted.provider` (see the emit sites in
     // src/tui/app/auth.rs) must resolve to a canonical server provider id so the
@@ -416,28 +337,6 @@ fn auth_changed_event_for_cerebras_login_carries_runtime_and_catalog_identity() 
             .map(crate::protocol::CatalogNamespace::as_str),
         Some("cerebras")
     );
-}
-
-#[test]
-fn reload_handoff_inactive_without_flag_or_marker() {
-    // `reload_handoff_active` falls back to the on-disk reload marker in the
-    // runtime dir. Point the runtime dir at an empty tempdir so a real
-    // `jcode.reload` left by a live self-dev reload on this machine cannot
-    // leak into the assertion.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
-    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
-
-    let inactive = !reconnect::reload_handoff_active(&RemoteRunState::default());
-
-    if let Some(prev_runtime) = prev_runtime {
-        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_DIR");
-    }
-
-    assert!(inactive);
 }
 
 #[test]

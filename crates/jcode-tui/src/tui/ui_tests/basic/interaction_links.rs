@@ -74,20 +74,6 @@ fn test_prompt_entry_bg_color_pulses_then_fades() {
 }
 
 #[test]
-#[ignore = "TERM=dumb quantizes shimmer blends to Indexed(231); terminal color-depth-sensitive"]
-fn test_prompt_entry_shimmer_color_moves_across_positions() {
-    let base = user_text();
-    let left_early = prompt_entry_shimmer_color(base, 0.1, 0.1);
-    let right_early = prompt_entry_shimmer_color(base, 0.9, 0.1);
-    let left_late = prompt_entry_shimmer_color(base, 0.1, 0.8);
-    let right_late = prompt_entry_shimmer_color(base, 0.9, 0.8);
-
-    assert_ne!(left_early, right_early);
-    assert_ne!(left_late, right_late);
-    assert_ne!(left_early, left_late);
-}
-
-#[test]
 fn test_active_file_diff_context_resolves_visible_edit() {
     let prepared = PreparedMessages {
         wrapped_lines: vec![Line::from("a"); 20],

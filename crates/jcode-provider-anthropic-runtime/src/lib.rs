@@ -1259,6 +1259,12 @@ impl Provider for AnthropicProvider {
         "anthropic"
     }
 
+    fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        jcode_provider_core::ProviderCapabilities {
+            reasoning_context_replay: true,
+        }
+    }
+
     fn supports_image_input(&self) -> bool {
         true
     }

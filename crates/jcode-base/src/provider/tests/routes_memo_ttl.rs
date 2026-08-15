@@ -105,6 +105,7 @@ fn memo_test_provider() -> MultiProvider {
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
 }
 

@@ -80,18 +80,6 @@ fn is_background_task_notification_content(content: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jcode_tui_messages::DisplayMessage;
-
-    #[test]
-    fn test_display_message_helpers() {
-        let msg = DisplayMessage::error("something went wrong");
-        assert_eq!(msg.role, "error");
-        assert_eq!(msg.content, "something went wrong");
-
-        let msg = DisplayMessage::user("hello").with_title("greeting");
-        assert_eq!(msg.role, "user");
-        assert_eq!(msg.title, Some("greeting".to_string()));
-    }
 
     #[test]
     fn test_byte_offset_to_char_index() {

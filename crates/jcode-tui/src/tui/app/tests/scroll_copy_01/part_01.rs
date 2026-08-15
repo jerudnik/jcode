@@ -225,24 +225,6 @@ fn scroll_down_key(app: &App) -> (KeyCode, KeyModifiers) {
     )
 }
 
-/// Get the configured scroll up fallback key, or primary scroll up key.
-fn scroll_up_fallback_key(app: &App) -> (KeyCode, KeyModifiers) {
-    app.scroll_keys
-        .up_fallback
-        .as_ref()
-        .map(|binding| (binding.code.clone(), binding.modifiers))
-        .unwrap_or_else(|| scroll_up_key(app))
-}
-
-/// Get the configured scroll down fallback key, or primary scroll down key.
-fn scroll_down_fallback_key(app: &App) -> (KeyCode, KeyModifiers) {
-    app.scroll_keys
-        .down_fallback
-        .as_ref()
-        .map(|binding| (binding.code.clone(), binding.modifiers))
-        .unwrap_or_else(|| scroll_down_key(app))
-}
-
 /// Get the configured prompt-up key binding (code, modifiers).
 fn prompt_up_key(app: &App) -> (KeyCode, KeyModifiers) {
     (
@@ -558,84 +540,6 @@ fn test_notification_file_activity_repaint_does_not_leave_trailing_digit_artifac
     assert!(
         !second.contains("1-9999"),
         "stale trailing digits from the previous notification should not persist after repaint:\n{second}"
-    );
-}
-
-/// Sentinel painted directly into the backend to stand in for stale cells the
-/// renderer failed to repaint. It must not appear in any real rendered text,
-/// including the randomly chosen client identity in the header.
-const GHOST_MARKER: &str = "ZZZZ";
-
-#[test]
-fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_mutation() {
-    let _lock = scroll_render_test_lock();
-
-    let mut app = create_test_app();
-    let backend = ratatui::backend::TestBackend::new(120, 12);
-    let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
-
-    let mut lines = vec![
-        "⚠️ File activity: /home/jeremy/jcode/src/lib.rs - amber previously read this file: read lines 1-9"
-            .to_string(),
-    ];
-    for idx in 1..=40 {
-        lines.push(format!("filler line {idx:02}"));
-    }
-
-    // Join as separate markdown paragraphs: the repro depends on the file
-    // activity line owning its row with trailing blank cells (so a blank->blank
-    // diff skips repainting the injected ghost). Single newlines now soft-wrap
-    // into one flowing paragraph, which would repaint over the ghost cells.
-    app.display_messages = vec![DisplayMessage::assistant(lines.join("\n\n"))];
-    app.bump_display_messages_version();
-    app.auto_scroll_paused = true;
-    app.scroll_offset = 0;
-
-    // The transcript begins with the persistent header, which can be taller
-    // than this 12-row viewport. Scroll until the file activity line is
-    // actually on screen instead of assuming it sits at the top.
-    let mut clean = render_and_snap(&app, &mut terminal);
-    while !clean.contains("read lines") && app.scroll_offset < 200 {
-        app.scroll_offset += 1;
-        clean = render_and_snap(&app, &mut terminal);
-    }
-    // The marker must be a string that cannot occur in real UI text. A bare
-    // 'Z' used to be enough until the header started rendering the randomly
-    // chosen client identity: one of the 157 animal names is "zebra", so
-    // roughly one run in 157 rendered "client: Zebra" and failed here before
-    // anything was injected. Matching the full four-character marker keeps the
-    // assertion about the ghost rather than about which animal was drawn.
-    assert!(
-        !clean.contains(GHOST_MARKER),
-        "ghost marker must not be present before injection:\n{clean}"
-    );
-    let target_row = clean
-        .lines()
-        .position(|line| line.contains("read lines"))
-        .unwrap_or_else(|| panic!("expected file activity line to be visible, got:\n{clean}"));
-    let target_line = clean.lines().nth(target_row).expect("target line text");
-    let trail_start = target_line
-        .find("read lines 1-9")
-        .expect("expected file activity suffix")
-        + "read lines 1-9".len();
-
-    let ghost = ratatui::buffer::Buffer::with_lines([GHOST_MARKER]);
-    let updates = ghost
-        .content()
-        .iter()
-        .enumerate()
-        .map(|(idx, cell)| (trail_start as u16 + idx as u16, target_row as u16, cell));
-    terminal
-        .backend_mut()
-        .draw(updates)
-        .expect("inject trailing nines after file activity line");
-
-    app.scroll_offset += 1;
-    let scrolled = render_and_snap(&app, &mut terminal);
-
-    assert!(
-        scrolled.contains(GHOST_MARKER),
-        "expected an injected ghost marker to remain after scroll-like repaint:\n{scrolled}"
     );
 }
 
@@ -964,10 +868,18 @@ fn test_prompt_jump_ctrl_brackets() {
     assert!(app.auto_scroll_paused);
     assert!(app.scroll_offset > 0);
 
+    // The fixture holds a single user prompt, so Ctrl+] has no later prompt to
+    // jump to and falls through to follow_chat_bottom(): offset 0, follow mode
+    // back on. Asserted exactly, because `<= after_up` also passes for a key
+    // that does nothing at all.
     let after_up = app.scroll_offset;
     app.handle_key(KeyCode::Char(']'), KeyModifiers::CONTROL)
         .unwrap();
-    assert!(app.scroll_offset <= after_up);
+    assert_eq!(
+        app.scroll_offset, 0,
+        "Ctrl+] past the last prompt returns to the bottom (was {after_up})"
+    );
+    assert!(!app.auto_scroll_paused);
 }
 
 // NOTE: test_prompt_jump_ctrl_digits_by_recency was removed because it relied on

@@ -822,113 +822,86 @@ fn test_info_widget_data_includes_connection_type() {
 
 #[test]
 fn test_remote_tui_state_prefers_cached_model_during_brief_connecting_phase() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_otter_123";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote cached model".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.save().expect("save remote session");
 
-    let session_id = "session_otter_123";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote cached model".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.save().expect("save remote session");
+        let app = App::new_for_remote(Some(session_id.to_string()));
 
-    let app = App::new_for_remote(Some(session_id.to_string()));
-
-    assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-    assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
-    assert_eq!(
-        crate::tui::TuiState::session_display_name(&app).as_deref(),
-        Some("otter")
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
+        assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
+        assert_eq!(
+            crate::tui::TuiState::session_display_name(&app).as_deref(),
+            Some("otter")
+        );
+    });
 }
 
 #[test]
 fn test_remote_tui_state_falls_back_to_cached_model_after_startup_phase_clears() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_otter_124";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote cached model".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.save().expect("save remote session");
 
-    let session_id = "session_otter_124";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote cached model".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.save().expect("save remote session");
+        let mut app = App::new_for_remote(Some(session_id.to_string()));
+        app.clear_remote_startup_phase();
 
-    let mut app = App::new_for_remote(Some(session_id.to_string()));
-    app.clear_remote_startup_phase();
-
-    assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-    assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
+        assert_eq!(crate::tui::TuiState::provider_name(&app), "openai");
+    });
 }
 
 #[test]
 fn test_new_for_remote_uses_startup_stub_without_loading_full_transcript() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp_home = tempfile::TempDir::new().expect("create temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp_home.path());
+    with_temp_jcode_home(|| {
+        let session_id = "session_otter_stub_125";
+        let mut session = crate::session::Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("remote cached model".to_string()),
+        );
+        session.model = Some("gpt-5.4".to_string());
+        session.append_stored_message(crate::session::StoredMessage {
+            id: "msg-startup-stub".to_string(),
+            role: crate::message::Role::User,
+            content: vec![crate::message::ContentBlock::Text {
+                text: "hello from persisted history".to_string(),
+                cache_control: None,
+            }],
+            display_role: None,
+            timestamp: None,
+            tool_duration_ms: None,
+            token_usage: None,
+        });
+        session.save().expect("save remote session");
 
-    let session_id = "session_otter_stub_125";
-    let mut session = crate::session::Session::create_with_id(
-        session_id.to_string(),
-        None,
-        Some("remote cached model".to_string()),
-    );
-    session.model = Some("gpt-5.4".to_string());
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg-startup-stub".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "hello from persisted history".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
+        let app = App::new_for_remote(Some(session_id.to_string()));
+        assert_eq!(app.session_id(), session_id);
+        assert_eq!(app.display_messages().len(), 1);
+        assert_eq!(
+            app.display_messages()[0].content,
+            "hello from persisted history"
+        );
+        // The remote client renders persisted history into `display_messages`,
+        // then calls `strip_transcript_for_remote_client()` to release the backing
+        // transcript (the server is the source of truth for the live transcript).
+        // So the stripped `session.messages` is expected to be empty here.
+        assert_eq!(app.session.messages.len(), 0);
+        assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
+        assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
     });
-    session.save().expect("save remote session");
-
-    let app = App::new_for_remote(Some(session_id.to_string()));
-    assert_eq!(app.session_id(), session_id);
-    assert_eq!(app.display_messages().len(), 1);
-    assert_eq!(
-        app.display_messages()[0].content,
-        "hello from persisted history"
-    );
-    // The remote client renders persisted history into `display_messages`,
-    // then calls `strip_transcript_for_remote_client()` to release the backing
-    // transcript (the server is the source of truth for the live transcript).
-    // So the stripped `session.messages` is expected to be empty here.
-    assert_eq!(app.session.messages.len(), 0);
-    assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
-    assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
@@ -1475,139 +1448,152 @@ fn test_info_widget_remote_openai_uses_explicit_route_when_credential_is_missing
 
 #[test]
 fn test_info_widget_local_direct_api_runtime_shows_cost_based_usage() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let tracked_env = [
-        "JCODE_RUNTIME_PROVIDER",
-        "JCODE_OPENROUTER_ALLOW_NO_AUTH",
-        "JCODE_OPENROUTER_API_BASE",
-        "JCODE_OPENROUTER_PROVIDER_FEATURES",
-        "JCODE_OPENROUTER_TRANSPORT_STATE",
-        "JCODE_OPENROUTER_CACHE_NAMESPACE",
-        "JCODE_NAMED_PROVIDER_PROFILE",
-        "JCODE_PROVIDER_PROFILE_ACTIVE",
-        "JCODE_PROVIDER_PROFILE_NAME",
-    ];
-    let saved_env = tracked_env
-        .iter()
-        .map(|&key| (key, std::env::var_os(key)))
-        .collect::<Vec<_>>();
-    for &key in &tracked_env {
-        crate::env::remove_var(key);
-    }
+    // Every key this test depends on is `JCODE_`-prefixed, so the scope both
+    // clears it on entry (the unset state each case starts from) and restores
+    // it on exit, including on panic.
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let cases = [
+            (
+                "claude-api",
+                "anthropic",
+                "claude-sonnet-4-6",
+                crate::tui::info_widget::AuthMethod::AnthropicApiKey,
+            ),
+            (
+                "openai-api",
+                "openai",
+                "gpt-5.4",
+                crate::tui::info_widget::AuthMethod::OpenAIApiKey,
+            ),
+            (
+                "openrouter",
+                "openrouter",
+                "anthropic/claude-sonnet-4",
+                crate::tui::info_widget::AuthMethod::OpenRouterApiKey,
+            ),
+            (
+                "openai-compatible",
+                "openrouter",
+                "direct-compatible-model",
+                crate::tui::info_widget::AuthMethod::ApiKey,
+            ),
+            (
+                "openai-compatible",
+                "cerebras",
+                "gpt-oss-120b",
+                crate::tui::info_widget::AuthMethod::ApiKey,
+            ),
+            (
+                "bedrock",
+                "bedrock",
+                "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                crate::tui::info_widget::AuthMethod::ApiKey,
+            ),
+        ];
 
-    let cases = [
-        (
-            "claude-api",
-            "anthropic",
-            "claude-sonnet-4-6",
-            crate::tui::info_widget::AuthMethod::AnthropicApiKey,
-        ),
-        (
-            "openai-api",
-            "openai",
-            "gpt-5.4",
-            crate::tui::info_widget::AuthMethod::OpenAIApiKey,
-        ),
-        (
-            "openrouter",
-            "openrouter",
-            "anthropic/claude-sonnet-4",
-            crate::tui::info_widget::AuthMethod::OpenRouterApiKey,
-        ),
-        (
-            "openai-compatible",
-            "openrouter",
-            "direct-compatible-model",
-            crate::tui::info_widget::AuthMethod::ApiKey,
-        ),
-        (
-            "openai-compatible",
-            "cerebras",
-            "gpt-oss-120b",
-            crate::tui::info_widget::AuthMethod::ApiKey,
-        ),
-        (
-            "bedrock",
-            "bedrock",
-            "anthropic.claude-3-5-sonnet-20241022-v2:0",
-            crate::tui::info_widget::AuthMethod::ApiKey,
-        ),
-    ];
+        for (runtime_provider, provider_name, model, expected_auth) in cases {
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
+            crate::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
+            crate::auth::AuthStatus::invalidate_cache();
 
-    for (runtime_provider, provider_name, model, expected_auth) in cases {
-        crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
+            let mut app = create_named_provider_test_app(provider_name, model);
+            app.streaming.streaming_input_tokens = 1_000;
+            app.streaming.streaming_output_tokens = 1_000;
+            app.token_accounting.total_input_tokens = 12_000;
+            app.token_accounting.total_output_tokens = 3_400;
+            app.update_cost_impl();
+
+            assert!(
+                app.cost.total_cost > 0.0,
+                "{runtime_provider} should accrue token cost"
+            );
+
+            let data = crate::tui::TuiState::info_widget_data(&app);
+            assert_eq!(data.auth_method, expected_auth);
+            let usage = data
+                .usage_info
+                .as_ref()
+                .expect("direct API runtime usage info");
+            assert_eq!(
+                usage.provider,
+                crate::tui::info_widget::UsageProvider::CostBased
+            );
+            assert_eq!(usage.input_tokens, 12_000);
+            assert_eq!(usage.output_tokens, 3_400);
+            assert!(usage.total_cost > 0.0);
+        }
+
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "jcode");
         crate::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
-        crate::auth::AuthStatus::invalidate_cache();
-
-        let mut app = create_named_provider_test_app(provider_name, model);
+        let mut app = create_named_provider_test_app("openrouter", "subscription-model");
         app.streaming.streaming_input_tokens = 1_000;
         app.streaming.streaming_output_tokens = 1_000;
         app.token_accounting.total_input_tokens = 12_000;
         app.token_accounting.total_output_tokens = 3_400;
         app.update_cost_impl();
-
-        assert!(
-            app.cost.total_cost > 0.0,
-            "{runtime_provider} should accrue token cost"
-        );
+        assert_eq!(app.cost.total_cost, 0.0);
 
         let data = crate::tui::TuiState::info_widget_data(&app);
-        assert_eq!(data.auth_method, expected_auth);
-        let usage = data
-            .usage_info
-            .as_ref()
-            .expect("direct API runtime usage info");
         assert_eq!(
-            usage.provider,
-            crate::tui::info_widget::UsageProvider::CostBased
+            data.auth_method,
+            crate::tui::info_widget::AuthMethod::Unknown
         );
-        assert_eq!(usage.input_tokens, 12_000);
-        assert_eq!(usage.output_tokens, 3_400);
-        assert!(usage.total_cost > 0.0);
-    }
+        assert!(data.usage_info.is_none());
 
-    crate::env::set_var("JCODE_RUNTIME_PROVIDER", "jcode");
-    crate::env::remove_var("JCODE_OPENROUTER_ALLOW_NO_AUTH");
-    let mut app = create_named_provider_test_app("openrouter", "subscription-model");
-    app.streaming.streaming_input_tokens = 1_000;
-    app.streaming.streaming_output_tokens = 1_000;
-    app.token_accounting.total_input_tokens = 12_000;
-    app.token_accounting.total_output_tokens = 3_400;
-    app.update_cost_impl();
-    assert_eq!(app.cost.total_cost, 0.0);
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
+        crate::env::set_var("JCODE_OPENROUTER_ALLOW_NO_AUTH", "1");
+        let mut app = create_named_provider_test_app("openrouter", "local-model");
+        app.streaming.streaming_input_tokens = 1_000;
+        app.streaming.streaming_output_tokens = 1_000;
+        app.token_accounting.total_input_tokens = 12_000;
+        app.token_accounting.total_output_tokens = 3_400;
+        app.update_cost_impl();
+        assert_eq!(app.cost.total_cost, 0.0);
 
-    let data = crate::tui::TuiState::info_widget_data(&app);
-    assert_eq!(
-        data.auth_method,
-        crate::tui::info_widget::AuthMethod::Unknown
-    );
-    assert!(data.usage_info.is_none());
+        let data = crate::tui::TuiState::info_widget_data(&app);
+        assert_eq!(
+            data.auth_method,
+            crate::tui::info_widget::AuthMethod::Unknown
+        );
+        assert!(data.usage_info.is_none());
+    });
+}
 
-    crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
-    crate::env::set_var("JCODE_OPENROUTER_ALLOW_NO_AUTH", "1");
-    let mut app = create_named_provider_test_app("openrouter", "local-model");
-    app.streaming.streaming_input_tokens = 1_000;
-    app.streaming.streaming_output_tokens = 1_000;
-    app.token_accounting.total_input_tokens = 12_000;
-    app.token_accounting.total_output_tokens = 3_400;
-    app.update_cost_impl();
-    assert_eq!(app.cost.total_cost, 0.0);
+#[test]
+fn test_info_widget_local_kimi_respects_explicit_auth_mode() {
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "openai-compatible");
+        crate::env::set_var("JCODE_OPENROUTER_TRANSPORT_STATE", "direct-api-key");
 
-    let data = crate::tui::TuiState::info_widget_data(&app);
-    assert_eq!(
-        data.auth_method,
-        crate::tui::info_widget::AuthMethod::Unknown
-    );
-    assert!(data.usage_info.is_none());
+        let app = create_identified_provider_test_app("openrouter", "kimi-for-coding", "kimi");
 
-    for (key, value) in saved_env {
-        if let Some(value) = value {
-            crate::env::set_var(key, value);
-        } else {
-            crate::env::remove_var(key);
+        crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "oauth");
+        assert_eq!(
+            crate::tui::TuiState::info_widget_data(&app).auth_method,
+            crate::tui::info_widget::AuthMethod::KimiOAuth
+        );
+
+        crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "api_key");
+        assert_eq!(
+            crate::tui::TuiState::info_widget_data(&app).auth_method,
+            crate::tui::info_widget::AuthMethod::ApiKey
+        );
+
+        crate::env::set_var(crate::auth::kimi::AUTH_MODE_ENV, "oauth");
+        for runtime_provider in ["grok-build", "kimi-code-acp", "reasonix"] {
+            crate::env::set_var("JCODE_RUNTIME_PROVIDER", runtime_provider);
+            let app = create_identified_provider_test_app(
+                "openrouter",
+                "kimi-for-coding",
+                runtime_provider,
+            );
+            assert_ne!(
+                crate::tui::TuiState::info_widget_data(&app).auth_method,
+                crate::tui::info_widget::AuthMethod::KimiOAuth,
+                "{runtime_provider} must not inherit direct Kimi OAuth auth"
+            );
         }
-    }
-    crate::auth::AuthStatus::invalidate_cache();
+    });
 }
 
 #[test]
@@ -1619,43 +1605,36 @@ fn test_anthropic_api_cost_accounts_for_split_cache_tokens() {
     //     subtracting them from the fresh input (double subtraction), and
     //   - bill cache-creation (cache-write) tokens, which Anthropic charges at a
     //     premium over the input rate.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let saved_runtime = std::env::var_os("JCODE_RUNTIME_PROVIDER");
-    crate::env::set_var("JCODE_RUNTIME_PROVIDER", "claude-api");
-    crate::auth::AuthStatus::invalidate_cache();
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_RUNTIME_PROVIDER", "claude-api");
+        crate::auth::AuthStatus::invalidate_cache();
 
-    // claude-sonnet-4-6 API pricing: input $3/Mtok, output $15/Mtok,
-    // cache-read $0.30/Mtok. Cache-write (1h TTL) is billed at 2x input = $6/Mtok.
-    let mut app = create_named_provider_test_app("anthropic", "claude-sonnet-4-6");
-    crate::provider::anthropic::set_cache_ttl_1h(true);
+        // claude-sonnet-4-6 API pricing: input $3/Mtok, output $15/Mtok,
+        // cache-read $0.30/Mtok. Cache-write (1h TTL) is billed at 2x input = $6/Mtok.
+        let mut app = create_named_provider_test_app("anthropic", "claude-sonnet-4-6");
+        crate::provider::anthropic::set_cache_ttl_1h(true);
 
-    // A representative cold turn: most of the prompt is freshly written to cache,
-    // a little is read back, and only a small uncached remainder is fresh input.
-    app.streaming.streaming_input_tokens = 1_000; // uncached fresh input
-    app.streaming.streaming_cache_read_tokens = Some(40_000); // served from cache
-    app.streaming.streaming_cache_creation_tokens = Some(100_000); // written to cache (premium)
-    app.streaming.streaming_output_tokens = 2_000;
-    app.update_cost_impl();
+        // A representative cold turn: most of the prompt is freshly written to cache,
+        // a little is read back, and only a small uncached remainder is fresh input.
+        app.streaming.streaming_input_tokens = 1_000; // uncached fresh input
+        app.streaming.streaming_cache_read_tokens = Some(40_000); // served from cache
+        app.streaming.streaming_cache_creation_tokens = Some(100_000); // written to cache (premium)
+        app.streaming.streaming_output_tokens = 2_000;
+        app.update_cost_impl();
 
-    // Expected:
-    //   fresh input:    1_000  * $3   / 1e6 = $0.003
-    //   output:         2_000  * $15  / 1e6 = $0.030
-    //   cache read:    40_000  * $0.3 / 1e6 = $0.012
-    //   cache write:  100_000  * $6   / 1e6 = $0.600
-    //   total                                = $0.645
-    let expected = 0.003 + 0.030 + 0.012 + 0.600;
-    assert!(
-        (app.cost.total_cost - expected).abs() < 1e-4,
-        "anthropic split-accounting cost should be ~${expected:.4}, got ${:.4}",
-        app.cost.total_cost
-    );
-
-    if let Some(value) = saved_runtime {
-        crate::env::set_var("JCODE_RUNTIME_PROVIDER", value);
-    } else {
-        crate::env::remove_var("JCODE_RUNTIME_PROVIDER");
-    }
-    crate::auth::AuthStatus::invalidate_cache();
+        // Expected:
+        //   fresh input:    1_000  * $3   / 1e6 = $0.003
+        //   output:         2_000  * $15  / 1e6 = $0.030
+        //   cache read:    40_000  * $0.3 / 1e6 = $0.012
+        //   cache write:  100_000  * $6   / 1e6 = $0.600
+        //   total                                = $0.645
+        let expected = 0.003 + 0.030 + 0.012 + 0.600;
+        assert!(
+            (app.cost.total_cost - expected).abs() < 1e-4,
+            "anthropic split-accounting cost should be ~${expected:.4}, got ${:.4}",
+            app.cost.total_cost
+        );
+    });
 }
 
 #[test]
@@ -1853,41 +1832,33 @@ fn test_remote_fast_mode_tier_bills_premium_rates_and_reprices_on_toggle() {
 
 #[test]
 fn test_info_widget_local_gemini_shows_oauth_auth_method() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let path = crate::auth::gemini::tokens_path().expect("gemini tokens path");
+        crate::storage::write_json_secret(
+            &path,
+            &serde_json::json!({
+                "access_token": "at-123",
+                "refresh_token": "rt-456",
+                "expires_at": 4102444800000i64,
+                "email": "user@example.com"
+            }),
+        )
+        .expect("write gemini tokens");
+        crate::auth::AuthStatus::invalidate_cache();
 
-    let path = crate::auth::gemini::tokens_path().expect("gemini tokens path");
-    crate::storage::write_json_secret(
-        &path,
-        &serde_json::json!({
-            "access_token": "at-123",
-            "refresh_token": "rt-456",
-            "expires_at": 4102444800000i64,
-            "email": "user@example.com"
-        }),
-    )
-    .expect("write gemini tokens");
-    crate::auth::AuthStatus::invalidate_cache();
+        let app = create_gemini_test_app();
+        let data = crate::tui::TuiState::info_widget_data(&app);
 
-    let app = create_gemini_test_app();
-    let data = crate::tui::TuiState::info_widget_data(&app);
+        assert_eq!(data.provider_name.as_deref(), Some("gemini"));
+        assert_eq!(data.model.as_deref(), Some("gemini-2.5-pro"));
+        assert_eq!(
+            data.auth_method,
+            crate::tui::info_widget::AuthMethod::GeminiOAuth
+        );
+        assert!(data.usage_info.is_none());
 
-    assert_eq!(data.provider_name.as_deref(), Some("gemini"));
-    assert_eq!(data.model.as_deref(), Some("gemini-2.5-pro"));
-    assert_eq!(
-        data.auth_method,
-        crate::tui::info_widget::AuthMethod::GeminiOAuth
-    );
-    assert!(data.usage_info.is_none());
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-    crate::auth::AuthStatus::invalidate_cache();
+        crate::auth::AuthStatus::invalidate_cache();
+    });
 }
 
 #[test]
@@ -2077,47 +2048,87 @@ fn test_remote_transcript_send_uses_remote_submission_path() {
 }
 
 #[test]
-fn test_remote_review_shows_processing_until_split_response() {
-    let mut app = create_test_app();
-    app.is_remote = true;
-    app.input = "/review".to_string();
-    app.cursor_pos = app.input.len();
-
+fn test_remote_split_command_shows_processing_until_split_response() {
+    // /review and /judge are the same split-launch path; only the command
+    // string, the status label, and the child session naming differ.
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-        .expect("/review should launch split request");
+    for (command, label, child_session_id, child_session_name) in [
+        ("/review", "Review", "session_review_child", "review_child"),
+        ("/judge", "Judge", "session_judge_child", "judge_child"),
+    ] {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.input = command.to_string();
+        app.cursor_pos = app.input.len();
 
-    assert!(
-        app.is_processing,
-        "review launch should show client processing state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Sending));
-    assert!(app.current_message_id.is_none());
-    assert_eq!(app.status_notice(), Some("Review launching".to_string()));
-    assert!(app.pending_split_startup_message.is_some());
-    assert_eq!(app.pending_split_label.as_deref(), Some("Review"));
-    assert!(!app.pending_split_request);
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.handle_server_event(
-        crate::protocol::ServerEvent::SplitResponse {
-            id: 1,
-            new_session_id: "session_review_child".to_string(),
-            new_session_name: "review_child".to_string(),
-        },
-        &mut remote,
-    );
+        rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
+            .unwrap_or_else(|e| panic!("{command} should launch split request: {e}"));
 
-    assert!(
-        !app.is_processing,
-        "split response should clear transient launch state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Idle));
-    assert!(app.processing_started.is_none());
-    assert!(app.pending_split_startup_message.is_none());
-    assert!(app.pending_split_label.is_none());
+        assert!(
+            app.is_processing,
+            "{command}: launch should show client processing state"
+        );
+        assert!(
+            matches!(app.status, ProcessingStatus::Sending),
+            "{command}: status is Sending"
+        );
+        assert!(
+            app.current_message_id.is_none(),
+            "{command}: no message id yet"
+        );
+        assert_eq!(
+            app.status_notice(),
+            Some(format!("{label} launching")),
+            "{command}: launch notice"
+        );
+        assert!(
+            app.pending_split_startup_message.is_some(),
+            "{command}: startup message pending"
+        );
+        assert_eq!(
+            app.pending_split_label.as_deref(),
+            Some(label),
+            "{command}: split label"
+        );
+        assert!(
+            !app.pending_split_request,
+            "{command}: request already dispatched"
+        );
+
+        app.handle_server_event(
+            crate::protocol::ServerEvent::SplitResponse {
+                id: 1,
+                new_session_id: child_session_id.to_string(),
+                new_session_name: child_session_name.to_string(),
+            },
+            &mut remote,
+        );
+
+        assert!(
+            !app.is_processing,
+            "{command}: split response should clear transient launch state"
+        );
+        assert!(
+            matches!(app.status, ProcessingStatus::Idle),
+            "{command}: status back to Idle"
+        );
+        assert!(
+            app.processing_started.is_none(),
+            "{command}: processing clock cleared"
+        );
+        assert!(
+            app.pending_split_startup_message.is_none(),
+            "{command}: startup message cleared"
+        );
+        assert!(
+            app.pending_split_label.is_none(),
+            "{command}: split label cleared"
+        );
+    }
 }
 
 #[test]
@@ -2170,50 +2181,6 @@ fn test_remote_super_space_routes_next_prompt_to_new_session() {
         assert!(app.pending_split_prompt.is_none());
         assert!(app.pending_split_label.is_none());
     });
-}
-
-#[test]
-fn test_remote_judge_shows_processing_until_split_response() {
-    let mut app = create_test_app();
-    app.is_remote = true;
-    app.input = "/judge".to_string();
-    app.cursor_pos = app.input.len();
-
-    let rt = tokio::runtime::Runtime::new().expect("runtime");
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-        .expect("/judge should launch split request");
-
-    assert!(
-        app.is_processing,
-        "judge launch should show client processing state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Sending));
-    assert!(app.current_message_id.is_none());
-    assert_eq!(app.status_notice(), Some("Judge launching".to_string()));
-    assert!(app.pending_split_startup_message.is_some());
-    assert_eq!(app.pending_split_label.as_deref(), Some("Judge"));
-    assert!(!app.pending_split_request);
-
-    app.handle_server_event(
-        crate::protocol::ServerEvent::SplitResponse {
-            id: 1,
-            new_session_id: "session_judge_child".to_string(),
-            new_session_name: "judge_child".to_string(),
-        },
-        &mut remote,
-    );
-
-    assert!(
-        !app.is_processing,
-        "split response should clear transient launch state"
-    );
-    assert!(matches!(app.status, ProcessingStatus::Idle));
-    assert!(app.processing_started.is_none());
-    assert!(app.pending_split_startup_message.is_none());
-    assert!(app.pending_split_label.is_none());
 }
 
 // ====================================================================
@@ -2301,71 +2268,68 @@ fn test_externally_started_tool_turn_shows_running_tool_status() {
 #[test]
 fn test_remote_fork_with_prompt_stages_split_prompt() {
     with_temp_jcode_home(|| {
-        let mut app = create_test_app();
-        app.is_remote = true;
-        app.input = "/fork explore plan b".to_string();
-        app.cursor_pos = app.input.len();
-
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let _guard = rt.enter();
-        let mut remote = crate::tui::backend::RemoteConnection::dummy();
-        remote.mark_history_loaded();
 
-        rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-            .expect("/fork <prompt> should launch split request");
+        for (command, expected_prompt, child_session_id, child_session_name) in [
+            (
+                "/fork explore plan b",
+                "explore plan b",
+                "session_fork_prompt_child",
+                "fork_prompt_child",
+            ),
+            (
+                "/btw what are we doing?",
+                "what are we doing?",
+                "session_btw_child",
+                "btw_child",
+            ),
+        ] {
+            let mut app = create_test_app();
+            app.is_remote = true;
+            app.input = command.to_string();
+            app.cursor_pos = app.input.len();
+            let mut remote = crate::tui::backend::RemoteConnection::dummy();
+            remote.mark_history_loaded();
 
-        assert!(app.pending_split_prompt.is_some());
-        assert_eq!(app.pending_split_label.as_deref(), Some("Prompt"));
-        assert!(!app.pending_split_request);
+            rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
+                .unwrap_or_else(|e| panic!("{command}: should launch split request: {e}"));
 
-        app.handle_server_event(
-            crate::protocol::ServerEvent::SplitResponse {
-                id: 1,
-                new_session_id: "session_fork_prompt_child".to_string(),
-                new_session_name: "fork_prompt_child".to_string(),
-            },
-            &mut remote,
-        );
+            assert!(
+                app.pending_split_prompt.is_some(),
+                "{command}: split prompt staged"
+            );
+            assert_eq!(
+                app.pending_split_label.as_deref(),
+                Some("Prompt"),
+                "{command}: split label"
+            );
+            assert!(
+                !app.pending_split_request,
+                "{command}: request already dispatched"
+            );
 
-        let restored = App::restore_input_for_reload("session_fork_prompt_child")
-            .expect("forked session should stage the prompt");
-        assert_eq!(restored.input, "explore plan b");
-        assert!(restored.submit_on_restore);
-        assert!(app.pending_split_prompt.is_none());
-    });
-}
+            app.handle_server_event(
+                crate::protocol::ServerEvent::SplitResponse {
+                    id: 1,
+                    new_session_id: child_session_id.to_string(),
+                    new_session_name: child_session_name.to_string(),
+                },
+                &mut remote,
+            );
 
-#[test]
-fn test_remote_btw_stages_question_in_forked_session() {
-    with_temp_jcode_home(|| {
-        let mut app = create_test_app();
-        app.is_remote = true;
-        app.input = "/btw what are we doing?".to_string();
-        app.cursor_pos = app.input.len();
-
-        let rt = tokio::runtime::Runtime::new().expect("runtime");
-        let _guard = rt.enter();
-        let mut remote = crate::tui::backend::RemoteConnection::dummy();
-        remote.mark_history_loaded();
-
-        rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-            .expect("/btw should launch split request");
-
-        assert!(app.pending_split_prompt.is_some());
-
-        app.handle_server_event(
-            crate::protocol::ServerEvent::SplitResponse {
-                id: 1,
-                new_session_id: "session_btw_child".to_string(),
-                new_session_name: "btw_child".to_string(),
-            },
-            &mut remote,
-        );
-
-        let restored = App::restore_input_for_reload("session_btw_child")
-            .expect("btw fork should stage the question");
-        assert_eq!(restored.input, "what are we doing?");
-        assert!(restored.submit_on_restore);
+            let restored = App::restore_input_for_reload(child_session_id)
+                .unwrap_or_else(|| panic!("{command}: forked session should stage the prompt"));
+            assert_eq!(restored.input, expected_prompt, "{command}: staged input");
+            assert!(
+                restored.submit_on_restore,
+                "{command}: staged prompt submits on restore"
+            );
+            assert!(
+                app.pending_split_prompt.is_none(),
+                "{command}: pending prompt cleared after split response"
+            );
+        }
     });
 }
 

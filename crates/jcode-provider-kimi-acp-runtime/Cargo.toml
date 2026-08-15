@@ -1,0 +1,29 @@
+[package]
+name = "jcode-provider-kimi-acp-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Kimi Code official CLI runtime for jcode over the shared ACP engine"
+publish = false
+
+[lib]
+name = "jcode_provider_kimi_acp_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jcode-fake-kimi-acp"
+path = "src/bin/fake_acp.rs"
+test = false
+bench = false
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+jcode-message-types = { path = "../jcode-message-types" }
+jcode-provider-acp-runtime = { path = "../jcode-provider-acp-runtime" }
+jcode-provider-core = { path = "../jcode-provider-core" }
+serde_json = "1"
+
+[dev-dependencies]
+futures = "0.3"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

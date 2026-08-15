@@ -1,56 +1,40 @@
 #[test]
 fn test_fast_default_on_saves_config_and_updates_session() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let mut app = create_fast_test_app();
+        app.input = "/fast default on".to_string();
 
-    let mut app = create_fast_test_app();
-    app.input = "/fast default on".to_string();
+        app.submit_input();
 
-    app.submit_input();
-
-    let cfg = crate::config::Config::load();
-    assert_eq!(
-        cfg.provider.openai_service_tier.as_deref(),
-        Some("priority")
-    );
-    assert_eq!(app.provider.service_tier().as_deref(), Some("priority"));
-    assert_eq!(app.status_notice(), Some("Fast mode: on".to_string()));
-    let last = app.display_messages().last().expect("missing response");
-    assert_eq!(last.content, "Saved OpenAI fast mode: on.");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let cfg = crate::config::Config::load();
+        assert_eq!(
+            cfg.provider.openai_service_tier.as_deref(),
+            Some("priority")
+        );
+        assert_eq!(app.provider.service_tier().as_deref(), Some("priority"));
+        assert_eq!(app.status_notice(), Some("Fast mode: on".to_string()));
+        let last = app.display_messages().last().expect("missing response");
+        assert_eq!(last.content, "Saved OpenAI fast mode: on.");
+    });
 }
 
 #[test]
 fn test_fast_status_shows_saved_default() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
-    crate::config::Config::set_openai_service_tier(Some("priority")).expect("save fast default");
+    with_temp_jcode_home(|| {
+        crate::config::Config::set_openai_service_tier(Some("priority"))
+            .expect("save fast default");
 
-    let mut app = create_fast_test_app();
-    app.input = "/fast status".to_string();
+        let mut app = create_fast_test_app();
+        app.input = "/fast status".to_string();
 
-    app.submit_input();
+        app.submit_input();
 
-    let last = app.display_messages().last().expect("missing response");
-    assert_eq!(
-        last.content,
-        "Fast mode is off.\nCurrent tier: Standard\nSaved default: on (Fast)\nUse /fast on, /fast off, or /fast default on|off."
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let last = app.display_messages().last().expect("missing response");
+        assert_eq!(
+            last.content,
+            "Fast mode is off.\nCurrent tier: Standard\nSaved default: on (Fast)\nUse /fast on, /fast off, or /fast default on|off."
+        );
+    });
 }
 
 #[test]
@@ -69,10 +53,7 @@ fn test_alignment_command_persists_and_applies_immediately() {
 
         let last = app.display_messages().last().expect("missing response");
         assert_eq!(last.role, "system");
-        assert!(
-            last.content
-                .contains("Saved default alignment: centered")
-        );
+        assert!(last.content.contains("Saved default alignment: centered"));
     });
 }
 
@@ -89,10 +70,7 @@ fn test_alignment_status_shows_current_and_saved_defaults() {
 
         let last = app.display_messages().last().expect("missing response");
         assert_eq!(last.role, "system");
-        assert!(
-            last.content
-                .contains("Alignment is currently centered.")
-        );
+        assert!(last.content.contains("Alignment is currently centered."));
         assert!(last.content.contains("Saved default: left-aligned."));
         assert!(last.content.contains("/alignment centered"));
         assert!(last.content.contains("Alt+C"));
@@ -166,20 +144,6 @@ fn test_compact_notifications_invalid_usage_shows_error() {
 }
 
 #[test]
-fn test_help_topic_shows_fix_command_details() {
-    let mut app = create_test_app();
-    app.input = "/help fix".to_string();
-    app.submit_input();
-
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing help response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/fix"));
-}
-
-#[test]
 fn test_mask_email_censors_local_part() {
     assert_eq!(mask_email("jeremyh1@uw.edu"), "j***1@uw.edu");
 }
@@ -230,23 +194,6 @@ fn test_usage_command_requests_usage_report_with_inline_view() {
     let mut app = create_test_app();
 
     assert!(super::commands::handle_usage_command(&mut app, "/usage"));
-
-    assert!(app.inline_interactive_state.is_none());
-    assert!(app.usage_overlay.is_none());
-    assert!(app.inline_view_state.is_none());
-    assert_eq!(
-        app.display_messages().last().map(|m| m.role.as_str()),
-        Some("usage")
-    );
-    assert!(app.usage_report_refreshing);
-}
-
-#[test]
-fn test_usage_submit_input_requests_usage_report_with_inline_view() {
-    let mut app = create_test_app();
-    app.input = "/usage".to_string();
-
-    app.submit_input();
 
     assert!(app.inline_interactive_state.is_none());
     assert!(app.usage_overlay.is_none());

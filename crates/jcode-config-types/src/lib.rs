@@ -1295,6 +1295,16 @@ pub struct ProviderConfig {
     /// that think silently for minutes before emitting tokens. Default: 180.
     /// Overridable per-launch via `JCODE_STREAM_IDLE_TIMEOUT_SECS`.
     pub stream_idle_timeout_secs: u64,
+    /// Max seconds to wait for the provider to hand back a response stream
+    /// after a request starts. Covers the provider setup window: failover
+    /// selection, lock acquisition, auth/token refresh, model catalog/pricing
+    /// lookups, and request build. Connect, response headers, and streaming
+    /// happen inside the provider's spawned stream task and are bounded by the
+    /// response-header timeout and `stream_idle_timeout_secs`. A stall in the
+    /// setup window previously hung the turn forever; now it fails the turn
+    /// with a diagnostic instead. Default: 180.
+    /// Overridable per-launch via `JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS`.
+    pub pre_stream_open_timeout_secs: u64,
 }
 
 impl Default for ProviderConfig {
@@ -1314,6 +1324,7 @@ impl Default for ProviderConfig {
             copilot_premium: None,
             model_picker_providers: None,
             stream_idle_timeout_secs: 180,
+            pre_stream_open_timeout_secs: 180,
         }
     }
 }

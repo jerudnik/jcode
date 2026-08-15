@@ -21,14 +21,18 @@ pub(super) async fn handle_spawn_action(
             };
 
             match send_request(request).await {
-                Ok(ServerEvent::CommSpawnResponse { new_session_id, .. })
-                    if !new_session_id.is_empty() =>
-                {
-                    Ok(ToolOutput::new(format!(
-                        "Spawned new agent: {}",
-                        new_session_id
-                    )))
-                }
+                Ok(ServerEvent::CommSpawnResponse {
+                    new_session_id,
+                    model,
+                    provider_key,
+                    route_api_method,
+                    ..
+                }) if !new_session_id.is_empty() => Ok(ToolOutput::new(format!(
+                    "Spawned new agent: {new_session_id}\nResolved identity: model={} provider_key={} route={}",
+                    model.as_deref().unwrap_or("none"),
+                    provider_key.as_deref().unwrap_or("none"),
+                    route_api_method.as_deref().unwrap_or("none"),
+                ))),
                 Ok(response) => {
                     ensure_success(&response)?;
                     Err(anyhow::anyhow!(

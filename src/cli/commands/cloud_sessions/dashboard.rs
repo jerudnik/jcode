@@ -79,7 +79,9 @@ fn fetch_cloud_session_list_json(
 /// The Jade helper prints a top-level JSON array, but we also accept an object
 /// wrapper keyed by `items` or `sessions` so the dashboard keeps working if the
 /// helper's output shape changes.
-pub(in crate::cli) fn parse_cloud_session_list_json(raw: &str) -> Result<Vec<CloudSessionListItem>> {
+pub(in crate::cli) fn parse_cloud_session_list_json(
+    raw: &str,
+) -> Result<Vec<CloudSessionListItem>> {
     let value: serde_json::Value = serde_json::from_str(raw)
         .map_err(|err| anyhow::anyhow!("failed to parse Jade list JSON: {err}"))?;
     let array = match value {

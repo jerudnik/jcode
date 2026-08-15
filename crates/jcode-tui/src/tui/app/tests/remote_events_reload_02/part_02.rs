@@ -50,71 +50,114 @@ fn test_handle_remote_disconnect_preserves_pending_interleaves_for_reconnect() {
 }
 
 #[test]
-fn test_replace_display_message_content_bumps_version() {
-    let mut app = create_test_app();
-    app.push_display_message(DisplayMessage::system("old reconnect status".to_string()));
-    let before = app.display_messages_version;
+fn test_display_message_mutations_bump_version() {
+    type Mutation = fn(&str, &mut App);
 
-    assert!(app.replace_display_message_content(0, "new reconnect status".to_string()));
-    assert_eq!(app.display_messages[0].content, "new reconnect status");
-    assert_ne!(app.display_messages_version, before);
+    let mut content_app = create_test_app();
+    content_app.push_display_message(DisplayMessage::system("old reconnect status".to_string()));
 
-    let after_change = app.display_messages_version;
-    assert!(app.replace_display_message_content(0, "new reconnect status".to_string()));
-    assert_eq!(app.display_messages_version, after_change);
-}
-
-#[test]
-fn test_replace_latest_tool_display_message_updates_latest_match_and_bumps_version() {
-    let mut app = create_test_app();
     let tool_call = crate::message::ToolCall {
         id: "tool-1".to_string(),
         name: "read".to_string(),
         input: serde_json::json!({"file_path": "src/main.rs"}),
-        intent: None, thought_signature: None, };
+        intent: None,
+        thought_signature: None,
+    };
+    let mut tool_app = create_test_app();
+    for (content, title) in [
+        ("placeholder 1", Some("old title")),
+        ("placeholder 2", None),
+    ] {
+        tool_app.push_display_message(DisplayMessage {
+            role: "tool".to_string(),
+            content: content.to_string(),
+            tool_calls: vec![],
+            duration_secs: None,
+            title: title.map(str::to_string),
+            tool_data: Some(tool_call.clone()),
+        });
+    }
 
-    app.push_display_message(DisplayMessage {
-        role: "tool".to_string(),
-        content: "placeholder 1".to_string(),
-        tool_calls: vec![],
-        duration_secs: None,
-        title: Some("old title".to_string()),
-        tool_data: Some(tool_call.clone()),
-    });
-    app.push_display_message(DisplayMessage {
-        role: "tool".to_string(),
-        content: "placeholder 2".to_string(),
-        tool_calls: vec![],
-        duration_secs: None,
-        title: None,
-        tool_data: Some(tool_call),
-    });
-    let before = app.display_messages_version;
-
-    assert!(app.replace_latest_tool_display_message(
-        "tool-1",
-        Some("new title".to_string()),
-        "final output".to_string(),
+    let mut remove_app = create_test_app();
+    remove_app.push_display_message(DisplayMessage::system(
+        "temporary reconnect status".to_string(),
     ));
-    assert_eq!(app.display_messages()[0].content, "placeholder 1");
-    assert_eq!(
-        app.display_messages()[0].title.as_deref(),
-        Some("old title")
-    );
-    assert_eq!(app.display_messages()[1].content, "final output");
-    assert_eq!(
-        app.display_messages()[1].title.as_deref(),
-        Some("new title")
-    );
-    assert_ne!(app.display_messages_version, before);
 
-    let after_change = app.display_messages_version;
-    assert!(app.replace_latest_tool_display_message(
-        "tool-1",
-        Some("new title".to_string()),
-        "final output".to_string(),
-    ));
-    assert_eq!(app.display_messages_version, after_change);
+    let cases: [(&str, App, Mutation, Option<Mutation>); 3] = [
+        (
+            "replace content",
+            content_app,
+            |name, app| {
+                assert!(app.replace_display_message_content(0, "new reconnect status".to_string()));
+                assert_eq!(
+                    app.display_messages()[0].content,
+                    "new reconnect status",
+                    "{name}"
+                );
+            },
+            Some(|_, app| {
+                assert!(app.replace_display_message_content(0, "new reconnect status".to_string()));
+            }),
+        ),
+        (
+            "replace latest tool result",
+            tool_app,
+            |name, app| {
+                assert!(app.replace_latest_tool_display_message(
+                    "tool-1",
+                    Some("new title".to_string()),
+                    "final output".to_string(),
+                ));
+                let messages = app
+                    .display_messages()
+                    .iter()
+                    .map(|message| (message.content.as_str(), message.title.as_deref()))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    messages,
+                    [
+                        ("placeholder 1", Some("old title")),
+                        ("final output", Some("new title"))
+                    ],
+                    "{name}"
+                );
+            },
+            Some(|_, app| {
+                assert!(app.replace_latest_tool_display_message(
+                    "tool-1",
+                    Some("new title".to_string()),
+                    "final output".to_string(),
+                ));
+            }),
+        ),
+        (
+            "remove content",
+            remove_app,
+            |name, app| {
+                let removed = app
+                    .remove_display_message(0)
+                    .unwrap_or_else(|| panic!("{name}: message should be removed"));
+                assert_eq!(removed.content, "temporary reconnect status", "{name}");
+                assert!(app.display_messages().is_empty(), "{name}");
+            },
+            None,
+        ),
+    ];
+
+    for (name, mut app, mutate, repeat) in cases {
+        let before = app.display_messages_version;
+        mutate(name, &mut app);
+        assert_ne!(app.display_messages_version, before, "{name}: version");
+
+        if let Some(repeat) = repeat {
+            let after_change = app.display_messages_version;
+            repeat(name, &mut app);
+            assert_eq!(
+                app.display_messages_version, after_change,
+                "{name}: idempotence"
+            );
+        }
+    }
 }
 
 #[test]
@@ -151,22 +194,6 @@ fn test_push_display_message_does_not_coalesce_multiline_system_messages() {
     assert_eq!(app.display_messages().len(), 2);
     assert_eq!(app.display_messages()[0].content, message);
     assert_eq!(app.display_messages()[1].content, message);
-}
-
-#[test]
-fn test_remove_display_message_bumps_version() {
-    let mut app = create_test_app();
-    app.push_display_message(DisplayMessage::system(
-        "temporary reconnect status".to_string(),
-    ));
-    let before = app.display_messages_version;
-
-    let removed = app
-        .remove_display_message(0)
-        .expect("message should be removed");
-    assert_eq!(removed.content, "temporary reconnect status");
-    assert!(app.display_messages.is_empty());
-    assert_ne!(app.display_messages_version, before);
 }
 
 #[test]
@@ -421,11 +448,7 @@ fn test_tool_done_preserves_sibling_streaming_tool_inputs_and_intents() {
         .display_messages()
         .iter()
         .rev()
-        .find(|dm| {
-            dm.tool_data
-                .as_ref()
-                .is_some_and(|td| td.id == "tool_b")
-        })
+        .find(|dm| dm.tool_data.as_ref().is_some_and(|td| td.id == "tool_b"))
         .expect("missing tool_b display message");
     let tool_b = tool_b_msg.tool_data.as_ref().unwrap();
     assert_eq!(tool_b.intent.as_deref(), Some("Fetch page B"));

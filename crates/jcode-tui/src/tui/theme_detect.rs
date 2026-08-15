@@ -177,6 +177,7 @@ fn terminal_background_query_supported(
 #[cfg(test)]
 mod tests {
     use super::{DETECTED, reset_detected_theme_for_tests, terminal_background_query_supported};
+    use crate::tui::app::test_support::with_temp_jcode_home;
     use jcode_tui_style::ThemeMode;
 
     #[test]
@@ -207,20 +208,21 @@ mod tests {
 
     #[test]
     fn reset_detected_theme_clears_test_cache_and_style() {
-        let _env_lock = crate::tui::app::test_support::lock_test_env();
-        *DETECTED
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ThemeMode::Light);
-        jcode_tui_style::set_theme_mode(ThemeMode::Light);
-
-        reset_detected_theme_for_tests();
-
-        assert!(
-            DETECTED
+        with_temp_jcode_home(|| {
+            *DETECTED
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .is_none()
-        );
-        assert_eq!(jcode_tui_style::theme_mode(), ThemeMode::Dark);
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ThemeMode::Light);
+            jcode_tui_style::set_theme_mode(ThemeMode::Light);
+
+            reset_detected_theme_for_tests();
+
+            assert!(
+                DETECTED
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .is_none()
+            );
+            assert_eq!(jcode_tui_style::theme_mode(), ThemeMode::Dark);
+        });
     }
 }

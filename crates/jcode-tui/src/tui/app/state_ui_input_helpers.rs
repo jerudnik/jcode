@@ -1774,40 +1774,6 @@ mod external_cli_suggestion_tests {
     use super::*;
     use std::io::Write;
 
-    /// Faithful, real-home measurement of the per-frame onboarding cost.
-    /// Ignored by default (depends on local ~/.codex and ~/.claude contents).
-    /// Run with:
-    ///   cargo test -p jcode-tui --lib onboarding_suggestion_scan_cost -- --ignored --nocapture
-    #[test]
-    #[ignore]
-    fn onboarding_suggestion_scan_cost() {
-        use std::time::Instant;
-
-        // Cold: the uncached scan that reads + JSON-parses the newest external
-        // transcripts. This is the work that used to run several times per frame.
-        let cold_start = Instant::now();
-        let cold = latest_external_cli_continuation_prompt_uncached();
-        let cold_ms = cold_start.elapsed().as_secs_f64() * 1000.0;
-
-        // Warm: the cached front-end the onboarding screen actually calls. Prime
-        // the cache once, then measure repeated calls (as a redrawing frame does).
-        let _ = latest_external_cli_continuation_prompt();
-        let runs = 1000;
-        let warm_start = Instant::now();
-        let mut warm = None;
-        for _ in 0..runs {
-            warm = latest_external_cli_continuation_prompt();
-        }
-        let warm_ms = warm_start.elapsed().as_secs_f64() * 1000.0 / runs as f64;
-
-        eprintln!(
-            "external-cli continuation prompt: cold(uncached)={cold_ms:.1} ms, \
-             warm(cached, avg of {runs})={warm_ms:.4} ms; cold_some={}, warm_some={}",
-            cold.is_some(),
-            warm.is_some()
-        );
-    }
-
     #[test]
     fn parses_claude_code_jsonl_with_session_path_and_context() {
         let temp = tempfile::tempdir().expect("tempdir");

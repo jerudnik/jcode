@@ -46,6 +46,14 @@ pub struct AuthStatus {
     pub gemini: AuthState,
     /// Cursor provider configured via Cursor Agent plus API key or CLI session
     pub cursor: AuthState,
+    /// Grok Build CLI installed with a cached subscription login detected
+    pub grok_build: AuthState,
+    /// Jcode-managed Grok Direct OAuth credentials
+    pub grok_direct: AuthState,
+    /// Kimi Code CLI installed with CLI-owned login/configuration detected
+    pub kimi_code_acp: AuthState,
+    /// Reasonix CLI installed with project or user configuration detected
+    pub reasonix: AuthState,
     /// Google/Gmail OAuth configured
     pub google: AuthState,
     /// Google Gmail has send capability (Full tier)

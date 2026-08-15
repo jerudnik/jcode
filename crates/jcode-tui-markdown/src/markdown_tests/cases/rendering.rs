@@ -212,8 +212,14 @@ fn test_math_in_table_stays_within_constrained_width() {
         .map(line_to_string)
         .collect();
 
-    assert!(rendered.iter().any(|line| line.contains("x+1")), "{rendered:?}");
-    assert!(rendered.iter().any(|line| line.contains("α₂")), "{rendered:?}");
+    assert!(
+        rendered.iter().any(|line| line.contains("x+1")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("α₂")),
+        "{rendered:?}"
+    );
     assert!(
         rendered.iter().map(|line| line.width()).max().unwrap_or(0) <= 24,
         "table math exceeded width: {rendered:?}"
@@ -229,8 +235,14 @@ fn test_math_in_list_and_blockquote_wraps_without_losing_gutter() {
         .filter(|line| !line.is_empty())
         .collect();
 
-    assert!(rendered.iter().any(|line| line.contains("x+1")), "{rendered:?}");
-    assert!(rendered.iter().any(|line| line.contains("α₂")), "{rendered:?}");
+    assert!(
+        rendered.iter().any(|line| line.contains("x+1")),
+        "{rendered:?}"
+    );
+    assert!(
+        rendered.iter().any(|line| line.contains("α₂")),
+        "{rendered:?}"
+    );
     assert!(
         rendered.iter().any(|line| line.starts_with("│ ")),
         "blockquote gutter was not preserved: {rendered:?}"
@@ -450,10 +462,7 @@ fn test_structured_markdown_lines_force_left_alignment() {
         "<div>html</div>"
     );
 
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width(md, Some(40));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || render_markdown_with_width(md, Some(40)));
 
     let expected = [
         "• [x] done",
@@ -595,10 +604,7 @@ fn test_centered_mode_keeps_list_markers_flush_left() {
         "   - steps\n"
     );
 
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width(md, Some(80));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || render_markdown_with_width(md, Some(80)));
 
     let numbered_1 = lines
         .iter()
@@ -652,10 +658,7 @@ fn test_centered_mode_centers_other_structured_blocks_as_blocks() {
         "| A | B |\n| - | - |\n| 1 | 2 |\n"
     );
 
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width(md, Some(50));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || render_markdown_with_width(md, Some(50)));
 
     for snippet in ["│ quoted line", "[^a]: footnote body", "• Term", "A │ B"] {
         let line = lines
@@ -672,10 +675,9 @@ fn test_centered_mode_centers_other_structured_blocks_as_blocks() {
 
 #[test]
 fn test_centered_mode_still_centers_framed_code_blocks() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width("```rust\nfn main() {}\n```", Some(40));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width("```rust\nfn main() {}\n```", Some(40))
+    });
 
     let header = lines
         .iter()
@@ -699,10 +701,9 @@ fn test_rule_and_inline_html_render() {
 
 #[test]
 fn test_centered_mode_centers_rules_as_blocks() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width("before\n\n---\n\nafter", Some(50));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width("before\n\n---\n\nafter", Some(50))
+    });
 
     let rule_line = lines
         .iter()
@@ -721,10 +722,9 @@ fn test_centered_mode_centers_rules_as_blocks() {
 
 #[test]
 fn test_centered_mode_keeps_lists_left_aligned() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width("- one\n- two", Some(50));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width("- one\n- two", Some(50))
+    });
 
     let rendered: Vec<String> = lines
         .iter()

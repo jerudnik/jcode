@@ -20,11 +20,12 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use jcode_base::provider_catalog::{
-    ApiKeyCredentialSource, OPENAI_COMPAT_PROFILE, active_openai_compatible_profile,
-    is_safe_env_file_name, is_safe_env_key_name, load_api_key, load_env_value_from_env_or_config,
-    normalize_api_base, openai_compatible_profile_by_id, openai_compatible_profile_id_for_api_base,
-    openai_compatible_profile_static_context_limits, openai_compatible_profile_static_models,
-    openai_compatible_profiles, resolve_openai_compatible_profile,
+    ApiKeyCredentialSource, ManagedOAuthProvider, OPENAI_COMPAT_PROFILE,
+    active_openai_compatible_profile, is_safe_env_file_name, is_safe_env_key_name, load_api_key,
+    load_env_value_from_env_or_config, normalize_api_base, openai_compatible_profile_by_id,
+    openai_compatible_profile_id_for_api_base, openai_compatible_profile_static_context_limits,
+    openai_compatible_profile_static_models, openai_compatible_profiles,
+    resolve_openai_compatible_profile,
 };
 use jcode_message_types::{CacheControl, ContentBlock, Message, Role, StreamEvent, ToolDefinition};
 use jcode_provider_core::{EventStream, Provider};
@@ -446,8 +447,13 @@ fn apply_coding_agent_headers(
     api_base: &str,
     auth: &ProviderAuth,
 ) -> Result<reqwest::RequestBuilder> {
-    if is_kimi_coding_api_base(api_base) {
-        if auth.is_kimi_oauth() {
+    if auth.is_managed_oauth(ManagedOAuthProvider::GrokDirect) {
+        Ok(req.header(
+            reqwest::header::USER_AGENT,
+            jcode_base::auth::grok_direct::user_agent(),
+        ))
+    } else if is_kimi_coding_api_base(api_base) {
+        if auth.is_managed_oauth(ManagedOAuthProvider::Kimi) {
             jcode_base::auth::kimi::apply_identity_headers(req)
         } else {
             Ok(req.header(
@@ -478,7 +484,8 @@ enum ProviderAuth {
     AzureEntra {
         label: String,
     },
-    KimiOAuth {
+    ManagedOAuth {
+        provider: ManagedOAuthProvider,
         label: String,
     },
     None {
@@ -506,8 +513,13 @@ impl ProviderAuth {
                 let token = jcode_base::auth::azure::get_bearer_token().await?;
                 Ok((req.bearer_auth(token), None))
             }
-            Self::KimiOAuth { .. } => {
-                let token = jcode_base::auth::kimi::access_token().await?;
+            Self::ManagedOAuth { provider, .. } => {
+                let token = match provider {
+                    ManagedOAuthProvider::Kimi => jcode_base::auth::kimi::access_token().await?,
+                    ManagedOAuthProvider::GrokDirect => {
+                        jcode_base::auth::grok_direct::access_token().await?
+                    }
+                };
                 Ok((req.bearer_auth(&token), Some(token)))
             }
             Self::None { .. } => Ok((req, None)),
@@ -515,11 +527,19 @@ impl ProviderAuth {
     }
 
     async fn refresh_after_unauthorized(&self, rejected_token: Option<&str>) -> Result<bool> {
-        let Self::KimiOAuth { .. } = self else {
+        let Self::ManagedOAuth { provider, .. } = self else {
             return Ok(false);
         };
-        let rejected_token = rejected_token.context("Kimi OAuth request token was not tracked")?;
-        jcode_base::auth::kimi::refresh_after_unauthorized(rejected_token).await?;
+        let rejected_token =
+            rejected_token.context("managed OAuth request token was not tracked")?;
+        match provider {
+            ManagedOAuthProvider::Kimi => {
+                jcode_base::auth::kimi::refresh_after_unauthorized(rejected_token).await?;
+            }
+            ManagedOAuthProvider::GrokDirect => {
+                jcode_base::auth::grok_direct::refresh_after_unauthorized(rejected_token).await?;
+            }
+        }
         Ok(true)
     }
 
@@ -528,13 +548,17 @@ impl ProviderAuth {
             Self::AuthorizationBearer { label, .. } => label,
             Self::HeaderValue { label, .. } => label,
             Self::AzureEntra { label } => label,
-            Self::KimiOAuth { label } => label,
+            Self::ManagedOAuth { label, .. } => label,
             Self::None { label } => label,
         }
     }
 
-    fn is_kimi_oauth(&self) -> bool {
-        matches!(self, Self::KimiOAuth { .. })
+    fn is_managed_oauth(&self, expected: ManagedOAuthProvider) -> bool {
+        matches!(self, Self::ManagedOAuth { provider, .. } if *provider == expected)
+    }
+
+    fn supports_unauthorized_refresh(&self) -> bool {
+        matches!(self, Self::ManagedOAuth { .. })
     }
 }
 
@@ -543,7 +567,32 @@ fn should_refresh_after_unauthorized(
     auth: &ProviderAuth,
     already_retried: bool,
 ) -> bool {
-    status == reqwest::StatusCode::UNAUTHORIZED && auth.is_kimi_oauth() && !already_retried
+    status == reqwest::StatusCode::UNAUTHORIZED
+        && auth.supports_unauthorized_refresh()
+        && !already_retried
+}
+
+fn managed_oauth_auth(provider: ManagedOAuthProvider) -> Result<ProviderAuth> {
+    match provider {
+        ManagedOAuthProvider::Kimi if jcode_base::auth::kimi::has_oauth_tokens() => {
+            Ok(ProviderAuth::ManagedOAuth {
+                provider,
+                label: "Kimi OAuth".to_string(),
+            })
+        }
+        ManagedOAuthProvider::Kimi => anyhow::bail!(
+            "Kimi OAuth is selected but no valid credentials are stored. Run `jcode login --provider kimi` or `/login kimi`."
+        ),
+        ManagedOAuthProvider::GrokDirect if jcode_base::auth::grok_direct::is_configured() => {
+            Ok(ProviderAuth::ManagedOAuth {
+                provider,
+                label: "Grok Direct OAuth".to_string(),
+            })
+        }
+        ManagedOAuthProvider::GrokDirect => anyhow::bail!(
+            "Grok Direct OAuth credentials are not available. Run `jcode login --provider grok-direct` or `/login grok-direct`."
+        ),
+    }
 }
 
 fn add_cache_breakpoint(messages: &mut [Message]) -> bool {
@@ -865,15 +914,29 @@ pub fn maybe_schedule_openai_compatible_profile_catalog_refresh(
         return false;
     };
     let credential_source = ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved);
-    let auth = if resolved.id == jcode_base::provider_catalog::KIMI_PROFILE.id
-        && matches!(
-            jcode_base::auth::kimi::selected_auth_mode(),
-            Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
-        )
-        && jcode_base::auth::kimi::has_oauth_tokens()
+    let auth = if matches!(
+        resolved.auth_strategy.managed_oauth_provider(),
+        Some(ManagedOAuthProvider::Kimi)
+    ) && matches!(
+        jcode_base::auth::kimi::selected_auth_mode(),
+        Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
+    ) {
+        match managed_oauth_auth(ManagedOAuthProvider::Kimi) {
+            Ok(auth) => auth,
+            Err(_) => {
+                finish_profile_catalog_refresh(&resolved.id);
+                return false;
+            }
+        }
+    } else if let Some(ManagedOAuthProvider::GrokDirect) =
+        resolved.auth_strategy.managed_oauth_provider()
     {
-        ProviderAuth::KimiOAuth {
-            label: "Kimi OAuth".to_string(),
+        match managed_oauth_auth(ManagedOAuthProvider::GrokDirect) {
+            Ok(auth) => auth,
+            Err(_) => {
+                finish_profile_catalog_refresh(&resolved.id);
+                return false;
+            }
         }
     } else if let Some(key) = load_api_key(&credential_source) {
         ProviderAuth::AuthorizationBearer {
@@ -1087,12 +1150,42 @@ impl OpenRouterProvider {
         matches!(profile_id, Some(id) if id.eq_ignore_ascii_case("deepseek"))
     }
 
+    fn profile_supports_openai_reasoning_effort(profile_id: Option<&str>) -> bool {
+        matches!(profile_id, Some(id) if id.eq_ignore_ascii_case("zai"))
+    }
+
+    fn profile_supports_grok_reasoning_effort(profile_id: Option<&str>) -> bool {
+        matches!(profile_id, Some(id) if id.eq_ignore_ascii_case("grok-direct"))
+    }
+
     /// DeepSeek-family models accept the DeepSeek-style top-level
     /// `reasoning_effort` request field regardless of which OpenAI-compatible
     /// gateway serves them (issue #352: profiles like opencode-go serve
     /// DeepSeek V4 but were rejected by the profile-id-only check).
     fn model_is_deepseek_family(model: &str) -> bool {
         model.trim().to_ascii_lowercase().contains("deepseek")
+    }
+
+    fn model_is_kimi_k3_family(model: &str) -> bool {
+        let model = model.trim().to_ascii_lowercase();
+        model == "k3"
+            || model.ends_with("/k3")
+            || model.contains("kimi-k3")
+            || model.ends_with("k3-256k")
+    }
+
+    pub(crate) fn supports_kimi_reasoning_effort(&self) -> bool {
+        self.reasoning_effort_support != Some(false)
+            && !Self::profile_supports_unified_reasoning(
+                self.profile_id.as_deref(),
+                self.send_openrouter_headers,
+            )
+            && Self::model_is_kimi_k3_family(&self.model_snapshot())
+    }
+
+    pub(crate) fn supports_grok_reasoning_effort(&self) -> bool {
+        self.reasoning_effort_support != Some(false)
+            && Self::profile_supports_grok_reasoning_effort(self.profile_id.as_deref())
     }
 
     /// Does this runtime accept the DeepSeek-style `reasoning_effort` field?
@@ -1132,6 +1225,9 @@ impl OpenRouterProvider {
         if self.reasoning_effort_support == Some(false) {
             return false;
         }
+        if Self::profile_supports_openai_reasoning_effort(self.profile_id.as_deref()) {
+            return true;
+        }
         !Self::profile_supports_unified_reasoning(
             self.profile_id.as_deref(),
             self.send_openrouter_headers,
@@ -1146,7 +1242,9 @@ impl OpenRouterProvider {
     }
 
     pub(crate) fn supports_any_reasoning_effort(&self) -> bool {
-        self.supports_deepseek_reasoning_effort()
+        self.supports_grok_reasoning_effort()
+            || self.supports_kimi_reasoning_effort()
+            || self.supports_deepseek_reasoning_effort()
             || self.supports_openai_reasoning_effort()
             || Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
@@ -1154,11 +1252,18 @@ impl OpenRouterProvider {
             )
     }
 
-    pub(crate) fn normalize_reasoning_effort_for_self(&self, effort: &str) -> Option<String> {
-        if self.supports_deepseek_reasoning_effort() {
-            Self::normalize_reasoning_effort(effort)
+    pub(crate) fn normalize_reasoning_effort_for_self(
+        &self,
+        effort: &str,
+    ) -> Result<Option<String>> {
+        if self.supports_grok_reasoning_effort() {
+            Self::normalize_grok_reasoning_effort(effort).map(Some)
+        } else if self.supports_kimi_reasoning_effort() {
+            Ok(Self::normalize_kimi_reasoning_effort(effort))
+        } else if self.supports_deepseek_reasoning_effort() {
+            Ok(Self::normalize_reasoning_effort(effort))
         } else {
-            Self::normalize_unified_reasoning_effort(effort)
+            Ok(Self::normalize_unified_reasoning_effort(effort))
         }
     }
 
@@ -1168,21 +1273,33 @@ impl OpenRouterProvider {
     fn initial_reasoning_effort(
         reasoning_effort_support: Option<bool>,
         profile_id: Option<&str>,
-    ) -> Option<String> {
-        let supported =
-            reasoning_effort_support.unwrap_or(Self::profile_supports_reasoning_effort(profile_id));
-        if !supported {
-            return None;
-        }
-        jcode_base::config::config()
+    ) -> Result<Option<String>> {
+        let Some(configured) = jcode_base::config::config()
             .provider
             .openai_reasoning_effort
             .as_deref()
-            .and_then(Self::normalize_reasoning_effort)
+        else {
+            return Ok(None);
+        };
+        let normalized = match reasoning_effort_support {
+            Some(true) => Self::normalize_reasoning_effort(configured),
+            Some(false) => None,
+            None if Self::profile_supports_grok_reasoning_effort(profile_id) => {
+                Some(Self::normalize_grok_reasoning_effort(configured)?)
+            }
+            None if Self::profile_supports_reasoning_effort(profile_id) => {
+                Self::normalize_reasoning_effort(configured)
+            }
+            None if Self::profile_supports_openai_reasoning_effort(profile_id) => {
+                Self::normalize_unified_reasoning_effort(configured)
+            }
+            None => None,
+        };
+        Ok(normalized)
     }
 
     fn profile_rejects_image_input(profile_id: Option<&str>) -> bool {
-        matches!(profile_id, Some(id) if id.eq_ignore_ascii_case("deepseek"))
+        matches!(profile_id, Some(id) if id.eq_ignore_ascii_case("deepseek") || id.eq_ignore_ascii_case("zai"))
     }
 
     fn profile_supports_unified_reasoning(
@@ -1210,6 +1327,70 @@ impl OpenRouterProvider {
                 );
                 Some("max".to_string())
             }
+        }
+    }
+
+    fn normalize_deepseek_request_effort(effort: &str) -> &str {
+        match effort {
+            "none" => "none",
+            "low" => "low",
+            "medium" | "high" => "high",
+            "max" | "swarm" | "swarm-deep" => "max",
+            _ => "max",
+        }
+    }
+
+    fn normalize_zai_request_effort(effort: &str) -> &str {
+        match effort {
+            "none" => "none",
+            "low" => "low",
+            "medium" | "high" => "high",
+            "xhigh" | "max" | "swarm" | "swarm-deep" => "max",
+            _ => "max",
+        }
+    }
+
+    fn normalize_grok_reasoning_effort(raw: &str) -> Result<String> {
+        let value = raw.trim().to_ascii_lowercase();
+        match value.as_str() {
+            "low" | "medium" | "high" | "xhigh" => Ok(value),
+            "max" | "swarm" | "swarm-deep" => Ok("xhigh".to_string()),
+            "none" => anyhow::bail!(
+                "Grok Direct reasoning cannot be disabled; use low, medium, high, or xhigh"
+            ),
+            _ => anyhow::bail!(
+                "Unsupported Grok Direct reasoning effort '{}'; expected low, medium, high, or xhigh",
+                raw
+            ),
+        }
+    }
+
+    fn normalize_kimi_reasoning_effort(raw: &str) -> Option<String> {
+        let value = raw.trim().to_ascii_lowercase();
+        match value.as_str() {
+            "" | "none" => None,
+            "low" => Some("low".to_string()),
+            "medium" | "high" => Some("high".to_string()),
+            "xhigh" | "max" => Some("max".to_string()),
+            "swarm" | "swarm-deep" => Some(value),
+            other => {
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openrouter.kimi_reasoning_effort",
+                    other,
+                    "max",
+                    "low|medium|high|xhigh|max|swarm|swarm-deep",
+                );
+                Some("max".to_string())
+            }
+        }
+    }
+
+    fn normalize_kimi_request_effort(effort: &str) -> &str {
+        match effort {
+            "low" => "low",
+            "medium" | "high" => "high",
+            "xhigh" | "max" | "swarm" | "swarm-deep" => "max",
+            _ => "max",
         }
     }
 
@@ -1467,7 +1648,7 @@ impl OpenRouterProvider {
             reasoning_effort: Arc::new(RwLock::new(Self::initial_reasoning_effort(
                 profile.supports_reasoning_effort,
                 Some(profile_name),
-            ))),
+            )?)),
             api_base,
             auth,
             supports_provider_features: matches!(
@@ -1620,6 +1801,18 @@ impl OpenRouterProvider {
         api_base.to_ascii_lowercase().contains("mistral.ai")
     }
 
+    fn allows_reasoning_context_replay(&self, model: &str, thinking_enabled: Option<bool>) -> bool {
+        let direct_deepseek_model =
+            !self.supports_provider_features && Self::model_is_deepseek_family(model);
+        let route_supports_replay = self.supports_provider_features
+            || self.is_kimi_coding_endpoint(model)
+            || direct_deepseek_model;
+
+        route_supports_replay
+            && thinking_enabled != Some(false)
+            && !Self::strict_openai_schema_endpoint(self.profile_id.as_deref(), &self.api_base)
+    }
+
     pub fn new() -> Result<Self> {
         let catalog_profile =
             activated_openai_compatible_profile().or_else(autodetected_openai_compatible_profile);
@@ -1694,7 +1887,7 @@ impl OpenRouterProvider {
             reasoning_effort: Arc::new(RwLock::new(Self::initial_reasoning_effort(
                 None,
                 profile_id.as_deref(),
-            ))),
+            )?)),
             api_base,
             auth,
             supports_provider_features,
@@ -1769,14 +1962,15 @@ impl OpenRouterProvider {
             )
         })?;
         let credential_source = ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved);
-        let auth = if resolved.id == jcode_base::provider_catalog::KIMI_PROFILE.id {
+        let auth = if matches!(
+            resolved.auth_strategy.managed_oauth_provider(),
+            Some(ManagedOAuthProvider::Kimi)
+        ) {
             match jcode_base::auth::kimi::selected_auth_mode() {
                 Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
                     if jcode_base::auth::kimi::has_oauth_tokens() =>
                 {
-                    ProviderAuth::KimiOAuth {
-                        label: "Kimi OAuth".to_string(),
-                    }
+                    managed_oauth_auth(ManagedOAuthProvider::Kimi)?
                 }
                 Some(jcode_base::auth::kimi::KimiAuthMode::ApiKey) => {
                     let token = load_api_key(&credential_source).ok_or_else(|| {
@@ -1794,6 +1988,10 @@ impl OpenRouterProvider {
                     "Kimi credentials are not available. Run `jcode login --provider kimi` or `/login kimi`."
                 ),
             }
+        } else if let Some(ManagedOAuthProvider::GrokDirect) =
+            resolved.auth_strategy.managed_oauth_provider()
+        {
+            managed_oauth_auth(ManagedOAuthProvider::GrokDirect)?
         } else {
             match load_api_key(&credential_source) {
                 Some(token) => ProviderAuth::AuthorizationBearer {
@@ -1831,7 +2029,7 @@ impl OpenRouterProvider {
             reasoning_effort: Arc::new(RwLock::new(Self::initial_reasoning_effort(
                 None,
                 Some(&resolved.id),
-            ))),
+            )?)),
             api_base,
             auth,
             supports_provider_features: false,
@@ -2497,16 +2695,19 @@ impl OpenRouterProvider {
         ) {
             return jcode_base::auth::azure::has_configuration();
         }
-        if configured_allow_no_auth() {
-            return true;
-        }
         let profile =
             activated_openai_compatible_profile().or_else(autodetected_openai_compatible_profile);
-        if profile
+        if let Some(provider) = profile
             .as_ref()
-            .is_some_and(|profile| profile.id == jcode_base::provider_catalog::KIMI_PROFILE.id)
+            .and_then(|profile| profile.auth_strategy.managed_oauth_provider())
         {
-            return jcode_base::auth::kimi::is_configured();
+            return match provider {
+                ManagedOAuthProvider::Kimi => jcode_base::auth::kimi::is_configured(),
+                ManagedOAuthProvider::GrokDirect => jcode_base::auth::grok_direct::is_configured(),
+            };
+        }
+        if configured_allow_no_auth() {
+            return true;
         }
         let source = profile
             .as_ref()
@@ -2538,16 +2739,17 @@ impl OpenRouterProvider {
             };
         }
 
-        if profile
-            .is_some_and(|profile| profile.id == jcode_base::provider_catalog::KIMI_PROFILE.id)
-        {
+        if profile.is_some_and(|profile| {
+            matches!(
+                profile.auth_strategy.managed_oauth_provider(),
+                Some(ManagedOAuthProvider::Kimi)
+            )
+        }) {
             match jcode_base::auth::kimi::selected_auth_mode() {
                 Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
                     if jcode_base::auth::kimi::has_oauth_tokens() =>
                 {
-                    return Ok(ProviderAuth::KimiOAuth {
-                        label: "Kimi OAuth".to_string(),
-                    });
+                    return managed_oauth_auth(ManagedOAuthProvider::Kimi);
                 }
                 Some(jcode_base::auth::kimi::KimiAuthMode::OAuth) => {
                     anyhow::bail!(
@@ -2556,6 +2758,15 @@ impl OpenRouterProvider {
                 }
                 Some(jcode_base::auth::kimi::KimiAuthMode::ApiKey) | None => {}
             }
+        }
+
+        if profile.is_some_and(|profile| {
+            matches!(
+                profile.auth_strategy.managed_oauth_provider(),
+                Some(ManagedOAuthProvider::GrokDirect)
+            )
+        }) {
+            return managed_oauth_auth(ManagedOAuthProvider::GrokDirect);
         }
 
         if configured_allow_no_auth() {
@@ -2819,11 +3030,20 @@ impl OpenRouterProvider {
     }
 
     async fn model_pricing(&self, model_id: &str) -> Option<ModelPricing> {
-        let cache = self.models_cache.read().await;
-        if cache.fetched
-            && let Some(model) = cache.models.iter().find(|m| m.id == model_id)
+        // Scope the read guard so it drops before the disk/fetch fallbacks.
+        // Holding it across `fetch_models().await` self-deadlocks: tokio's
+        // RwLock is write-preferring, so when a background catalog refresh
+        // queues a write while this task still holds the read, the fresh read
+        // inside `fetch_models` parks behind the writer, and the writer parks
+        // behind this guard. The agent turn then hangs forever before the
+        // stream ever opens.
         {
-            return Some(model.pricing.clone());
+            let cache = self.models_cache.read().await;
+            if cache.fetched
+                && let Some(model) = cache.models.iter().find(|m| m.id == model_id)
+            {
+                return Some(model.pricing.clone());
+            }
         }
 
         if let Some(cache_entry) = self.load_usable_model_disk_cache_entry() {
@@ -2833,10 +3053,15 @@ impl OpenRouterProvider {
                 .find(|m| m.id == model_id)
                 .map(|m| m.pricing.clone());
             if pricing.is_some() {
-                if let Ok(mut cache) = self.models_cache.try_write() {
-                    cache.models = models;
-                    cache.fetched = true;
-                }
+                // The read guard above is dropped, so this write can actually
+                // land. The previous `try_write` here could never succeed
+                // while the guard was alive, which also meant the in-memory
+                // cache stayed cold and every `complete()` re-read the disk
+                // cache.
+                let mut cache = self.models_cache.write().await;
+                cache.models = models;
+                cache.fetched = true;
+                cache.cached_at = current_unix_secs();
                 return pricing;
             }
         }

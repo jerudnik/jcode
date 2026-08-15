@@ -64,6 +64,15 @@ use std::time::Duration;
 /// Stream of events from a provider.
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
 
+/// Provider behavior that downstream consumers must query explicitly instead
+/// of inferring from a runtime implementation name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProviderCapabilities {
+    /// Stored reasoning blocks can be sent back through this provider in the
+    /// shape required to continue a tool-call conversation.
+    pub reasoning_context_replay: bool,
+}
+
 /// Provider trait for LLM backends.
 #[async_trait]
 pub trait Provider: Send + Sync {
@@ -99,6 +108,22 @@ pub trait Provider: Send + Sync {
     /// underlying runtime is a specific OpenAI-compatible profile. Use
     /// [`Provider::display_name`] for anything shown to the user.
     fn name(&self) -> &str;
+
+    /// Stable identity of the provider or direct profile currently serving
+    /// requests through this runtime.
+    ///
+    /// Most providers execute through a one-to-one runtime and inherit the
+    /// normalized runtime name. Multiplexing runtimes override this so a direct
+    /// profile such as `kimi` or `deepseek` does not collapse into the runtime
+    /// implementation id (`openrouter`).
+    fn provider_identity(&self) -> String {
+        self.name().trim().to_ascii_lowercase()
+    }
+
+    /// Capabilities of the active provider/profile selection.
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::default()
+    }
 
     /// Human-facing provider label for the *current runtime selection*.
     ///
@@ -413,6 +438,16 @@ pub trait Provider: Send + Sync {
 
     /// Create a new provider instance with independent mutable state.
     fn fork(&self) -> Arc<dyn Provider>;
+
+    /// Bind the session's working directory for workspace-scoped runtimes.
+    ///
+    /// Network API providers ignore this; the default is a no-op. Subprocess
+    /// runtimes that scope file access to a workspace (notably ACP vendor
+    /// CLIs like Reasonix, Kimi Code, and Grok Build) override it so the
+    /// workspace root sent to the child is the *session's* working directory
+    /// rather than the daemon process cwd. Called when a session binds its
+    /// provider and whenever the session working directory changes.
+    fn set_session_working_dir(&self, _dir: Option<&std::path::Path>) {}
 
     /// Fork this provider and pin the fork to `model_spec` before returning it.
     ///

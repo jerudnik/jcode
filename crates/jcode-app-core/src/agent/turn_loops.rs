@@ -113,19 +113,26 @@ impl Agent {
                 },
                 provider_correlation.clone(),
             );
-            let mut stream = match self
-                .provider
-                .complete_split(
+            // Bound the provider setup window (failover selection, lock
+            // acquisition, auth refresh, catalog/pricing lookups, request
+            // build). Connect, headers, and streaming run in the spawned
+            // stream task under their own timeouts; a stall here previously
+            // hung the turn forever in "working".
+            let pre_stream_timeout = jcode_base::provider::pre_stream_open_timeout();
+            let mut stream = match tokio::time::timeout(
+                pre_stream_timeout,
+                self.provider.complete_split(
                     send_messages,
                     &tools,
                     &split_prompt.static_part,
                     &split_prompt.dynamic_part,
                     self.provider_session_id.as_deref(),
-                )
-                .await
+                ),
+            )
+            .await
             {
-                Ok(stream) => stream,
-                Err(e) => {
+                Ok(Ok(stream)) => stream,
+                Ok(Err(e)) => {
                     if self.try_auto_compact_after_context_limit(&e.to_string()) {
                         self.append_provider_error_response(
                             self.provider.name(),
@@ -155,6 +162,24 @@ impl Agent {
                         self.provider.model(),
                         api_start,
                         e,
+                        EvidenceErrorClass::ProviderOpen,
+                        provider_correlation.clone(),
+                    ));
+                }
+                Err(_elapsed) => {
+                    let timeout_secs = pre_stream_timeout.as_secs();
+                    logging::error(&format!(
+                        "Pre-stream watchdog: provider did not open a stream within {}s; failing the turn. Last PRESTREAM waypoint in the log localizes the stall.",
+                        timeout_secs
+                    ));
+                    return Err(self.append_and_classify_provider_error(
+                        self.provider.name(),
+                        self.provider.model(),
+                        api_start,
+                        anyhow::anyhow!(
+                            "Provider did not open a response stream within {}s (pre-stream watchdog). The turn was aborted instead of hanging. Check the log for the last PRESTREAM waypoint to localize the stall.",
+                            timeout_secs
+                        ),
                         EvidenceErrorClass::ProviderOpen,
                         provider_correlation.clone(),
                     ));
@@ -194,9 +219,9 @@ impl Agent {
             let mut saw_message_end = false;
             let mut stop_reason: Option<String> = None;
             let mut _thinking_start: Option<Instant> = None;
-            let provider_name = self.provider.name().to_string();
+            let reasoning_provider_identity = self.provider.provider_identity();
             let store_reasoning_content =
-                crate::provider::stores_reasoning_content_for_context(&provider_name);
+                crate::provider::stores_reasoning_content_for_context(self.provider.as_ref());
             let mut reasoning_content = String::new();
             let mut reasoning_signature = String::new();
             let mut openai_reasoning_items: Vec<ContentBlock> = Vec::new();
@@ -809,7 +834,7 @@ impl Agent {
             }
             crate::message::push_reasoning_blocks(
                 &mut content_blocks,
-                &provider_name,
+                &reasoning_provider_identity,
                 &reasoning_content,
                 Some(&reasoning_signature),
                 store_reasoning_content,

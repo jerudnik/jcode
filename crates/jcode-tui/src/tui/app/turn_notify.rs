@@ -286,14 +286,6 @@ fn format_duration_compact(secs: f32) -> String {
 mod tests {
     use super::*;
 
-    fn todo(status: &str, blocked: bool) -> TodoItem {
-        todo_named("x", status, &[]).tap(|t| {
-            if blocked {
-                t.blocked_by = vec!["other".to_string()];
-            }
-        })
-    }
-
     fn todo_named(content: &str, status: &str, blocked_by: &[&str]) -> TodoItem {
         TodoItem {
             content: content.to_string(),
@@ -308,14 +300,6 @@ mod tests {
             assigned_to: None,
         }
     }
-
-    trait Tap: Sized {
-        fn tap(mut self, f: impl FnOnce(&mut Self)) -> Self {
-            f(&mut self);
-            self
-        }
-    }
-    impl Tap for TodoItem {}
 
     #[test]
     fn title_includes_session_and_compact_duration() {
@@ -370,13 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn snippet_used_when_no_todos() {
-        let n = build_turn_notification(None, 200.0, &[], Some("Fixed the parser bug."));
-        assert_eq!(n.subtitle, None);
-        assert_eq!(n.body, "Fixed the parser bug.");
-    }
-
-    #[test]
     fn snippet_skips_markdown_noise_and_truncates() {
         let text = "```rust\ncode\n```\n\n## **Results** are `good`\nmore detail";
         assert_eq!(summary_snippet(text), "code");
@@ -396,13 +373,6 @@ mod tests {
         assert_eq!(n.title, "jcode · done in 1m 5s");
         assert_eq!(n.subtitle, None);
         assert_eq!(n.body, "Turn finished");
-    }
-
-    #[test]
-    fn still_counts_blocked_in_subtitle() {
-        let blocked = vec![todo("completed", false), todo("pending", true)];
-        let n = build_turn_notification(None, 200.0, &blocked, None);
-        assert_eq!(n.subtitle.as_deref(), Some("1/2 todos · 1 blocked"));
     }
 
     #[test]

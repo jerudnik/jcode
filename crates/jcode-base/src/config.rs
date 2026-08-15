@@ -166,6 +166,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_SMTP_PASSWORD",
     "JCODE_SPAWN_HOOK",
     "JCODE_STREAM_IDLE_TIMEOUT_SECS",
+    "JCODE_PRE_STREAM_OPEN_TIMEOUT_SECS",
     "JCODE_SWARM_ENABLED",
     "JCODE_SWARM_MODEL",
     "JCODE_SWARM_MAX_CONCURRENT_AGENTS",
@@ -635,6 +636,12 @@ pub struct AcpConfig {
     pub profile: String,
     /// Tool profile to request when `jcode acp` starts a daemon itself.
     pub tool_profile: String,
+    /// Explicit Grok Build CLI path for the subscription ACP runtime.
+    pub grok_cli_path: Option<std::path::PathBuf>,
+    /// Explicit Kimi Code CLI path for the official ACP runtime.
+    pub kimi_cli_path: Option<std::path::PathBuf>,
+    /// Explicit Reasonix CLI path for the ACP runtime.
+    pub reasonix_cli_path: Option<std::path::PathBuf>,
 }
 
 impl Default for AcpConfig {
@@ -642,6 +649,9 @@ impl Default for AcpConfig {
         Self {
             profile: "standard".to_string(),
             tool_profile: "acp".to_string(),
+            grok_cli_path: None,
+            kimi_cli_path: None,
+            reasonix_cli_path: None,
         }
     }
 }

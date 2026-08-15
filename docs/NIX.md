@@ -55,6 +55,11 @@ Install into a Nix profile:
 nix profile install github:jerudnik/jcode/main
 ```
 
+The `jcode` package closure includes the official Reasonix `1.25.0` ACP runtime,
+pinned through an exact `llm-agents.nix` revision. Nix users do not install
+Reasonix separately; the wrapped `jcode` executable adds that runtime to its own
+`PATH` without changing the caller's shell environment.
+
 ## Updating
 
 Update through the Nix mechanism that owns the installation:

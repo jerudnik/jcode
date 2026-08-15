@@ -64,6 +64,16 @@ fn auth_status_default_all_not_configured() {
 }
 
 #[test]
+fn reasonix_only_auth_status_is_available() {
+    let status = AuthStatus {
+        reasonix: AuthState::Available,
+        ..AuthStatus::default()
+    };
+
+    assert!(status.has_any_available());
+}
+
+#[test]
 fn auth_cache_home_key_tracks_standard_fallback_inputs() {
     let _lock = crate::storage::lock_test_env();
     let saved = ["JCODE_HOME", "HOME", "XDG_CONFIG_HOME"].map(|key| (key, std::env::var_os(key)));

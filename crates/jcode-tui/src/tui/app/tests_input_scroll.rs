@@ -156,33 +156,27 @@ fn test_disconnected_key_handler_runs_model_picker_locally() {
 
 #[test]
 fn test_disconnected_key_handler_runs_reload_locally() {
-    use std::time::SystemTime;
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        use std::time::SystemTime;
 
-    let mut app = create_test_app();
-    let exe = crate::build::launcher_binary_path().expect("launcher binary path");
-    let mut created = false;
-    if !exe.exists() {
+        let mut app = create_test_app();
+        let exe = crate::build::launcher_binary_path().expect("launcher binary path");
         if let Some(parent) = exe.parent() {
             std::fs::create_dir_all(parent).expect("create launcher dir");
         }
         std::fs::write(&exe, "test").expect("write launcher binary fixture");
-        created = true;
-    }
 
-    app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
-    app.input = "/reload".to_string();
-    app.cursor_pos = app.input.len();
+        app.client_binary_mtime = Some(SystemTime::UNIX_EPOCH);
+        app.input = "/reload".to_string();
+        app.cursor_pos = app.input.len();
 
-    remote::handle_disconnected_key(&mut app, KeyCode::Enter, KeyModifiers::empty()).unwrap();
+        remote::handle_disconnected_key(&mut app, KeyCode::Enter, KeyModifiers::empty()).unwrap();
 
-    assert!(app.input.is_empty());
-    assert!(app.queued_messages().is_empty());
-    assert!(app.reload_requested.is_some());
-    assert!(app.should_quit);
-
-    if created {
-        let _ = std::fs::remove_file(&exe);
-    }
+        assert!(app.input.is_empty());
+        assert!(app.queued_messages().is_empty());
+        assert!(app.reload_requested.is_some());
+        assert!(app.should_quit);
+    });
 }
 
 #[test]
@@ -235,30 +229,13 @@ fn test_disconnected_key_handler_ctrl_c_arms_quit() {
     );
 }
 
-#[test]
-fn test_remote_scroll_cmd_j_k_fallback() {
-    let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    // Seed max scroll estimates before key handling.
-    render_and_snap(&app, &mut terminal);
-
-    let (up_code, up_mods) = scroll_up_fallback_key(&app);
-    let (down_code, down_mods) = scroll_down_fallback_key(&app);
-
-    rt.block_on(app.handle_remote_key(up_code, up_mods, &mut remote))
-        .unwrap();
-    assert!(app.auto_scroll_paused);
-    assert!(app.scroll_offset > 0);
-    let after_up = app.scroll_offset;
-
-    rt.block_on(app.handle_remote_key(down_code, down_mods, &mut remote))
-        .unwrap();
-    assert!(app.scroll_offset <= after_up);
-}
+// NOTE: test_remote_scroll_cmd_j_k_fallback was removed. The scroll fallback
+// bindings ship unbound on every platform (see PlatformDefault::unbound in
+// jcode-config-types/src/keybindings.rs), so scroll_up_fallback_key falls back to
+// the primary binding and the test only re-covered the primary-key path.
+// Covering the fallback path needs a test that configures a non-empty
+// scroll_up_fallback and asserts the distinct key scrolls; that is new coverage,
+// not a repair of this one.
 
 #[test]
 fn test_remote_shift_enter_inserts_newline() {
@@ -309,41 +286,29 @@ fn test_remote_ctrl_h_does_not_insert_text() {
 }
 
 #[test]
-fn test_remote_ctrl_enter_queues_while_processing() {
+fn test_remote_modifier_enter_queues_while_processing() {
+    // Ctrl+Enter and Cmd+Enter are the same binding on the remote path; only
+    // the modifier differs, so both are cases of one test.
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
-    let mut app = create_test_app();
-    app.is_processing = true;
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    rt.block_on(app.handle_remote_key(KeyCode::Char('h'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Char('i'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::CONTROL, &mut remote))
-        .unwrap();
+    for (case, modifier) in [
+        ("ctrl+enter", KeyModifiers::CONTROL),
+        ("cmd+enter", KeyModifiers::SUPER),
+    ] {
+        let mut app = create_test_app();
+        app.is_processing = true;
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    assert!(app.input().is_empty());
-    assert_eq!(app.queued_messages().len(), 1);
-    assert_eq!(app.queued_messages()[0], "hi");
-}
+        rt.block_on(app.handle_remote_key(KeyCode::Char('h'), KeyModifiers::empty(), &mut remote))
+            .unwrap();
+        rt.block_on(app.handle_remote_key(KeyCode::Char('i'), KeyModifiers::empty(), &mut remote))
+            .unwrap();
+        rt.block_on(app.handle_remote_key(KeyCode::Enter, modifier, &mut remote))
+            .unwrap();
 
-#[test]
-fn test_remote_cmd_enter_queues_while_processing() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut app = create_test_app();
-    app.is_processing = true;
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-
-    rt.block_on(app.handle_remote_key(KeyCode::Char('h'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Char('i'), KeyModifiers::empty(), &mut remote))
-        .unwrap();
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::SUPER, &mut remote))
-        .unwrap();
-
-    assert!(app.input().is_empty());
-    assert_eq!(app.queued_messages().len(), 1);
-    assert_eq!(app.queued_messages()[0], "hi");
+        assert!(app.input().is_empty(), "{case}: input should be consumed");
+        assert_eq!(app.queued_messages().len(), 1, "{case}: one queued message");
+        assert_eq!(app.queued_messages()[0], "hi", "{case}: queued text");
+    }
 }

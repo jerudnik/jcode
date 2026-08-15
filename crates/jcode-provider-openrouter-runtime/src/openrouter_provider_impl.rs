@@ -41,7 +41,9 @@ impl Provider for OpenRouterProvider {
         system: &str,
         _resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
+        jcode_base::logging::info("PRESTREAM: profile complete() enter");
         let model = self.model.read().await.clone();
+        jcode_base::logging::info("PRESTREAM: profile complete() model read");
         let reasoning_effort = self.reasoning_effort();
         let thinking_override = Self::thinking_override();
         // Moonshot's dedicated Kimi coding endpoint enables thinking server-side
@@ -60,8 +62,18 @@ impl Provider for OpenRouterProvider {
                 None
             }
         });
-        let allow_reasoning = (self.supports_provider_features || kimi_coding_endpoint)
-            && thinking_enabled != Some(false);
+        // Direct DeepSeek-family routes must replay the exact reasoning returned
+        // alongside assistant tool calls. Keep this route check separate from
+        // `include_reasoning_content`: unlike Kimi, DeepSeek must not receive a
+        // synthesized blank field when no reasoning was returned.
+        let direct_deepseek_model =
+            !self.supports_provider_features && Self::model_is_deepseek_family(&model);
+        let direct_zai_profile = !self.supports_provider_features
+            && self
+                .profile_id
+                .as_deref()
+                .is_some_and(|id| id.eq_ignore_ascii_case("zai"));
+        let allow_reasoning = self.allows_reasoning_context_replay(&model, thinking_enabled);
         let include_reasoning_content = thinking_enabled == Some(true)
             || (allow_reasoning && Self::is_kimi_model(&model))
             || kimi_coding_endpoint;
@@ -73,12 +85,12 @@ impl Provider for OpenRouterProvider {
         // regardless of any thinking override (issue #261).
         let strict_openai_schema =
             Self::strict_openai_schema_endpoint(self.profile_id.as_deref(), &self.api_base);
-        let allow_reasoning = allow_reasoning && !strict_openai_schema;
         let include_reasoning_content = include_reasoning_content && !strict_openai_schema;
         let allow_image_input = self.supports_image_input();
 
         let mut effective_messages: Vec<Message> = messages.to_vec();
         let cache_supported = self.model_supports_cache(&model).await;
+        jcode_base::logging::info("PRESTREAM: profile complete() cache check done");
         let cache_control_added = if cache_supported {
             add_cache_breakpoint(&mut effective_messages)
         } else {
@@ -135,13 +147,21 @@ impl Provider for OpenRouterProvider {
 
         let mut sent_reasoning_config = false;
         if let Some(effort) = reasoning_effort.as_deref() {
-            if self.supports_deepseek_reasoning_effort() {
-                // The `swarm` sentinel maps to the strongest real effort.
-                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
-                    "max"
-                } else {
-                    effort
-                };
+            if self.supports_grok_reasoning_effort() {
+                request["reasoning_effort"] = serde_json::json!(effort);
+                sent_reasoning_config = true;
+            } else if self.supports_kimi_reasoning_effort() {
+                request["reasoning_effort"] =
+                    serde_json::json!(Self::normalize_kimi_request_effort(effort));
+                sent_reasoning_config = true;
+            } else if self.supports_deepseek_reasoning_effort() {
+                let effort = Self::normalize_deepseek_request_effort(effort);
+                if direct_deepseek_model {
+                    request["thinking"] = serde_json::json!({
+                        "type": if effort == "none" { "disabled" } else { "enabled" }
+                    });
+                    sent_reasoning_config = true;
+                }
                 if effort != "none" {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
@@ -150,11 +170,19 @@ impl Provider for OpenRouterProvider {
                 // GPT-family models on direct compat gateways (e.g. OpenCode
                 // Zen serving gpt-5.3-codex-spark) take the standard OpenAI
                 // `reasoning_effort` field with OpenAI's effort vocabulary.
-                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
+                let effort = if direct_zai_profile {
+                    Self::normalize_zai_request_effort(effort)
+                } else if jcode_base::prompt::is_swarm_effort(effort) {
                     "xhigh"
                 } else {
                     effort
                 };
+                if direct_zai_profile {
+                    request["thinking"] = serde_json::json!({
+                        "type": if effort == "none" { "disabled" } else { "enabled" }
+                    });
+                    sent_reasoning_config = true;
+                }
                 if effort != "none" {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
@@ -329,6 +357,28 @@ impl Provider for OpenRouterProvider {
         "openrouter"
     }
 
+    fn provider_identity(&self) -> String {
+        self.profile_id
+            .clone()
+            .unwrap_or_else(|| "openrouter".to_string())
+    }
+
+    fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        let model = self.model();
+        let thinking_enabled = Self::thinking_override().or_else(|| {
+            if Self::is_kimi_model(&model) {
+                Some(true)
+            } else {
+                None
+            }
+        });
+
+        jcode_provider_core::ProviderCapabilities {
+            reasoning_context_replay: self
+                .allows_reasoning_context_replay(&model, thinking_enabled),
+        }
+    }
+
     fn display_name(&self) -> String {
         self.runtime_display_name()
     }
@@ -442,7 +492,7 @@ impl Provider for OpenRouterProvider {
                 "Reasoning effort is not supported by the current model/profile. It works for OpenRouter, DeepSeek-family and GPT-family reasoning models, and profiles with supports_reasoning_effort = true."
             );
         }
-        let normalized = self.normalize_reasoning_effort_for_self(effort);
+        let normalized = self.normalize_reasoning_effort_for_self(effort)?;
         let mut current = self.reasoning_effort.try_write().map_err(|_| {
             anyhow::anyhow!("Cannot change reasoning effort while a request is in progress")
         })?;
@@ -451,7 +501,11 @@ impl Provider for OpenRouterProvider {
     }
 
     fn available_efforts(&self) -> Vec<&'static str> {
-        if self.supports_deepseek_reasoning_effort() {
+        if self.supports_grok_reasoning_effort() {
+            vec!["low", "medium", "high", "xhigh"]
+        } else if self.supports_kimi_reasoning_effort() {
+            vec!["low", "high", "max", "swarm", "swarm-deep"]
+        } else if self.supports_deepseek_reasoning_effort() {
             vec![
                 "none",
                 "low",

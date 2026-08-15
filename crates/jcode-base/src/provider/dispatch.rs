@@ -186,6 +186,7 @@ impl MultiProvider {
         resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
         self.reconcile_auth_if_provider_missing(provider);
+        crate::logging::info(&format!("PRESTREAM: dispatch to {:?}", provider));
         match provider {
             ActiveProvider::Claude => {
                 if let Some(anthropic) = self.anthropic_provider() {

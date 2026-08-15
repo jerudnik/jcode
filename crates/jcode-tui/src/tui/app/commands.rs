@@ -94,6 +94,7 @@ pub(super) fn clear_queued_poke_messages(app: &mut App) -> usize {
 pub(super) fn disable_auto_poke(app: &mut App) -> usize {
     let cleared = clear_queued_poke_messages(app);
     app.auto_poke_incomplete_todos = false;
+    app.last_auto_poke_fingerprint = None;
     cleared
 }
 
@@ -311,6 +312,7 @@ pub(super) fn activate_auto_poke(app: &mut App) -> PokeActivation {
     let incomplete = incomplete_poke_todos(app);
     app.auto_poke_incomplete_todos = true;
     app.auto_poke_followups_sent = 0;
+    app.last_auto_poke_fingerprint = None;
     app.set_status_notice("Poke: ON");
 
     if incomplete.is_empty() {

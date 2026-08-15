@@ -118,6 +118,15 @@ impl App {
                 session_id_clone.as_deref()
             ));
 
+            // Bound the provider setup window (failover selection, lock
+            // acquisition, auth refresh, catalog/pricing lookups, request
+            // build). Connect, headers, and streaming run in the spawned
+            // stream task under their own timeouts; a stall here previously
+            // hung the turn forever with the spinner running.
+            let pre_stream_deadline =
+                tokio::time::sleep(crate::provider::pre_stream_open_timeout());
+            tokio::pin!(pre_stream_deadline);
+
             let mut stream = loop {
                 tokio::select! {
                     biased;
@@ -192,6 +201,20 @@ impl App {
                             super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
                         }
                     }
+                    _ = &mut pre_stream_deadline => {
+                        let timeout = crate::provider::pre_stream_open_timeout().as_secs();
+                        crate::logging::error(&format!(
+                            "Pre-stream watchdog: provider did not open a stream within {}s; failing the turn. Last PRESTREAM waypoint in the log localizes the stall.",
+                            timeout
+                        ));
+                        self.push_display_message(DisplayMessage::system(format!(
+                            "Provider did not open a response stream within {timeout}s (pre-stream watchdog). The turn was aborted instead of hanging. Check the log for the last PRESTREAM waypoint."
+                        )));
+                        return Err(anyhow::anyhow!(
+                            "Provider did not open a response stream within {}s (pre-stream watchdog)",
+                            timeout
+                        ));
+                    }
                     // Poll API call
                     result = &mut api_future => {
                         match result {
@@ -238,9 +261,9 @@ impl App {
             // Track tool results from provider (already executed by Claude Code CLI)
             let mut sdk_tool_results: std::collections::HashMap<String, (String, bool)> =
                 std::collections::HashMap::new();
-            let provider_name = self.provider.name().to_string();
+            let reasoning_provider_identity = self.provider.provider_identity();
             let store_reasoning_content =
-                crate::provider::stores_reasoning_content_for_context(&provider_name);
+                crate::provider::stores_reasoning_content_for_context(self.provider.as_ref());
             let mut reasoning_content = String::new();
             let mut reasoning_signature = String::new();
             let mut openai_reasoning_items: Vec<ContentBlock> = Vec::new();
@@ -312,7 +335,7 @@ impl App {
                                             }
                                             crate::message::push_reasoning_blocks(
                                                 &mut content_blocks,
-                                                &provider_name,
+                                                &reasoning_provider_identity,
                                                 &reasoning_content,
                                                 Some(&reasoning_signature),
                                                 store_reasoning_content,
@@ -380,7 +403,7 @@ impl App {
                                             }
                                             crate::message::push_reasoning_blocks(
                                                 &mut content_blocks,
-                                                &provider_name,
+                                                &reasoning_provider_identity,
                                                 &reasoning_content,
                                                 Some(&reasoning_signature),
                                                 store_reasoning_content,
@@ -1065,7 +1088,7 @@ impl App {
             }
             crate::message::push_reasoning_blocks(
                 &mut content_blocks,
-                &provider_name,
+                &reasoning_provider_identity,
                 &reasoning_content,
                 Some(&reasoning_signature),
                 store_reasoning_content,

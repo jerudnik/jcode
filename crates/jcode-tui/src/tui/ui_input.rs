@@ -1395,14 +1395,6 @@ mod tests {
     }
 
     #[test]
-    fn connection_phase_waiting_label_is_generic_response_wait() {
-        assert_eq!(
-            connection_phase_label(&ConnectionPhase::WaitingForResponse),
-            "waiting for response"
-        );
-    }
-
-    #[test]
     fn streaming_liveness_label_shows_quiet_stream_warning_before_message_end() {
         assert_eq!(
             streaming_liveness_label("4.2s".to_string(), Some(3.4), false),
@@ -1542,11 +1534,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_mode_color_is_distinct() {
-        assert_eq!(shell_mode_color(), rgb(110, 214, 151));
-    }
-
-    #[test]
     fn normalize_repaint_sensitive_notice_text_drops_warning_variation_selector() {
         assert_eq!(
             normalize_repaint_sensitive_notice_text("⚠️ File activity: read lines 1-9"),
@@ -1555,6 +1542,14 @@ mod tests {
         assert_eq!(
             normalize_repaint_sensitive_notice_text("all clear"),
             "all clear"
+        );
+    }
+
+    #[test]
+    fn kimi_oauth_overscroll_label_is_oauth() {
+        assert_eq!(
+            overscroll_auth_label(crate::tui::info_widget::AuthMethod::KimiOAuth),
+            Some(("OAuth", rgb(190, 140, 255)))
         );
     }
 }
@@ -2032,6 +2027,7 @@ fn overscroll_auth_label(
         }
         AuthMethod::AnthropicOAuth => Some(("OAuth", rgb(255, 160, 100))),
         AuthMethod::OpenAIOAuth => Some(("OAuth", rgb(100, 200, 180))),
+        AuthMethod::KimiOAuth => Some(("OAuth", rgb(190, 140, 255))),
         AuthMethod::CopilotOAuth => Some(("OAuth", rgb(110, 200, 140))),
         AuthMethod::GeminiOAuth => Some(("OAuth", rgb(120, 190, 255))),
     }

@@ -3,7 +3,7 @@
 Status: **problem capture** (no solution designed yet).
 
 Incident evidence: 2026-08-10 workflow-repair swarm, coordinator session
-`session_shrimp_..._ac572e` in `/Users/jrudnik/labs/jcode`.
+`session_shrimp_..._ac572e` in the primary jcode checkout.
 
 ## What happened
 

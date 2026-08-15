@@ -1495,6 +1495,12 @@ pub enum ServerEvent {
         new_session_id: String,
         #[serde(default)]
         initial_prompt_delivered: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_key: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        route_api_method: Option<String>,
     },
 
     /// Response to comm_list_models request

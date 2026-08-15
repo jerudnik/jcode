@@ -929,6 +929,12 @@ mod ambient_root_tests {
     /// per-process random temp dir.
     #[test]
     fn test_bundle_default_path_is_not_under_the_real_home() {
+        // Deliberately *not* wrapped in `with_temp_jcode_home` (WP3): that scope
+        // points `$HOME` at its own temp dir, which is also where `JCODE_HOME`
+        // resolves, so both halves of the comparison collapse onto the same
+        // directory and the assertion can no longer tell a correct redirect from
+        // an escape. The read lease below is the isolation this test can use.
+        //
         // Read under the shared env lease. Both halves of this comparison are
         // env-derived: `default_path` resolves through the harness redirect,
         // and `assert_redirected_away_from_real_home` calls `dirs::home_dir()`,

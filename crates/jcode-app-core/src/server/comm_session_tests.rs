@@ -1,11 +1,12 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use super::{
-    CoordinatorSpawnIdentity, SwarmSpawnCreation, auto_fallback_member_label,
+    CoordinatorSpawnIdentity, SwarmSpawnCreation, SwarmSpawnSelection, auto_fallback_member_label,
     ensure_spawn_coordinator_swarm, explicit_route_for_configured_model, handle_comm_spawn,
     prepare_visible_spawn_session, provider_key_for_spawn_model, register_visible_spawned_member,
     resolve_coordinator_spawn_identity, resolve_spawn_working_dir, resolve_stop_target_session,
     resolve_swarm_spawn_creation, resolve_swarm_spawn_selection, swarm_stop_allowed_by_owner,
+    validate_concrete_spawn_selection,
 };
 use crate::agent::Agent;
 use crate::config::SwarmSpawnMode;
@@ -100,10 +101,6 @@ fn spawn_provider_key_uses_resolver_for_explicit_catalog_and_native_models() {
     assert_eq!(
         provider_key_for_spawn_model(Some("composer-2-fast"), None).as_deref(),
         Some("cursor")
-    );
-    assert_eq!(
-        provider_key_for_spawn_model(Some("unknown:gpt-5.5"), None).as_deref(),
-        None
     );
     assert_eq!(
         provider_key_for_spawn_model(Some("openai-api:gpt-5.5"), Some("override")).as_deref(),
@@ -738,9 +735,100 @@ fn coordinator_identity(
     }
 }
 
+fn resolved_spawn_selection(
+    requested_model: Option<String>,
+    configured_swarm_model: Option<String>,
+    coordinator: &CoordinatorSpawnIdentity,
+) -> SwarmSpawnSelection {
+    resolve_swarm_spawn_selection(requested_model, configured_swarm_model, coordinator)
+        .expect("spawn model should resolve")
+}
+
+#[test]
+fn resolve_swarm_spawn_model_rejects_unknown_per_spawn_model() {
+    // This replaces the old lines 90-112 behavior that accepted the same
+    // unrecognized prefix as `provider_key=None`.
+    let requested = "unknown:gpt-5.5";
+    let error = resolve_swarm_spawn_selection(
+        Some(requested.to_string()),
+        None,
+        &coordinator_identity(
+            Some("claude-opus-4-8"),
+            Some("claude-oauth"),
+            Some("claude-oauth"),
+        ),
+    )
+    .expect_err("unknown per-spawn model must fail closed");
+
+    let message = error.to_string();
+    assert!(message.contains(requested));
+    assert!(message.contains("swarm list_models"));
+    assert!(message.contains("openai-oauth:"));
+}
+
+#[test]
+fn resolve_swarm_spawn_model_rejects_unknown_configured_model() {
+    let configured = "definitely-unknown-swarm-model";
+    let error = resolve_swarm_spawn_selection(
+        None,
+        Some(configured.to_string()),
+        &coordinator_identity(
+            Some("claude-opus-4-8"),
+            Some("claude-oauth"),
+            Some("claude-oauth"),
+        ),
+    )
+    .expect_err("unknown agents.swarm_model must fail closed");
+
+    assert!(error.to_string().contains(configured));
+}
+
+#[test]
+fn concrete_spawn_validation_allows_only_an_inheritance_or_resolved_route_escape() {
+    let unresolved = validate_concrete_spawn_selection(
+        "definitely-unknown-swarm-model",
+        Some("coordinator-model"),
+        None,
+        None,
+        None,
+    );
+    assert!(unresolved.is_err());
+
+    assert!(
+        validate_concrete_spawn_selection(
+            "coordinator-model",
+            Some("coordinator-model"),
+            None,
+            None,
+            None,
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_concrete_spawn_selection(
+            "profile:model",
+            Some("coordinator-model"),
+            Some("profile"),
+            None,
+            None,
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_concrete_spawn_selection(
+            "resolved-model",
+            Some("coordinator-model"),
+            None,
+            Some("provider"),
+            None,
+        )
+        .is_ok()
+    );
+}
+
 #[test]
 fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         None,
         Some("openai/gpt-5.4@OpenAI".to_string()),
         &coordinator_identity(
@@ -758,7 +846,7 @@ fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
 
 #[test]
 fn resolve_swarm_spawn_model_inherits_coordinator_when_unconfigured() {
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         None,
         None,
         &coordinator_identity(
@@ -783,7 +871,7 @@ fn resolve_swarm_spawn_model_inherits_coordinator_when_unconfigured() {
 fn resolve_swarm_spawn_model_inherits_coordinator_auth_route_for_oauth_vs_api() {
     // Regression: a coordinator on the Claude API route must spawn agents on
     // the same API route, not Claude OAuth (the config default).
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         None,
         None,
         &coordinator_identity(
@@ -800,7 +888,7 @@ fn resolve_swarm_spawn_model_inherits_coordinator_auth_route_for_oauth_vs_api() 
 
 #[test]
 fn resolve_swarm_spawn_model_keeps_provider_key_when_config_matches_coordinator() {
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         None,
         Some("custom-model".to_string()),
         &coordinator_identity(
@@ -819,7 +907,7 @@ fn resolve_swarm_spawn_model_keeps_provider_key_when_config_matches_coordinator(
 fn resolve_swarm_spawn_model_openai_api_prefix_pins_api_route_over_coordinator() {
     // `agents.swarm_model = "openai-api:gpt-5.5"` must spawn agents on GPT-5.5
     // via the OpenAI API key route, regardless of the coordinator's model/auth.
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         None,
         Some("openai-api:gpt-5.5".to_string()),
         &coordinator_identity(
@@ -853,7 +941,7 @@ fn resolve_swarm_spawn_model_auth_route_prefixes_pin_expected_routes() {
             "claude-oauth",
         ),
     ] {
-        let selection = resolve_swarm_spawn_selection(
+        let selection = resolved_spawn_selection(
             None,
             Some(configured.to_string()),
             &coordinator_identity(
@@ -883,7 +971,7 @@ fn resolve_swarm_spawn_model_auth_route_prefixes_pin_expected_routes() {
 #[test]
 fn resolve_swarm_spawn_model_inherit_sentinel_uses_coordinator_model() {
     for sentinel in ["inherit", "INHERIT", "coordinator", " inherit ", ""] {
-        let selection = resolve_swarm_spawn_selection(
+        let selection = resolved_spawn_selection(
             None,
             Some(sentinel.to_string()),
             &coordinator_identity(
@@ -914,7 +1002,7 @@ fn resolve_swarm_spawn_model_inherit_sentinel_uses_coordinator_model() {
 #[test]
 fn resolve_swarm_spawn_model_requested_model_overrides_configured_pin() {
     // A per-spawn requested model must beat the agents.swarm_model config pin.
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         Some("openai-api:gpt-5.5".to_string()),
         Some("claude-oauth:claude-opus-4-8".to_string()),
         &coordinator_identity(
@@ -936,7 +1024,7 @@ fn resolve_swarm_spawn_model_requested_model_overrides_configured_pin() {
 fn resolve_swarm_spawn_model_requested_inherit_overrides_configured_pin() {
     // An explicit `inherit` request must force coordinator inheritance even
     // when the config pins a different model.
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         Some("inherit".to_string()),
         Some("openai-api:gpt-5.5".to_string()),
         &coordinator_identity(
@@ -954,7 +1042,7 @@ fn resolve_swarm_spawn_model_requested_inherit_overrides_configured_pin() {
 #[test]
 fn resolve_swarm_spawn_model_requested_matching_coordinator_model_keeps_route() {
     // Requesting the coordinator's own model keeps its provider key and route.
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         Some("custom-model".to_string()),
         None,
         &coordinator_identity(
@@ -972,7 +1060,7 @@ fn resolve_swarm_spawn_model_requested_matching_coordinator_model_keeps_route() 
 #[test]
 fn resolve_swarm_spawn_model_blank_requested_model_falls_back_to_config() {
     // A whitespace-only requested model is treated as "not provided".
-    let selection = resolve_swarm_spawn_selection(
+    let selection = resolved_spawn_selection(
         Some("   ".to_string()),
         Some("openai-api:gpt-5.5".to_string()),
         &coordinator_identity(

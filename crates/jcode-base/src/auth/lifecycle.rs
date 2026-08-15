@@ -758,6 +758,9 @@ fn normalized_login_provider_id(provider_id: &str) -> Option<&'static str> {
         "copilot" => Some("copilot"),
         "gemini" => Some("gemini"),
         "antigravity" => Some("antigravity"),
+        "grok-build" | "grok-subscription" => Some("grok-build"),
+        "kimi-code-acp" | "kimi-acp" => Some("kimi-code-acp"),
+        "reasonix" | "reasonix-acp" => Some("reasonix"),
         _ => None,
     }
 }
@@ -1043,6 +1046,18 @@ fn direct_provider_activation(provider_id: &str) -> Option<ProviderActivation> {
             RuntimeProviderId::Antigravity,
             ActiveProvider::Antigravity,
         )),
+        "grok-build" => Some(ProviderActivation::locked(
+            RuntimeProviderId::GrokBuild,
+            ActiveProvider::OpenRouter,
+        )),
+        "kimi-code-acp" => Some(ProviderActivation::locked(
+            RuntimeProviderId::KimiCodeAcp,
+            ActiveProvider::OpenRouter,
+        )),
+        "reasonix" => Some(ProviderActivation::locked(
+            RuntimeProviderId::Reasonix,
+            ActiveProvider::OpenRouter,
+        )),
         _ => None,
     }
 }
@@ -1071,6 +1086,9 @@ pub fn model_switch_request_for_provider_id(
         Some("copilot") => format!("copilot:{}", model),
         Some("gemini") => format!("gemini:{}", model),
         Some("antigravity") => format!("antigravity:{}", model),
+        Some("grok-build") => format!("grok-build:{}", model),
+        Some("kimi-code-acp") => format!("kimi-code-acp:{}", model),
+        Some("reasonix") => format!("reasonix:{}", model),
         _ => model.to_string(),
     }
 }
@@ -1283,6 +1301,10 @@ mod tests {
             ("copilot", "copilot", "GitHub Copilot"),
             ("gemini", "gemini", "Google Gemini"),
             ("antigravity", "antigravity", "Antigravity"),
+            ("grok-build", "grok-build", "Grok Build"),
+            ("grok-subscription", "grok-build", "Grok Build"),
+            ("kimi-code-acp", "kimi-code-acp", "Kimi Code (official CLI)"),
+            ("kimi-acp", "kimi-code-acp", "Kimi Code (official CLI)"),
         ] {
             assert_eq!(normalized_auth_provider_id(Some(hint)), Some(normalized));
             assert_eq!(provider_display_label(Some(hint)).as_deref(), Some(label));
@@ -1336,6 +1358,8 @@ mod tests {
             ("copilot", "copilot", "copilot"),
             ("gemini", "gemini", "gemini"),
             ("antigravity", "antigravity", "antigravity"),
+            ("grok-build", "grok-build", "openrouter"),
+            ("kimi-code-acp", "kimi-code-acp", "openrouter"),
         ] {
             crate::env::remove_var("JCODE_RUNTIME_PROVIDER");
             crate::env::remove_var("JCODE_ACTIVE_PROVIDER");
@@ -1400,6 +1424,18 @@ mod tests {
                 }
                 crate::provider_catalog::LoginProviderTarget::Antigravity => {
                     Some(("antigravity", "antigravity", "antigravity", "antigravity"))
+                }
+                crate::provider_catalog::LoginProviderTarget::GrokBuild => {
+                    Some(("grok-build", "grok-build", "openrouter", "grok-build"))
+                }
+                crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => Some((
+                    "kimi-code-acp",
+                    "kimi-code-acp",
+                    "openrouter",
+                    "kimi-code-acp",
+                )),
+                crate::provider_catalog::LoginProviderTarget::Reasonix => {
+                    Some(("reasonix", "reasonix", "openrouter", "reasonix"))
                 }
                 _ => None,
             }) else {
@@ -1471,6 +1507,9 @@ mod tests {
             "copilot",
             "gemini",
             "antigravity",
+            "grok-build",
+            "kimi-code-acp",
+            "reasonix",
         ] {
             assert!(
                 covered.contains(&expected),
@@ -1507,6 +1546,8 @@ mod tests {
             ("copilot", "copilot:shared-model"),
             ("gemini", "gemini:shared-model"),
             ("antigravity", "antigravity:shared-model"),
+            ("grok-build", "grok-build:shared-model"),
+            ("kimi-code-acp", "kimi-code-acp:shared-model"),
             ("cerebras", "cerebras:shared-model"),
         ] {
             assert_eq!(

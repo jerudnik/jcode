@@ -31,7 +31,7 @@ pub(crate) enum ProviderAuthArg {
 #[command(version = jcode_build_meta::VERSION)]
 #[command(about = "J-Code: A coding agent using Claude Max or ChatGPT Pro subscriptions")]
 pub(crate) struct Args {
-    /// Provider to use (jcode, claude, openai, openai-api, openrouter, azure, opencode, opencode-go, zai, 302ai, baseten, cortecs, comtegra, deepseek, fpt, firmware, huggingface, moonshotai, nebius, scaleway, stackit, groq, mistral, perplexity, togetherai, deepinfra, xai, nvidia-nim, lmstudio, ollama, chutes, cerebras, alibaba-coding-plan, openai-compatible, cursor, copilot, gemini, antigravity, google, or auto-detect)
+    /// Provider to use (jcode, claude, openai, openai-api, openrouter, azure, opencode, opencode-go, zai, 302ai, baseten, cortecs, comtegra, deepseek, fpt, firmware, huggingface, moonshotai, nebius, scaleway, stackit, groq, mistral, perplexity, togetherai, deepinfra, xai, grok-build, kimi-code-acp, reasonix, nvidia-nim, lmstudio, ollama, chutes, cerebras, alibaba-coding-plan, openai-compatible, cursor, copilot, gemini, antigravity, google, or auto-detect)
     #[arg(short, long, default_value = "auto", global = true)]
     pub(crate) provider: ProviderChoice,
 
@@ -127,13 +127,13 @@ pub(crate) enum Command {
     /// Run as an Agent Client Protocol (ACP) adapter backed by the Jcode daemon
     Acp,
 
-    /// Re-publish the running daemon's tool registry (including `swarm`) over the
-    /// Model Context Protocol as a stdio JSON-RPC server. Add to an MCP client via
-    /// `~/.jcode/mcp.json`: {"servers":{"jcode":{"command":"jcode","args":["mcp-serve"]}}}
+    /// Expose a running daemon's session-filtered tools to an external MCP client
+    /// over stdio JSON-RPC. Configure this command in that external client, not in
+    /// Jcode's own `~/.jcode/mcp.json`.
     #[command(name = "mcp-serve")]
     McpServe {
-        /// Pin a target session id for session-scoped tools (e.g. the swarm
-        /// coordinator). If omitted, a coordinator session is created on first use.
+        /// Pin an existing daemon session for tool discovery and calls. If omitted,
+        /// an independent, unlinked headless session is created on first use.
         #[arg(long)]
         session: Option<String>,
     },

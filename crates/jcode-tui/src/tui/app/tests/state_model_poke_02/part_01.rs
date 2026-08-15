@@ -248,53 +248,50 @@ fn test_handterm_native_scroll_client_roundtrips_over_socket() {
     use std::os::unix::net::UnixListener;
 
     let _render_lock = scroll_render_test_lock();
-    let dir = tempfile::tempdir().expect("tempdir");
-    let socket_path = dir.path().join("handterm-scroll.sock");
-    let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
-    unsafe {
-        std::env::set_var("HANDTERM_NATIVE_SCROLL_SOCKET", &socket_path);
-    }
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = dir.path().join("handterm-scroll.sock");
+        let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
+        crate::env::set_var("HANDTERM_NATIVE_SCROLL_SOCKET", &socket_path);
 
-    let mut client = super::handterm_native_scroll::HandtermNativeScrollClient::connect_from_env()
-        .expect("native scroll client should connect from env");
-    let (mut server, _) = listener.accept().expect("accept client");
-    server
-        .set_read_timeout(Some(Duration::from_secs(1)))
-        .expect("set read timeout");
+        let mut client =
+            super::handterm_native_scroll::HandtermNativeScrollClient::connect_from_env()
+                .expect("native scroll client should connect from env");
+        let (mut server, _) = listener.accept().expect("accept client");
+        server
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("set read timeout");
 
-    let (mut app, mut terminal) = create_scroll_test_app(50, 12, 0, 24);
-    app.auto_scroll_paused = true;
-    app.scroll_offset = 6;
-    let _ = render_and_snap(&app, &mut terminal);
+        let (mut app, mut terminal) = create_scroll_test_app(50, 12, 0, 24);
+        app.auto_scroll_paused = true;
+        app.scroll_offset = 6;
+        let _ = render_and_snap(&app, &mut terminal);
 
-    client.sync_from_app(&app);
+        client.sync_from_app(&app);
 
-    let mut buf = [0u8; 4096];
-    let n = server.read(&mut buf).expect("read pane snapshot");
-    let line = std::str::from_utf8(&buf[..n]).expect("utf8 snapshot");
-    assert!(line.contains("pane_snapshot"));
-    assert!(line.contains("chat"));
-    assert!(line.contains("\"position\":6"));
+        let mut buf = [0u8; 4096];
+        let n = server.read(&mut buf).expect("read pane snapshot");
+        let line = std::str::from_utf8(&buf[..n]).expect("utf8 snapshot");
+        assert!(line.contains("pane_snapshot"));
+        assert!(line.contains("chat"));
+        assert!(line.contains("\"position\":6"));
 
-    server
-        .write_all(b"{\"type\":\"scroll\",\"pane\":\"chat\",\"delta\":-2}\n")
-        .expect("write host scroll command");
+        server
+            .write_all(b"{\"type\":\"scroll\",\"pane\":\"chat\",\"delta\":-2}\n")
+            .expect("write host scroll command");
 
-    let runtime = tokio::runtime::Runtime::new().expect("runtime");
-    let command = runtime
-        .block_on(async {
-            tokio::time::timeout(Duration::from_secs(1), client.recv())
-                .await
-                .expect("timeout waiting for scroll command")
-        })
-        .expect("scroll command should arrive");
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let command = runtime
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(1), client.recv())
+                    .await
+                    .expect("timeout waiting for scroll command")
+            })
+            .expect("scroll command should arrive");
 
-    app.apply_handterm_native_scroll(command);
-    assert_eq!(app.scroll_offset, 4);
-
-    unsafe {
-        std::env::remove_var("HANDTERM_NATIVE_SCROLL_SOCKET");
-    }
+        app.apply_handterm_native_scroll(command);
+        assert_eq!(app.scroll_offset, 4);
+    });
 }
 
 #[test]
@@ -1084,38 +1081,31 @@ fn test_autocomplete_adds_space_for_nested_argument_commands() {
 
 #[test]
 fn test_goals_show_suggestions_include_goal_ids() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let project = temp.path().join("repo");
-    std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project = temp.path().join("repo");
+        std::fs::create_dir_all(&project).expect("project dir");
 
-    let goal = crate::goal::create_goal(
-        crate::goal::GoalCreateInput {
-            title: "Ship mobile MVP".to_string(),
-            scope: crate::goal::GoalScope::Project,
-            ..crate::goal::GoalCreateInput::default()
-        },
-        Some(&project),
-    )
-    .expect("create goal");
+        let goal = crate::goal::create_goal(
+            crate::goal::GoalCreateInput {
+                title: "Ship mobile MVP".to_string(),
+                scope: crate::goal::GoalScope::Project,
+                ..crate::goal::GoalCreateInput::default()
+            },
+            Some(&project),
+        )
+        .expect("create goal");
 
-    let mut app = create_test_app();
-    app.session.working_dir = Some(project.display().to_string());
+        let mut app = create_test_app();
+        app.session.working_dir = Some(project.display().to_string());
 
-    let suggestions = app.get_suggestions_for("/goals show ");
-    assert!(
-        suggestions
-            .iter()
-            .any(|(cmd, _)| cmd == &format!("/goals show {}", goal.id))
-    );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
+        let suggestions = app.get_suggestions_for("/goals show ");
+        assert!(
+            suggestions
+                .iter()
+                .any(|(cmd, _)| cmd == &format!("/goals show {}", goal.id))
+        );
+    });
 }
 
 fn configure_test_remote_models(app: &mut App) {

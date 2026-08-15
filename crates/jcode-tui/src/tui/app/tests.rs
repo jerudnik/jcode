@@ -1,6 +1,6 @@
 #![cfg_attr(test, allow(clippy::clone_on_copy))]
 
-use super::test_support::{lock_test_env, with_temp_jcode_home};
+use super::test_support::with_temp_jcode_home;
 
 include!("tests/support_failover/part_01.rs");
 include!("tests/support_failover/part_02.rs");
@@ -346,115 +346,121 @@ fn idle_cold_cache_warning_waits_for_ttl_and_rearms_after_new_cache_write() {
 
 #[test]
 fn harness_caused_kv_cache_miss_pushes_in_chat_alarm() {
-    let _env = lock_test_env();
-    // A warm session whose system prompt hash silently changes between turns is
-    // the exact failure mode of the skill-ordering bug: the conversation only
-    // grew, yet the cached prefix is invalidated. We must surface that loudly.
-    let mut app = create_test_app();
-    crate::provider::anthropic::set_cache_ttl_1h(true);
-    // No documented invalidation may explain this miss, or the alarm downgrades
-    // to the informational attribution notice.
-    crate::cache_invalidation::clear_for_tests();
+    with_temp_jcode_home(|| {
+        // A warm session whose system prompt hash silently changes between turns is
+        // the exact failure mode of the skill-ordering bug: the conversation only
+        // grew, yet the cached prefix is invalidated. We must surface that loudly.
+        let mut app = create_test_app();
+        crate::provider::anthropic::set_cache_ttl_1h(true);
+        // No documented invalidation may explain this miss, or the alarm downgrades
+        // to the informational attribution notice.
+        crate::cache_invalidation::clear_for_tests();
 
-    let messages = vec![
-        Message::user("first prompt"),
-        Message::assistant_text("first answer"),
-        Message::user("second prompt"),
-    ];
+        let messages = vec![
+            Message::user("first prompt"),
+            Message::assistant_text("first answer"),
+            Message::user("second prompt"),
+        ];
 
-    // Baseline captured last turn with a *different* system static hash.
-    let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
-    let session_id = app.kv_cache_session_id();
-    // Match the live provider/model exactly so the miss is classified as a
-    // harness system change rather than a provider/model switch.
-    let provider = app.kv_cache_provider_name();
-    let model = app.kv_cache_provider_model();
-    app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
-        session_id,
-        input_tokens: 50_000,
-        completed_at: Instant::now(),
-        provider,
-        model,
-        upstream_provider: None,
-        signature: Some(baseline_signature),
+        // Baseline captured last turn with a *different* system static hash.
+        let baseline_signature =
+            App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
+        let session_id = app.kv_cache_session_id();
+        // Match the live provider/model exactly so the miss is classified as a
+        // harness system change rather than a provider/model switch.
+        let provider = app.kv_cache_provider_name();
+        let model = app.kv_cache_provider_model();
+        app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+            session_id,
+            input_tokens: 50_000,
+            completed_at: Instant::now(),
+            provider,
+            model,
+            upstream_provider: None,
+            signature: Some(baseline_signature),
+        });
+
+        // This turn: same provider/model, conversation grew, but the system prompt
+        // changed (hash differs). Register the pending request, then complete the
+        // stream with a near-zero cache read to model the bust.
+        app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
+        app.streaming.streaming_input_tokens = 50_000;
+        app.streaming.streaming_cache_read_tokens = Some(0);
+        app.streaming.streaming_cache_creation_tokens = Some(50_000);
+        app.kv_cache.current_api_usage_recorded = false;
+        app.record_completed_stream_cache_usage();
+
+        let alarm = app
+            .display_messages()
+            .iter()
+            .find(|message| message.role == "system" && message.content.contains("KV cache miss"))
+            .expect("harness-caused cache miss should push an in-chat alarm");
+        assert!(
+            alarm.content.contains("harness: system changed"),
+            "{alarm:?}"
+        );
+        assert!(alarm.content.contains("50K"), "{alarm:?}");
     });
-
-    // This turn: same provider/model, conversation grew, but the system prompt
-    // changed (hash differs). Register the pending request, then complete the
-    // stream with a near-zero cache read to model the bust.
-    app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
-    app.streaming.streaming_input_tokens = 50_000;
-    app.streaming.streaming_cache_read_tokens = Some(0);
-    app.streaming.streaming_cache_creation_tokens = Some(50_000);
-    app.kv_cache.current_api_usage_recorded = false;
-    app.record_completed_stream_cache_usage();
-
-    let alarm = app
-        .display_messages()
-        .iter()
-        .find(|message| message.role == "system" && message.content.contains("KV cache miss"))
-        .expect("harness-caused cache miss should push an in-chat alarm");
-    assert!(
-        alarm.content.contains("harness: system changed"),
-        "{alarm:?}"
-    );
-    assert!(alarm.content.contains("50K"), "{alarm:?}");
 }
 
 #[test]
 fn documented_invalidation_downgrades_kv_cache_alarm_to_attribution() {
-    let _env = lock_test_env();
-    // Config/skill reloads legitimately change the system prompt mid-session.
-    // Those sites document the invalidation; a harness-attributed miss that
-    // follows must be surfaced as an informational "refresh" with the cause,
-    // not as the unexplained harness-bust alarm.
-    let mut app = create_test_app();
-    crate::provider::anthropic::set_cache_ttl_1h(true);
-    crate::cache_invalidation::clear_for_tests();
+    with_temp_jcode_home(|| {
+        // Config/skill reloads legitimately change the system prompt mid-session.
+        // Those sites document the invalidation; a harness-attributed miss that
+        // follows must be surfaced as an informational "refresh" with the cause,
+        // not as the unexplained harness-bust alarm.
+        let mut app = create_test_app();
+        crate::provider::anthropic::set_cache_ttl_1h(true);
+        crate::cache_invalidation::clear_for_tests();
 
-    let messages = vec![
-        Message::user("first prompt"),
-        Message::assistant_text("first answer"),
-        Message::user("second prompt"),
-    ];
-    let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
-    let session_id = app.kv_cache_session_id();
-    let provider = app.kv_cache_provider_name();
-    let model = app.kv_cache_provider_model();
-    app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
-        session_id,
-        input_tokens: 50_000,
-        completed_at: Instant::now(),
-        provider,
-        model,
-        upstream_provider: None,
-        signature: Some(baseline_signature),
-    });
+        let messages = vec![
+            Message::user("first prompt"),
+            Message::assistant_text("first answer"),
+            Message::user("second prompt"),
+        ];
+        let baseline_signature =
+            App::kv_cache_request_signature(&messages, &[], "system PROMPT A", "");
+        let session_id = app.kv_cache_session_id();
+        let provider = app.kv_cache_provider_name();
+        let model = app.kv_cache_provider_model();
+        app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+            session_id,
+            input_tokens: 50_000,
+            completed_at: Instant::now(),
+            provider,
+            model,
+            upstream_provider: None,
+            signature: Some(baseline_signature),
+        });
 
-    // The documented cause lands between the baseline and the busted request.
-    crate::cache_invalidation::record("config reload", "modified_changed=true");
+        // The documented cause lands between the baseline and the busted request.
+        crate::cache_invalidation::record("config reload", "modified_changed=true");
 
-    app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
-    app.streaming.streaming_input_tokens = 50_000;
-    app.streaming.streaming_cache_read_tokens = Some(0);
-    app.streaming.streaming_cache_creation_tokens = Some(50_000);
-    app.kv_cache.current_api_usage_recorded = false;
-    app.record_completed_stream_cache_usage();
+        app.begin_kv_cache_request(&messages, &[], "system PROMPT B", "");
+        app.streaming.streaming_input_tokens = 50_000;
+        app.streaming.streaming_cache_read_tokens = Some(0);
+        app.streaming.streaming_cache_creation_tokens = Some(50_000);
+        app.kv_cache.current_api_usage_recorded = false;
+        app.record_completed_stream_cache_usage();
 
-    let notice = app
-        .display_messages()
-        .iter()
-        .find(|message| message.role == "system" && message.content.contains("KV cache refresh"))
-        .expect("documented invalidation should push an attribution notice");
-    assert!(notice.content.contains("config reload"), "{notice:?}");
-    assert!(
-        !app.display_messages()
+        let notice = app
+            .display_messages()
             .iter()
-            .any(|message| message.role == "system" && message.content.contains("KV cache miss")),
-        "documented invalidation must not also raise the harness alarm"
-    );
+            .find(|message| {
+                message.role == "system" && message.content.contains("KV cache refresh")
+            })
+            .expect("documented invalidation should push an attribution notice");
+        assert!(notice.content.contains("config reload"), "{notice:?}");
+        assert!(
+            !app.display_messages().iter().any(
+                |message| message.role == "system" && message.content.contains("KV cache miss")
+            ),
+            "documented invalidation must not also raise the harness alarm"
+        );
 
-    crate::cache_invalidation::clear_for_tests();
+        crate::cache_invalidation::clear_for_tests();
+    });
 }
 
 #[test]
@@ -1021,81 +1027,81 @@ fn endorsed_but_not_installed_skill_invocation_surfaces_install_hint() {
 
 #[test]
 fn stale_server_history_is_deferred_before_remote_state_is_applied() {
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.is_remote = true;
-    app.remote_session_id = Some("session_existing".to_string());
-    app.connection_type = Some("websocket".to_string());
+        app.is_remote = true;
+        app.remote_session_id = Some("session_existing".to_string());
+        app.connection_type = Some("websocket".to_string());
 
-    let redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_from_stale_server".to_string(),
-            messages: vec![crate::protocol::HistoryMessage {
-                role: "assistant".to_string(),
-                content: "stale answer".to_string(),
-                tool_calls: None,
-                tool_data: None,
-            }],
-            images: vec![],
-            provider_name: Some("stale-provider".to_string()),
-            provider_model: Some("stale-model".to_string()),
-            subagent_model: Some("stale-subagent".to_string()),
-            autoreview_enabled: Some(true),
-            autojudge_enabled: Some(true),
-            available_models: vec!["stale-model".to_string()],
-            available_model_routes: vec![],
-            mcp_servers: vec!["stale-mcp:1".to_string()],
-            skills: vec!["stale-skill".to_string()],
-            total_tokens: Some((99, 100)),
-            token_usage_totals: None,
-            all_sessions: vec!["session_from_stale_server".to_string()],
-            client_count: Some(42),
-            is_canary: Some(false),
-            reload_recovery: None,
-            server_version: Some("v0.0.1-stale".to_string()),
-            server_name: Some("stale-server".to_string()),
-            server_icon: Some("🧟".to_string()),
-            server_has_update: Some(true),
-            was_interrupted: None,
-            connection_type: Some("stale-connection".to_string()),
-            status_detail: Some("stale-status".to_string()),
-            upstream_provider: Some("stale-upstream".to_string()),
-            resolved_credential: None,
-            reasoning_effort: Some("high".to_string()),
-            service_tier: Some("stale-tier".to_string()),
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_from_stale_server".to_string(),
+                messages: vec![crate::protocol::HistoryMessage {
+                    role: "assistant".to_string(),
+                    content: "stale answer".to_string(),
+                    tool_calls: None,
+                    tool_data: None,
+                }],
+                images: vec![],
+                provider_name: Some("stale-provider".to_string()),
+                provider_model: Some("stale-model".to_string()),
+                subagent_model: Some("stale-subagent".to_string()),
+                autoreview_enabled: Some(true),
+                autojudge_enabled: Some(true),
+                available_models: vec!["stale-model".to_string()],
+                available_model_routes: vec![],
+                mcp_servers: vec!["stale-mcp:1".to_string()],
+                skills: vec!["stale-skill".to_string()],
+                total_tokens: Some((99, 100)),
+                token_usage_totals: None,
+                all_sessions: vec!["session_from_stale_server".to_string()],
+                client_count: Some(42),
+                is_canary: Some(false),
+                reload_recovery: None,
+                server_version: Some("v0.0.1-stale".to_string()),
+                server_name: Some("stale-server".to_string()),
+                server_icon: Some("🧟".to_string()),
+                server_has_update: Some(true),
+                was_interrupted: None,
+                connection_type: Some("stale-connection".to_string()),
+                status_detail: Some("stale-status".to_string()),
+                upstream_provider: Some("stale-upstream".to_string()),
+                resolved_credential: None,
+                reasoning_effort: Some("high".to_string()),
+                service_tier: Some("stale-tier".to_string()),
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    assert!(!redraw);
-    assert!(app.pending_server_reload);
-    assert_eq!(app.remote_server_has_update, Some(true));
-    assert_eq!(app.remote_server_version.as_deref(), Some("v0.0.1-stale"));
-    assert_eq!(app.remote_session_id.as_deref(), Some("session_existing"));
-    assert_eq!(remote.session_id(), None);
-    assert_eq!(app.connection_type.as_deref(), Some("websocket"));
-    assert!(app.remote_skills.is_empty());
-    assert!(app.remote_sessions.is_empty());
-    assert_eq!(app.remote_client_count, None);
-    assert_eq!(app.remote_total_tokens, None);
-    assert_ne!(
-        app.session.subagent_model.as_deref(),
-        Some("stale-subagent")
-    );
-    let content = app.display_messages().last().unwrap().content.clone();
-    assert!(
-        content.contains("Reloading the server before applying remote session state"),
-        "{content}"
-    );
+        assert!(!redraw);
+        assert!(app.pending_server_reload);
+        assert_eq!(app.remote_server_has_update, Some(true));
+        assert_eq!(app.remote_server_version.as_deref(), Some("v0.0.1-stale"));
+        assert_eq!(app.remote_session_id.as_deref(), Some("session_existing"));
+        assert_eq!(remote.session_id(), None);
+        assert_eq!(app.connection_type.as_deref(), Some("websocket"));
+        assert!(app.remote_skills.is_empty());
+        assert!(app.remote_sessions.is_empty());
+        assert_eq!(app.remote_client_count, None);
+        assert_eq!(app.remote_total_tokens, None);
+        assert_ne!(
+            app.session.subagent_model.as_deref(),
+            Some("stale-subagent")
+        );
+        let content = app.display_messages().last().unwrap().content.clone();
+        assert!(
+            content.contains("Reloading the server before applying remote session state"),
+            "{content}"
+        );
+    });
 }
 
 #[test]
@@ -1187,86 +1193,86 @@ fn ancient_server_history_is_deferred_via_client_side_release_check() {
     // it is stale. The client must independently compare release versions and
     // defer + reload anyway, instead of attaching to the ancient daemon (which
     // would then reject newer protocol requests like `set_route`).
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
     // The test binary's own version is dev/dirty (unorderable), so use the
     // test-only override to give the client a clean release version newer than
     // the simulated ancient server.
-    crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.17.0 (d741696f)");
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.17.0 (d741696f)");
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.is_remote = true;
-    app.remote_session_id = Some("session_existing".to_string());
-    app.connection_type = Some("websocket".to_string());
+        app.is_remote = true;
+        app.remote_session_id = Some("session_existing".to_string());
+        app.connection_type = Some("websocket".to_string());
 
-    let redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_from_ancient_server".to_string(),
-            messages: vec![crate::protocol::HistoryMessage {
-                role: "assistant".to_string(),
-                content: "ancient answer".to_string(),
-                tool_calls: None,
-                tool_data: None,
-            }],
-            images: vec![],
-            provider_name: Some("ancient-provider".to_string()),
-            provider_model: Some("ancient-model".to_string()),
-            subagent_model: Some("ancient-subagent".to_string()),
-            autoreview_enabled: Some(true),
-            autojudge_enabled: Some(true),
-            available_models: vec!["ancient-model".to_string()],
-            available_model_routes: vec![],
-            mcp_servers: vec!["ancient-mcp:1".to_string()],
-            skills: vec!["ancient-skill".to_string()],
-            total_tokens: Some((99, 100)),
-            token_usage_totals: None,
-            all_sessions: vec!["session_from_ancient_server".to_string()],
-            client_count: Some(42),
-            is_canary: Some(false),
-            reload_recovery: None,
-            // Clean older release, and crucially server_has_update is None: the
-            // ancient daemon does not know how to self-assess.
-            server_version: Some("v0.14.2 (38452185)".to_string()),
-            server_name: Some("ancient-server".to_string()),
-            server_icon: Some("🦖".to_string()),
-            server_has_update: None,
-            was_interrupted: None,
-            connection_type: Some("ancient-connection".to_string()),
-            status_detail: Some("ancient-status".to_string()),
-            upstream_provider: Some("ancient-upstream".to_string()),
-            resolved_credential: None,
-            reasoning_effort: Some("high".to_string()),
-            service_tier: Some("ancient-tier".to_string()),
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_from_ancient_server".to_string(),
+                messages: vec![crate::protocol::HistoryMessage {
+                    role: "assistant".to_string(),
+                    content: "ancient answer".to_string(),
+                    tool_calls: None,
+                    tool_data: None,
+                }],
+                images: vec![],
+                provider_name: Some("ancient-provider".to_string()),
+                provider_model: Some("ancient-model".to_string()),
+                subagent_model: Some("ancient-subagent".to_string()),
+                autoreview_enabled: Some(true),
+                autojudge_enabled: Some(true),
+                available_models: vec!["ancient-model".to_string()],
+                available_model_routes: vec![],
+                mcp_servers: vec!["ancient-mcp:1".to_string()],
+                skills: vec!["ancient-skill".to_string()],
+                total_tokens: Some((99, 100)),
+                token_usage_totals: None,
+                all_sessions: vec!["session_from_ancient_server".to_string()],
+                client_count: Some(42),
+                is_canary: Some(false),
+                reload_recovery: None,
+                // Clean older release, and crucially server_has_update is None: the
+                // ancient daemon does not know how to self-assess.
+                server_version: Some("v0.14.2 (38452185)".to_string()),
+                server_name: Some("ancient-server".to_string()),
+                server_icon: Some("🦖".to_string()),
+                server_has_update: None,
+                was_interrupted: None,
+                connection_type: Some("ancient-connection".to_string()),
+                status_detail: Some("ancient-status".to_string()),
+                upstream_provider: Some("ancient-upstream".to_string()),
+                resolved_credential: None,
+                reasoning_effort: Some("high".to_string()),
+                service_tier: Some("ancient-tier".to_string()),
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
+        crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
 
-    assert!(!redraw);
-    assert!(app.pending_server_reload);
-    // Remote session state must NOT have been applied from the ancient server.
-    assert_eq!(app.remote_session_id.as_deref(), Some("session_existing"));
-    assert_eq!(remote.session_id(), None);
-    assert!(app.remote_skills.is_empty());
-    assert!(app.remote_sessions.is_empty());
-    assert_ne!(
-        app.session.subagent_model.as_deref(),
-        Some("ancient-subagent")
-    );
-    let content = app.display_messages().last().unwrap().content.clone();
-    assert!(
-        content.contains("older release") && content.contains("jcode server stop"),
-        "{content}"
-    );
+        assert!(!redraw);
+        assert!(app.pending_server_reload);
+        // Remote session state must NOT have been applied from the ancient server.
+        assert_eq!(app.remote_session_id.as_deref(), Some("session_existing"));
+        assert_eq!(remote.session_id(), None);
+        assert!(app.remote_skills.is_empty());
+        assert!(app.remote_sessions.is_empty());
+        assert_ne!(
+            app.session.subagent_model.as_deref(),
+            Some("ancient-subagent")
+        );
+        let content = app.display_messages().last().unwrap().content.clone();
+        assert!(
+            content.contains("older release") && content.contains("jcode server stop"),
+            "{content}"
+        );
+    });
 }
 
 #[test]
@@ -1278,75 +1284,75 @@ fn older_server_reporting_no_update_is_still_deferred_via_client_check() {
     // short-circuited and the client trusted the old server forever. Now the
     // client's release-order check wins: defer + reload (after repairing the
     // shared-server channel client-side).
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
-    crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.is_remote = true;
-    app.remote_session_id = Some("session_existing".to_string());
+        app.is_remote = true;
+        app.remote_session_id = Some("session_existing".to_string());
 
-    let redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_from_old_server".to_string(),
-            messages: vec![],
-            images: vec![],
-            provider_name: Some("p".to_string()),
-            provider_model: Some("m".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec!["m".to_string()],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec![],
-            client_count: Some(1),
-            is_canary: Some(false),
-            reload_recovery: None,
-            // Older clean release than the client, but the daemon insists it has
-            // no newer binary to reload into.
-            server_version: Some("v0.14.6 (deadbeef)".to_string()),
-            server_name: Some("old-server".to_string()),
-            server_icon: Some("🕰".to_string()),
-            server_has_update: Some(false),
-            was_interrupted: None,
-            connection_type: Some("websocket".to_string()),
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_from_old_server".to_string(),
+                messages: vec![],
+                images: vec![],
+                provider_name: Some("p".to_string()),
+                provider_model: Some("m".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec!["m".to_string()],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec![],
+                client_count: Some(1),
+                is_canary: Some(false),
+                reload_recovery: None,
+                // Older clean release than the client, but the daemon insists it has
+                // no newer binary to reload into.
+                server_version: Some("v0.14.6 (deadbeef)".to_string()),
+                server_name: Some("old-server".to_string()),
+                server_icon: Some("🕰".to_string()),
+                server_has_update: Some(false),
+                was_interrupted: None,
+                connection_type: Some("websocket".to_string()),
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
+        crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
 
-    assert!(!redraw);
-    assert!(
-        app.pending_server_reload,
-        "client-proven-older server must defer + reload even when it reports Some(false)"
-    );
-    assert_eq!(app.remote_server_has_update, Some(false));
-    // Remote session state must NOT have been applied from the old server.
-    assert_eq!(app.remote_session_id.as_deref(), Some("session_existing"));
-    assert_eq!(remote.session_id(), None);
-    let content = app.display_messages().last().unwrap().content.clone();
-    assert!(
-        content.contains("older release") && content.contains("jcode server stop"),
-        "{content}"
-    );
+        assert!(!redraw);
+        assert!(
+            app.pending_server_reload,
+            "client-proven-older server must defer + reload even when it reports Some(false)"
+        );
+        assert_eq!(app.remote_server_has_update, Some(false));
+        // Remote session state must NOT have been applied from the old server.
+        assert_eq!(app.remote_session_id.as_deref(), Some("session_existing"));
+        assert_eq!(remote.session_id(), None);
+        let content = app.display_messages().last().unwrap().content.clone();
+        assert!(
+            content.contains("older release") && content.contains("jcode server stop"),
+            "{content}"
+        );
+    });
 }
 
 #[test]
@@ -1361,85 +1367,75 @@ fn older_server_history_queues_a_forced_reload_end_to_end() {
     // also assert: with one fixed publish target there is no stale channel left
     // to repoint, so the queued reload is the whole remedy.
     use std::time::{Duration, SystemTime};
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
-    crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
-    let temp = tempfile::TempDir::new().expect("temp home");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    with_temp_jcode_home(|| {
+        crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
+        crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
 
-    // Field state: a newer binary has already been published to the single
-    // fixed target, so a reload has somewhere strictly newer to go.
-    let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let published = crate::build::current_fixed_binary_path().expect("fixed path");
-    std::fs::create_dir_all(published.parent().expect("fixed dir")).expect("create fixed dir");
-    std::fs::write(&published, "bin 0.22.0").expect("write published binary");
-    std::fs::File::open(&published)
-        .expect("open published binary")
-        .set_modified(base + Duration::from_secs(60))
-        .expect("set mtime");
+        // Field state: a newer binary has already been published to the single
+        // fixed target, so a reload has somewhere strictly newer to go.
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let published = crate::build::current_fixed_binary_path().expect("fixed path");
+        std::fs::create_dir_all(published.parent().expect("fixed dir")).expect("create fixed dir");
+        std::fs::write(&published, "bin 0.22.0").expect("write published binary");
+        std::fs::File::open(&published)
+            .expect("open published binary")
+            .set_modified(base + Duration::from_secs(60))
+            .expect("set mtime");
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    app.is_remote = true;
-    app.remote_session_id = Some("session_existing".to_string());
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        app.is_remote = true;
+        app.remote_session_id = Some("session_existing".to_string());
 
-    let _redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_from_old_server".to_string(),
-            messages: vec![],
-            images: vec![],
-            provider_name: Some("p".to_string()),
-            provider_model: Some("m".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec!["m".to_string()],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec![],
-            client_count: Some(1),
-            is_canary: Some(false),
-            reload_recovery: None,
-            server_version: Some("v0.14.6 (deadbeef)".to_string()),
-            server_name: Some("old-server".to_string()),
-            server_icon: Some("🕰".to_string()),
-            server_has_update: Some(false),
-            was_interrupted: None,
-            connection_type: Some("websocket".to_string()),
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let _redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_from_old_server".to_string(),
+                messages: vec![],
+                images: vec![],
+                provider_name: Some("p".to_string()),
+                provider_model: Some("m".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec!["m".to_string()],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec![],
+                client_count: Some(1),
+                is_canary: Some(false),
+                reload_recovery: None,
+                server_version: Some("v0.14.6 (deadbeef)".to_string()),
+                server_name: Some("old-server".to_string()),
+                server_icon: Some("🕰".to_string()),
+                server_has_update: Some(false),
+                was_interrupted: None,
+                connection_type: Some("websocket".to_string()),
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    let pending = app.pending_server_reload;
+        let pending = app.pending_server_reload;
 
-    // Restore env before asserting so a panic cannot leak global state.
-    crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-
-    assert!(
-        pending,
-        "a server self-reporting an older release must be force-reloaded even when it claims \
+        assert!(
+            pending,
+            "a server self-reporting an older release must be force-reloaded even when it claims \
          server_has_update: false"
-    );
+        );
+    });
 }
 
 #[test]
@@ -1447,65 +1443,65 @@ fn current_release_server_history_is_not_deferred_by_client_check() {
     // A server on the SAME or NEWER clean release as the client, with
     // server_has_update: None, must be trusted and attached normally. This
     // guards against the client-side check over-firing and looping reloads.
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
-    crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.17.0 (d741696f)");
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.17.0 (d741696f)");
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.is_remote = true;
-    app.remote_session_id = Some("session_existing".to_string());
+        app.is_remote = true;
+        app.remote_session_id = Some("session_existing".to_string());
 
-    let redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_current".to_string(),
-            messages: vec![],
-            images: vec![],
-            provider_name: Some("p".to_string()),
-            provider_model: Some("m".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec!["m".to_string()],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec!["session_current".to_string()],
-            client_count: Some(1),
-            is_canary: Some(false),
-            reload_recovery: None,
-            server_version: Some("v0.17.0 (d741696f)".to_string()),
-            server_name: Some("current-server".to_string()),
-            server_icon: Some("🟢".to_string()),
-            server_has_update: None,
-            was_interrupted: None,
-            connection_type: Some("websocket".to_string()),
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_current".to_string(),
+                messages: vec![],
+                images: vec![],
+                provider_name: Some("p".to_string()),
+                provider_model: Some("m".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec!["m".to_string()],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec!["session_current".to_string()],
+                client_count: Some(1),
+                is_canary: Some(false),
+                reload_recovery: None,
+                server_version: Some("v0.17.0 (d741696f)".to_string()),
+                server_name: Some("current-server".to_string()),
+                server_icon: Some("🟢".to_string()),
+                server_has_update: None,
+                was_interrupted: None,
+                connection_type: Some("websocket".to_string()),
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
+        crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
 
-    // Attached normally: session id applied, no pending reload triggered by the
-    // client-side staleness check. (The History arm always returns false for
-    // redraw; the meaningful signal is that state was actually applied.)
-    let _ = redraw;
-    assert!(!app.pending_server_reload);
-    assert_eq!(app.remote_session_id.as_deref(), Some("session_current"));
+        // Attached normally: session id applied, no pending reload triggered by the
+        // client-side staleness check. (The History arm always returns false for
+        // redraw; the meaningful signal is that state was actually applied.)
+        let _ = redraw;
+        assert!(!app.pending_server_reload);
+        assert_eq!(app.remote_session_id.as_deref(), Some("session_current"));
+    });
 }
 
 #[test]

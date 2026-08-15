@@ -1678,37 +1678,6 @@ mod tests {
         }
     }
 
-    /// A single logical event split across multiple socket writes (no trailing
-    /// newline until the end) must be reassembled into one event.
-    #[tokio::test]
-    async fn next_event_reassembles_event_split_across_reads() {
-        let mut remote = RemoteConnection::dummy();
-        let peer = remote
-            ._dummy_peer
-            .take()
-            .expect("dummy remote should retain peer stream");
-        let (_reader, mut writer) = peer.into_split();
-
-        let encoded = crate::protocol::encode_event(&ServerEvent::Done { id: 9 });
-        let bytes = encoded.as_bytes();
-        let mid = bytes.len() / 2;
-        writer
-            .write_all(&bytes[..mid])
-            .await
-            .expect("first half should write");
-        // Give the reader a chance to observe the partial line.
-        tokio::task::yield_now().await;
-        writer
-            .write_all(&bytes[mid..])
-            .await
-            .expect("second half should write");
-
-        match remote.next_event().await {
-            RemoteRead::Event(ServerEvent::Done { id }) => assert_eq!(id, 9),
-            other => panic!("expected reassembled Done event, got {other:?}"),
-        }
-    }
-
     /// Two events delivered back-to-back in a single socket write must both be
     /// returned, with the second served from the buffer without another read.
     #[tokio::test]

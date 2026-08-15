@@ -1,9 +1,8 @@
 #[test]
 fn test_centered_mode_right_aligns_ordered_markers_within_list_block() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width("9. stuff\n10. more stuff here", Some(50));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width("9. stuff\n10. more stuff here", Some(50))
+    });
 
     let nine = lines
         .iter()
@@ -31,13 +30,12 @@ fn test_centered_mode_right_aligns_ordered_markers_within_list_block() {
 
 #[test]
 fn test_wrapped_centered_ordered_list_keeps_shared_content_column() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width(
-        "9. short\n10. this centered numbered list item should wrap onto another line cleanly",
-        Some(42),
-    );
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width(
+            "9. short\n10. this centered numbered list item should wrap onto another line cleanly",
+            Some(42),
+        )
+    });
 
     let wrapped = wrap_lines(lines, 26);
     let rendered: Vec<String> = wrapped
@@ -80,13 +78,12 @@ fn test_wrapped_centered_ordered_list_keeps_shared_content_column() {
 
 #[test]
 fn test_wrapped_centered_bullet_list_preserves_content_indent() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width(
-        "- this centered bullet item should wrap onto another line cleanly",
-        Some(34),
-    );
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width(
+            "- this centered bullet item should wrap onto another line cleanly",
+            Some(34),
+        )
+    });
 
     let wrapped = wrap_lines(lines, 22);
     let rendered: Vec<String> = wrapped
@@ -108,13 +105,12 @@ fn test_wrapped_centered_bullet_list_preserves_content_indent() {
 
 #[test]
 fn test_wrapped_centered_numbered_list_preserves_content_indent() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width(
-        "12. this centered numbered list item should wrap onto another line cleanly",
-        Some(38),
-    );
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width(
+            "12. this centered numbered list item should wrap onto another line cleanly",
+            Some(38),
+        )
+    });
 
     let wrapped = wrap_lines(lines, 24);
     let rendered: Vec<String> = wrapped
@@ -136,10 +132,9 @@ fn test_wrapped_centered_numbered_list_preserves_content_indent() {
 
 #[test]
 fn test_centered_mode_keeps_blockquotes_left_aligned() {
-    let saved = center_code_blocks();
-    set_center_code_blocks(true);
-    let lines = render_markdown_with_width("> quoted\n> second line", Some(50));
-    set_center_code_blocks(saved);
+    let lines = with_center_code_blocks_override(true, || {
+        render_markdown_with_width("> quoted\n> second line", Some(50))
+    });
 
     let rendered: Vec<String> = lines
         .iter()

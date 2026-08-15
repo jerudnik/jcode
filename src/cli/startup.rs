@@ -121,6 +121,51 @@ pub async fn run() -> Result<()> {
 /// registration in this one function so the composition-root wiring stays
 /// discoverable as more providers move out of the base crate.
 pub fn register_external_provider_runtimes() {
+    crate::provider::external::register_external_provider_fallible(
+        crate::provider::external::KIMI_CODE_ACP_RUNTIME,
+        || {
+            if !crate::auth::kimi_code_acp::cli_available()
+                || !crate::auth::kimi_code_acp::has_cli_owned_state()
+            {
+                return None;
+            }
+            Some(
+                std::sync::Arc::new(jcode_provider_kimi_acp_runtime::provider(
+                    crate::auth::kimi_code_acp::cli_path(),
+                )) as std::sync::Arc<dyn crate::provider::Provider>,
+            )
+        },
+    );
+    crate::provider::external::register_external_provider_fallible(
+        crate::provider::external::REASONIX_RUNTIME,
+        || {
+            if !crate::auth::reasonix::cli_available()
+                || !crate::auth::reasonix::config_presence().any()
+            {
+                return None;
+            }
+            Some(
+                std::sync::Arc::new(jcode_provider_reasonix_runtime::provider(
+                    crate::auth::reasonix::cli_path(),
+                )) as std::sync::Arc<dyn crate::provider::Provider>,
+            )
+        },
+    );
+    crate::provider::external::register_external_provider_fallible(
+        crate::provider::external::GROK_BUILD_RUNTIME,
+        || {
+            if !crate::auth::grok_build::cli_available()
+                || !crate::auth::grok_build::has_cached_login()
+            {
+                return None;
+            }
+            Some(
+                std::sync::Arc::new(jcode_provider_grok_build_runtime::provider(
+                    crate::auth::grok_build::cli_path(),
+                )) as std::sync::Arc<dyn crate::provider::Provider>,
+            )
+        },
+    );
     crate::provider::external::register_external_provider(
         crate::provider::external::GEMINI_RUNTIME,
         || std::sync::Arc::new(jcode_provider_gemini_runtime::GeminiProvider::new()),
@@ -314,6 +359,14 @@ mod tests {
         // Copilot credentials exist on the machine running the tests.
         assert!(crate::provider::external::external_provider_registered(
             crate::provider::external::COPILOT_RUNTIME
+        ));
+        // Grok Build is also fallible: the factory is registered unconditionally
+        // but only instantiates when the CLI and cached subscription login exist.
+        assert!(crate::provider::external::external_provider_registered(
+            crate::provider::external::GROK_BUILD_RUNTIME
+        ));
+        assert!(crate::provider::external::external_provider_registered(
+            crate::provider::external::REASONIX_RUNTIME
         ));
     }
 }

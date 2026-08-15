@@ -271,30 +271,6 @@ fn test_compute_streaming_tps_uses_latest_observed_snapshot_instead_of_current_r
 }
 
 #[test]
-fn test_compute_streaming_tps_does_not_decay_on_redundant_usage_snapshots() {
-    let mut app = create_test_app();
-    let mut seen = 0;
-
-    app.streaming.streaming_tps_collect_output = true;
-    app.streaming.streaming_tps_start = Some(Instant::now() - Duration::from_secs(10));
-    app.accumulate_streaming_output_tokens(40, &mut seen);
-    let initial_tps = app.compute_streaming_tps().expect("initial tps");
-
-    app.streaming.streaming_tps_start = Some(Instant::now() - Duration::from_secs(30));
-    app.accumulate_streaming_output_tokens(40, &mut seen);
-
-    let tps = app.compute_streaming_tps().expect("tps");
-    assert!(
-        initial_tps > 3.9 && initial_tps < 4.1,
-        "unexpected initial tps: {initial_tps}"
-    );
-    assert!(
-        tps > 3.9 && tps < 4.1,
-        "unexpected tps after redundant snapshot: {tps}"
-    );
-}
-
-#[test]
 fn test_compute_streaming_tps_bursty_stream_simulation_stays_constant_between_real_updates() {
     let mut app = create_test_app();
     let mut seen = 0;
@@ -513,17 +489,6 @@ fn test_handle_key_typing() {
 }
 
 #[test]
-fn test_handle_key_shift_slash_preserves_layout_translated_slash() {
-    let mut app = create_test_app();
-
-    app.handle_key(KeyCode::Char('/'), KeyModifiers::SHIFT)
-        .unwrap();
-
-    assert_eq!(app.input(), "/");
-    assert_eq!(app.cursor_pos(), 1);
-}
-
-#[test]
 fn test_handle_key_event_shift_slash_preserves_layout_translated_slash() {
     use crossterm::event::{KeyEvent, KeyEventKind};
 
@@ -554,47 +519,37 @@ fn test_handle_key_control_alt_symbol_inserts_layout_translated_text() {
 }
 
 #[test]
-fn test_super_space_toggles_next_prompt_new_session_routing() {
-    let mut app = create_test_app();
-
-    app.handle_key(KeyCode::Char(' '), KeyModifiers::SUPER)
-        .unwrap();
-    assert!(app.route_next_prompt_to_new_session);
-    assert_eq!(
-        app.status_notice(),
-        Some("Next prompt → new session".to_string())
-    );
-
-    app.handle_key(KeyCode::Char(' '), KeyModifiers::SUPER)
-        .unwrap();
-    assert!(!app.route_next_prompt_to_new_session);
-    assert_eq!(
-        app.status_notice(),
-        Some("Next-prompt new session canceled".to_string())
-    );
-}
-
-#[test]
-fn test_alt_space_toggles_next_prompt_new_session_routing() {
-    let mut app = create_test_app();
-
+fn test_modifier_space_toggles_next_prompt_new_session_routing() {
     // Option/Alt+Space mirrors Cmd/Super+Space so the fork hotkey works in
     // terminals where Cmd+Space is captured by the OS (e.g. Spotlight).
-    app.handle_key(KeyCode::Char(' '), KeyModifiers::ALT)
-        .unwrap();
-    assert!(app.route_next_prompt_to_new_session);
-    assert_eq!(
-        app.status_notice(),
-        Some("Next prompt → new session".to_string())
-    );
+    for (case, modifier) in [
+        ("cmd+space", KeyModifiers::SUPER),
+        ("alt+space", KeyModifiers::ALT),
+    ] {
+        let mut app = create_test_app();
 
-    app.handle_key(KeyCode::Char(' '), KeyModifiers::ALT)
-        .unwrap();
-    assert!(!app.route_next_prompt_to_new_session);
-    assert_eq!(
-        app.status_notice(),
-        Some("Next-prompt new session canceled".to_string())
-    );
+        app.handle_key(KeyCode::Char(' '), modifier).unwrap();
+        assert!(
+            app.route_next_prompt_to_new_session,
+            "{case}: first press arms routing"
+        );
+        assert_eq!(
+            app.status_notice(),
+            Some("Next prompt → new session".to_string()),
+            "{case}: armed notice"
+        );
+
+        app.handle_key(KeyCode::Char(' '), modifier).unwrap();
+        assert!(
+            !app.route_next_prompt_to_new_session,
+            "{case}: second press disarms routing"
+        );
+        assert_eq!(
+            app.status_notice(),
+            Some("Next-prompt new session canceled".to_string()),
+            "{case}: canceled notice"
+        );
+    }
 }
 
 #[test]

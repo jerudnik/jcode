@@ -455,10 +455,10 @@ fn the_ordinary_auto_poke_stops_at_its_safety_budget() {
     with_temp_jcode_home(|| {
         let mut app = create_test_app();
         app.auto_poke_incomplete_todos = true;
-        save_pending_todos(&app, 3);
 
         let budget = super::commands::MAX_AUTO_POKE_FOLLOWUPS;
         for i in 0..budget {
+            save_pending_todos(&app, 3 + usize::from(i));
             assert!(
                 app.schedule_auto_poke_followup_if_needed(),
                 "poke {i} of {budget} is inside the budget and must still fire"
@@ -467,6 +467,7 @@ fn the_ordinary_auto_poke_stops_at_its_safety_budget() {
         }
 
         // The list is still incomplete, so only the budget can stop this.
+        save_pending_todos(&app, 3 + usize::from(budget));
         assert!(
             !app.schedule_auto_poke_followup_if_needed(),
             "the poke must stop once it has spent its budget of {budget}"
@@ -517,11 +518,17 @@ fn the_poke_budget_is_not_consumed_by_turns_that_do_not_poke_and_resets_on_rearm
             "declined pokes must not be charged against the budget"
         );
 
-        // Spend the budget.
-        for _ in 0..super::commands::MAX_AUTO_POKE_FOLLOWUPS {
+        // Spend the budget with distinct todo revisions. Unchanged revisions are
+        // intentionally suppressed and must not count against this backstop.
+        for i in 0..super::commands::MAX_AUTO_POKE_FOLLOWUPS {
+            save_pending_todos(&app, 2 + usize::from(i));
             assert!(app.schedule_auto_poke_followup_if_needed());
             drain_poke_queue(&mut app);
         }
+        save_pending_todos(
+            &app,
+            2 + usize::from(super::commands::MAX_AUTO_POKE_FOLLOWUPS),
+        );
         assert!(!app.schedule_auto_poke_followup_if_needed());
 
         // Re-arming with /poke restores a full budget.
@@ -535,6 +542,103 @@ fn the_poke_budget_is_not_consumed_by_turns_that_do_not_poke_and_resets_on_rearm
         assert!(
             app.schedule_auto_poke_followup_if_needed(),
             "after re-arming, the poke must work again"
+        );
+    });
+}
+
+#[test]
+fn unchanged_todos_do_not_repeat_or_spend_auto_poke_budget() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.auto_poke_incomplete_todos = true;
+        crate::todo::save_todos(&app.session.id, &[poke_todo("t1", "Wait for worker", &[])])
+            .expect("save todos");
+
+        assert!(app.schedule_auto_poke_followup_if_needed());
+        assert_eq!(app.auto_poke_followups_sent, 1);
+        drain_poke_queue(&mut app);
+
+        assert!(
+            !app.schedule_auto_poke_followup_if_needed(),
+            "an unchanged list must not queue another automatic turn"
+        );
+        assert!(app.queued_messages.is_empty());
+        assert_eq!(
+            app.auto_poke_followups_sent, 1,
+            "a suppressed duplicate must not consume safety budget"
+        );
+    });
+}
+
+#[test]
+fn changed_outstanding_todos_rearm_one_auto_poke() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.auto_poke_incomplete_todos = true;
+        let mut todos = vec![
+            poke_todo("t1", "Write the plan", &[]),
+            poke_todo("t2", "Ship the change", &["waiting on review"]),
+        ];
+        crate::todo::save_todos(&app.session.id, &todos).expect("save todos");
+
+        assert!(app.schedule_auto_poke_followup_if_needed());
+        drain_poke_queue(&mut app);
+
+        todos.push(poke_todo("t3", "Add regression coverage", &[]));
+        crate::todo::save_todos(&app.session.id, &todos).expect("add todo");
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "adding an outstanding todo must produce one fresh poke"
+        );
+        drain_poke_queue(&mut app);
+
+        todos[2].status = "completed".to_string();
+        crate::todo::save_todos(&app.session.id, &todos).expect("complete todo");
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "completing one todo changes the outstanding set"
+        );
+        drain_poke_queue(&mut app);
+
+        todos[1].blocked_by = vec!["waiting on security review".to_string()];
+        crate::todo::save_todos(&app.session.id, &todos).expect("change blocker");
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "changing blocked_by must produce one fresh poke"
+        );
+        drain_poke_queue(&mut app);
+
+        todos[1].blocked_by.clear();
+        crate::todo::save_todos(&app.session.id, &todos).expect("clear blocker");
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "a blocked-to-actionable transition must produce one fresh poke"
+        );
+    });
+}
+
+#[test]
+fn settled_todo_cycle_allows_one_fresh_poke_for_an_equivalent_new_list() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.auto_poke_incomplete_todos = true;
+        let pending = poke_todo("t1", "Review worker result", &[]);
+        crate::todo::save_todos(&app.session.id, std::slice::from_ref(&pending))
+            .expect("save todos");
+
+        assert!(app.schedule_auto_poke_followup_if_needed());
+        drain_poke_queue(&mut app);
+
+        crate::todo::save_todos(&app.session.id, &[]).expect("settle cycle");
+        assert!(!app.schedule_auto_poke_followup_if_needed());
+
+        // Simulate default-on rearming without going through activate_auto_poke,
+        // which has its own reset. This proves settlement itself ended the cycle.
+        app.auto_poke_incomplete_todos = true;
+        crate::todo::save_todos(&app.session.id, &[pending]).expect("start equivalent cycle");
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "an equivalent list in a new cycle must receive one fresh nudge"
         );
     });
 }

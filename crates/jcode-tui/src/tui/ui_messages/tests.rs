@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::app::test_support::with_temp_jcode_home;
 
 fn extract_line_text(line: &Line<'_>) -> String {
     line.spans
@@ -123,60 +124,52 @@ fn render_plaintext_lines_hang_indents_wrapped_continuations() {
 
 #[test]
 fn render_system_message_centered_mode_left_aligns_with_padding() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage::system("Reload complete - continuing.");
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::system("Reload complete - continuing.");
 
-    let lines = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let lines = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off);
 
-    assert!(!lines.is_empty(), "expected rendered system message lines");
-    for line in &lines {
-        assert_eq!(
-            line.alignment,
-            Some(ratatui::layout::Alignment::Left),
-            "centered system lines should be left-aligned with padding"
-        );
-        assert!(
-            line.spans
-                .first()
-                .is_some_and(|span| span.content.starts_with(' ')),
-            "centered system lines should start with padding"
-        );
-    }
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(!lines.is_empty(), "expected rendered system message lines");
+        for line in &lines {
+            assert_eq!(
+                line.alignment,
+                Some(ratatui::layout::Alignment::Left),
+                "centered system lines should be left-aligned with padding"
+            );
+            assert!(
+                line.spans
+                    .first()
+                    .is_some_and(|span| span.content.starts_with(' ')),
+                "centered system lines should start with padding"
+            );
+        }
+    });
 }
 
 #[test]
 fn render_system_message_uses_width_stable_titles_on_kitty() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let prev_term_program = std::env::var("TERM_PROGRAM").ok();
-    let prev_term = std::env::var("TERM").ok();
-    crate::env::set_var("TERM_PROGRAM", "kitty");
-    crate::env::set_var("TERM", "xterm-kitty");
+    // The scope does not *clear* `TERM`/`TERM_PROGRAM` on entry (this test sets
+    // them itself), but its drop restores the whole environment snapshot, so
+    // the values survive a panicking assertion below.
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("TERM_PROGRAM", "kitty");
+        crate::env::set_var("TERM", "xterm-kitty");
 
-    let msg = DisplayMessage::system(
-        "⚡ Connection lost - retrying (attempt 2, 7s) - connection reset by server",
-    )
-    .with_title("Connection");
+        let msg = DisplayMessage::system(
+            "⚡ Connection lost - retrying (attempt 2, 7s) - connection reset by server",
+        )
+        .with_title("Connection");
 
-    let lines = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains("reconnecting"));
-    assert!(!plain.contains("⚡ reconnecting"));
-
-    match prev_term_program {
-        Some(value) => crate::env::set_var("TERM_PROGRAM", value),
-        None => crate::env::remove_var("TERM_PROGRAM"),
-    }
-    match prev_term {
-        Some(value) => crate::env::set_var("TERM", value),
-        None => crate::env::remove_var("TERM"),
-    }
+        assert!(plain.contains("reconnecting"));
+        assert!(!plain.contains("⚡ reconnecting"));
+    });
 }
 
 #[test]
@@ -251,39 +244,41 @@ fn render_system_message_strips_ansi_from_existing_inline_command_preview() {
 
 #[test]
 fn render_background_task_message_uses_swarm_flavor_for_swarm_tool() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::background_task(
-        "**Background task** `bg777` · `run_plan (6 nodes, deep mode)` (`swarm`) · ✓ completed · 92.4s · exit 0\n\n```text\nSwarm plan reached terminal/blocked state after 9 loop(s). completed=6 blocked=0 cycles=0 active=0 assignments=8\n```\n\n_Full output:_ `bg action=\"output\" task_id=\"bg777\"`",
-    );
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::background_task(
+            "**Background task** `bg777` · `run_plan (6 nodes, deep mode)` (`swarm`) · ✓ completed · 92.4s · exit 0\n\n```text\nSwarm plan reached terminal/blocked state after 9 loop(s). completed=6 blocked=0 cycles=0 active=0 assignments=8\n```\n\n_Full output:_ `bg action=\"output\" task_id=\"bg777\"`",
+        );
 
-    let lines = render_background_task_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_background_task_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert_eq!(plain, "🐝 ✓ run plan · 92.4s");
-    assert!(!plain.contains("bg777"));
-    assert!(!plain.contains("Swarm plan reached terminal/blocked state"));
+        assert_eq!(plain, "🐝 ✓ run plan · 92.4s");
+        assert!(!plain.contains("bg777"));
+        assert!(!plain.contains("Swarm plan reached terminal/blocked state"));
+    });
 }
 
 #[test]
 fn render_background_task_progress_message_uses_swarm_flavor_for_swarm_tool() {
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::background_task(
-        "**Background task progress** `bg777` · `run_plan (6 nodes, deep mode)` (`swarm`)\n\n[####--------] 33% · 2/6 nodes · completed 2 · blocked 0 · active 3 · assignments 5 (reported)",
-    );
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::background_task(
+            "**Background task progress** `bg777` · `run_plan (6 nodes, deep mode)` (`swarm`)\n\n[####--------] 33% · 2/6 nodes · completed 2 · blocked 0 · active 3 · assignments 5 (reported)",
+        );
 
-    let lines = render_background_task_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_background_task_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert_eq!(plain, "🐝 ● run plan · 2/6");
-    assert!(!plain.contains("bg777"));
+        assert_eq!(plain, "🐝 ● run plan · 2/6");
+        assert!(!plain.contains("bg777"));
+    });
 }
 
 #[test]
@@ -679,23 +674,17 @@ fn parse_todo_tool_output_accepts_timestamp_only_header() {
 
 #[test]
 fn unbiased_visual_prompt_retry_renders_complete_feedback_change() {
-    const PROMPT: &str = "can you make a pelican riding a bike animation in html and vanillia js ";
+    // The eval input for this fixture is deliberately neutral:
+    //   "can you make a pelican riding a bike animation in html and vanillia js "
+    // The visual verification strategy must come from the model's todo
+    // refinement, not from criteria planted in the prompt, so that text stays
+    // free of "feedback loop", "browser", "console", "viewport", "screenshot",
+    // and "visual quality". A loop asserting exactly that used to live here; it
+    // compared a file-local constant against itself and could not fail, so the
+    // requirement is recorded as a comment instead.
     const INITIAL_FEEDBACK: &str = "Open the page in a browser, inspect runtime errors, and verify animation state changes over time.";
     const REVISED_FEEDBACK: &str = "Serve the files locally, load them in a real browser at desktop and mobile viewport sizes, assert zero console/page errors, sample wheel and scenery transforms at two timestamps to prove motion, and exercise pause plus speed controls to confirm state changes.";
     const REVISED_OBJECTIVE: &str = "Deliver a responsive standalone animation whose pelican visibly pedals a moving bicycle through a layered seaside scene at 60fps where supported, with working pause/resume and three-speed controls, accessible labels, no external runtime dependencies, and zero browser console errors.";
-
-    // Keep the eval input neutral. The visual verification strategy must come
-    // from the model's todo refinement, not from criteria planted in the prompt.
-    for biased_term in [
-        "feedback loop",
-        "browser",
-        "console",
-        "viewport",
-        "screenshot",
-        "visual quality",
-    ] {
-        assert!(!PROMPT.to_ascii_lowercase().contains(biased_term));
-    }
 
     let todos = vec![crate::todo::TodoItem {
         id: "implement".to_string(),
@@ -969,76 +958,77 @@ fn render_system_message_uses_scheduled_task_card() {
     // Holds the shared env lock so a concurrent test mutating TERM_PROGRAM/TERM
     // (render_system_message_uses_width_stable_titles_on_kitty) cannot flip the
     // width-stable-glyph branch between this test's render and assert reads.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let msg = DisplayMessage::system(
-        "[Scheduled task]\nA scheduled task for this session is now due.\n\nTask: Follow up on the scheduler test\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nBranch: master\n\nBackground: Verify the scheduled task card styling\nSuccess criteria: The due task renders clearly\nScheduled by session: session_test",
-    );
+    with_temp_jcode_home(|| {
+        let msg = DisplayMessage::system(
+            "[Scheduled task]\nA scheduled task for this session is now due.\n\nTask: Follow up on the scheduler test\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nBranch: master\n\nBackground: Verify the scheduled task card styling\nSuccess criteria: The due task renders clearly\nScheduled by session: session_test",
+        );
 
-    let lines = render_system_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_system_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains(width_stable_system_title(
-        "⏰ scheduled task due",
-        "scheduled task due"
-    )));
-    assert!(plain.contains("This scheduled task is now active in this session."));
-    assert!(plain.contains("Follow up on the scheduler test"));
-    assert!(plain.contains("Verify the scheduled task card styling"));
-    assert!(!plain.contains("[Scheduled task]"));
-    assert!(!plain.contains("A scheduled task for this session is now due."));
+        assert!(plain.contains(width_stable_system_title(
+            "⏰ scheduled task due",
+            "scheduled task due"
+        )));
+        assert!(plain.contains("This scheduled task is now active in this session."));
+        assert!(plain.contains("Follow up on the scheduler test"));
+        assert!(plain.contains("Verify the scheduled task card styling"));
+        assert!(!plain.contains("[Scheduled task]"));
+        assert!(!plain.contains("A scheduled task for this session is now due."));
+    });
 }
 
 #[test]
 fn render_tool_message_uses_scheduled_card() {
     // Same width-stable-glyph race as render_system_message_uses_scheduled_task_card:
     // hold the env lock so a concurrent TERM_PROGRAM/TERM writer cannot flip the branch.
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let msg = DisplayMessage {
-        role: "tool".to_string(),
-        content: "Scheduled task 'Follow up on the scheduler test' for in 1m (id: sched_abc123)\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nTarget: resume session session_test".to_string(),
-        tool_calls: Vec::new(),
-        duration_secs: None,
-        title: Some("scheduled: Follow up on the scheduler test".to_string()),
-        tool_data: Some(crate::message::ToolCall {
-            id: "call_schedule_card".to_string(),
-            name: "schedule".to_string(),
-            input: serde_json::json!({
-                "task": "Follow up on the scheduler test",
-                "wake_in_minutes": 1,
-                "target": "resume"
-            }),
-            intent: None, thought_signature: None, }),
-    };
+    with_temp_jcode_home(|| {
+        let msg = DisplayMessage {
+            role: "tool".to_string(),
+            content: "Scheduled task 'Follow up on the scheduler test' for in 1m (id: sched_abc123)\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nTarget: resume session session_test".to_string(),
+            tool_calls: Vec::new(),
+            duration_secs: None,
+            title: Some("scheduled: Follow up on the scheduler test".to_string()),
+            tool_data: Some(crate::message::ToolCall {
+                id: "call_schedule_card".to_string(),
+                name: "schedule".to_string(),
+                input: serde_json::json!({
+                    "task": "Follow up on the scheduler test",
+                    "wake_in_minutes": 1,
+                    "target": "resume"
+                }),
+                intent: None, thought_signature: None, }),
+        };
 
-    let lines = render_tool_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_tool_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains(width_stable_system_title("⏰ scheduled", "scheduled")));
-    assert!(plain.contains("Will run in 1m."));
-    assert!(plain.contains("Follow up on the scheduler test"));
-    assert!(plain.contains("session session_test"));
-    assert!(plain.contains("sched_abc123"));
-    assert!(!plain.contains("✓ schedule"));
+        assert!(plain.contains(width_stable_system_title("⏰ scheduled", "scheduled")));
+        assert!(plain.contains("Will run in 1m."));
+        assert!(plain.contains("Follow up on the scheduler test"));
+        assert!(plain.contains("session session_test"));
+        assert!(plain.contains("sched_abc123"));
+        assert!(!plain.contains("✓ schedule"));
+    });
 }
 
 #[test]
 fn render_assistant_message_renders_plan_block_as_card() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::assistant(
-        "Here is the plan:\n\n```plan\n# Ship compact mode\n\n## Goal\nAdd a compact message mode.\n\n## Approach\n1. Add config flag\n2. Wire renderer\n```\n\nLet me know if this works.",
-    );
+    let lines = crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::assistant(
+            "Here is the plan:\n\n```plan\n# Ship compact mode\n\n## Goal\nAdd a compact message mode.\n\n## Approach\n1. Add config flag\n2. Wire renderer\n```\n\nLet me know if this works.",
+        );
 
-    let lines = render_assistant_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    crate::tui::markdown::set_center_code_blocks(saved);
+        render_assistant_message(&msg, 100, crate::config::DiffDisplayMode::Off)
+    });
     let plain = lines
         .iter()
         .map(extract_line_text)
@@ -1059,12 +1049,11 @@ fn render_assistant_message_renders_plan_block_as_card() {
 
 #[test]
 fn render_assistant_message_plan_card_survives_unterminated_fence() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::assistant("```plan\n# Streaming plan\n\n- step one");
+    let lines = crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::assistant("```plan\n# Streaming plan\n\n- step one");
 
-    let lines = render_assistant_message(&msg, 80, crate::config::DiffDisplayMode::Off);
-    crate::tui::markdown::set_center_code_blocks(saved);
+        render_assistant_message(&msg, 80, crate::config::DiffDisplayMode::Off)
+    });
     let plain = lines
         .iter()
         .map(extract_line_text)
@@ -1077,14 +1066,13 @@ fn render_assistant_message_plan_card_survives_unterminated_fence() {
 
 #[test]
 fn render_assistant_message_plan_card_keeps_nested_fences_inside() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage::assistant(
-        "```plan\n# Validation plan\n\n```bash\ncargo test -p jcode-tui\n```\n\nAfter the block.\n```\n\nOutside text.",
-    );
+    let lines = crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage::assistant(
+            "```plan\n# Validation plan\n\n```bash\ncargo test -p jcode-tui\n```\n\nAfter the block.\n```\n\nOutside text.",
+        );
 
-    let lines = render_assistant_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    crate::tui::markdown::set_center_code_blocks(saved);
+        render_assistant_message(&msg, 100, crate::config::DiffDisplayMode::Off)
+    });
     let plain = lines
         .iter()
         .map(extract_line_text)
@@ -1115,213 +1103,202 @@ fn split_plan_segments_returns_none_without_plan_block() {
 
 #[test]
 fn render_assistant_message_truncates_tool_calls_to_single_line() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage {
-        role: "assistant".to_string(),
-        content: "Done.".to_string(),
-        tool_calls: vec![
-            "read".to_string(),
-            "grep".to_string(),
-            "apply_patch".to_string(),
-            "batch".to_string(),
-        ],
-        duration_secs: None,
-        title: None,
-        tool_data: None,
-    };
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage {
+            role: "assistant".to_string(),
+            content: "Done.".to_string(),
+            tool_calls: vec![
+                "read".to_string(),
+                "grep".to_string(),
+                "apply_patch".to_string(),
+                "batch".to_string(),
+            ],
+            duration_secs: None,
+            title: None,
+            tool_data: None,
+        };
 
-    let lines = render_assistant_message(&msg, 20, crate::config::DiffDisplayMode::Off);
-    assert_eq!(extract_line_text(&lines[1]), "");
-    let tool_lines: Vec<String> = lines
-        .iter()
-        .skip(2)
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        })
-        .collect();
+        let lines = render_assistant_message(&msg, 20, crate::config::DiffDisplayMode::Off);
+        assert_eq!(extract_line_text(&lines[1]), "");
+        let tool_lines: Vec<String> = lines
+            .iter()
+            .skip(2)
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
 
-    assert!(
-        tool_lines.len() == 1,
-        "expected single-line tool-call summary: {tool_lines:?}"
-    );
-    assert!(
-        tool_lines[0].contains("tools:"),
-        "expected tool summary label on first line: {tool_lines:?}"
-    );
-    assert!(
-        tool_lines.iter().all(|line| line.width() <= 20),
-        "tool-call summary line should respect available width: {tool_lines:?}"
-    );
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(
+            tool_lines.len() == 1,
+            "expected single-line tool-call summary: {tool_lines:?}"
+        );
+        assert!(
+            tool_lines[0].contains("tools:"),
+            "expected tool summary label on first line: {tool_lines:?}"
+        );
+        assert!(
+            tool_lines.iter().all(|line| line.width() <= 20),
+            "tool-call summary line should respect available width: {tool_lines:?}"
+        );
+    });
 }
 
 #[test]
 fn render_assistant_message_centers_single_line_tool_summary() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage {
-        role: "assistant".to_string(),
-        content: "Done.".to_string(),
-        tool_calls: vec![
-            "read".to_string(),
-            "grep".to_string(),
-            "apply_patch".to_string(),
-            "batch".to_string(),
-        ],
-        duration_secs: None,
-        title: None,
-        tool_data: None,
-    };
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage {
+            role: "assistant".to_string(),
+            content: "Done.".to_string(),
+            tool_calls: vec![
+                "read".to_string(),
+                "grep".to_string(),
+                "apply_patch".to_string(),
+                "batch".to_string(),
+            ],
+            duration_secs: None,
+            title: None,
+            tool_data: None,
+        };
 
-    let lines = render_assistant_message(&msg, 28, crate::config::DiffDisplayMode::Off);
-    assert_eq!(extract_line_text(&lines[1]), "");
-    let tool_lines: Vec<String> = lines
-        .iter()
-        .skip(2)
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        })
-        .collect();
-
-    assert!(
-        tool_lines.len() == 1,
-        "expected single-line tool-call summary: {tool_lines:?}"
-    );
-    let first_pad = tool_lines[0].chars().take_while(|c| *c == ' ').count();
-    assert!(
-        first_pad > 0,
-        "tool summary should still be padded/centered as a block: {tool_lines:?}"
-    );
-    assert!(
-        lines
+        let lines = render_assistant_message(&msg, 28, crate::config::DiffDisplayMode::Off);
+        assert_eq!(extract_line_text(&lines[1]), "");
+        let tool_lines: Vec<String> = lines
             .iter()
             .skip(2)
-            .all(|line| line.alignment == Some(ratatui::layout::Alignment::Left)),
-        "centered tool summary should use a shared left-aligned block pad"
-    );
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
 
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(
+            tool_lines.len() == 1,
+            "expected single-line tool-call summary: {tool_lines:?}"
+        );
+        let first_pad = tool_lines[0].chars().take_while(|c| *c == ' ').count();
+        assert!(
+            first_pad > 0,
+            "tool summary should still be padded/centered as a block: {tool_lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .skip(2)
+                .all(|line| line.alignment == Some(ratatui::layout::Alignment::Left)),
+            "centered tool summary should use a shared left-aligned block pad"
+        );
+    });
 }
 
 #[test]
 fn render_assistant_message_without_body_does_not_add_extra_blank_line_before_tool_summary() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let msg = DisplayMessage {
-        role: "assistant".to_string(),
-        content: String::new(),
-        tool_calls: vec!["read".to_string()],
-        duration_secs: None,
-        title: None,
-        tool_data: None,
-    };
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let msg = DisplayMessage {
+            role: "assistant".to_string(),
+            content: String::new(),
+            tool_calls: vec!["read".to_string()],
+            duration_secs: None,
+            title: None,
+            tool_data: None,
+        };
 
-    let lines = render_assistant_message(&msg, 28, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let lines = render_assistant_message(&msg, 28, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
 
-    assert_eq!(rendered.len(), 1, "rendered={rendered:?}");
-    assert!(rendered[0].contains("tool:"), "rendered={rendered:?}");
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert_eq!(rendered.len(), 1, "rendered={rendered:?}");
+        assert!(rendered[0].contains("tool:"), "rendered={rendered:?}");
+    });
 }
 
 #[test]
 fn render_assistant_message_centered_mode_keeps_markdown_unpadded_for_center_alignment() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage::assistant(
-        "streaming-block streaming-block streaming-block streaming-block",
-    );
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::assistant(
+            "streaming-block streaming-block streaming-block streaming-block",
+        );
 
-    let lines = render_assistant_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let content_line = lines
-        .iter()
-        .find(|line| extract_line_text(line).contains("streaming-block"))
-        .expect("expected assistant markdown line");
+        let lines = render_assistant_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let content_line = lines
+            .iter()
+            .find(|line| extract_line_text(line).contains("streaming-block"))
+            .expect("expected assistant markdown line");
 
-    let first_pad = extract_line_text(content_line)
-        .chars()
-        .take_while(|c| *c == ' ')
-        .count();
-    assert_eq!(
-        first_pad, 0,
-        "centered assistant markdown should not inject left padding: {lines:?}"
-    );
-    assert_eq!(
-        content_line.alignment, None,
-        "assistant render should leave centered prose alignment unset for outer centering"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        let first_pad = extract_line_text(content_line)
+            .chars()
+            .take_while(|c| *c == ' ')
+            .count();
+        assert_eq!(
+            first_pad, 0,
+            "centered assistant markdown should not inject left padding: {lines:?}"
+        );
+        assert_eq!(
+            content_line.alignment, None,
+            "assistant render should leave centered prose alignment unset for outer centering"
+        );
+    });
 }
 
 #[test]
 fn render_assistant_message_recenters_structured_markdown_to_actual_width() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage::assistant("- one\n- two");
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::assistant("- one\n- two");
 
-    let lines = render_assistant_message(&msg, 140, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
-    let bullets: Vec<&String> = rendered.iter().filter(|line| line.contains("• ")).collect();
+        let lines = render_assistant_message(&msg, 140, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let bullets: Vec<&String> = rendered.iter().filter(|line| line.contains("• ")).collect();
 
-    assert_eq!(
-        bullets.len(),
-        2,
-        "expected two rendered bullet lines: {rendered:?}"
-    );
-    let first_pad = leading_spaces(bullets[0]);
-    let second_pad = leading_spaces(bullets[1]);
-    assert_eq!(
-        first_pad, second_pad,
-        "simple list should share a block pad: {rendered:?}"
-    );
-    assert!(
-        first_pad > 45,
-        "list should be re-centered to the full display width: {rendered:?}"
-    );
-    assert!(
-        bullets
-            .iter()
-            .all(|line| line[leading_spaces(line)..].starts_with("• ")),
-        "bullet markers should remain flush-left within the centered block: {rendered:?}"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert_eq!(
+            bullets.len(),
+            2,
+            "expected two rendered bullet lines: {rendered:?}"
+        );
+        let first_pad = leading_spaces(bullets[0]);
+        let second_pad = leading_spaces(bullets[1]);
+        assert_eq!(
+            first_pad, second_pad,
+            "simple list should share a block pad: {rendered:?}"
+        );
+        assert!(
+            first_pad > 45,
+            "list should be re-centered to the full display width: {rendered:?}"
+        );
+        assert!(
+            bullets
+                .iter()
+                .all(|line| line[leading_spaces(line)..].starts_with("• ")),
+            "bullet markers should remain flush-left within the centered block: {rendered:?}"
+        );
+    });
 }
 
 #[test]
 fn render_system_message_centered_mode_caps_wrap_width_for_visible_gutters() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage::system(
-        "This is a long centered-mode system notification that should keep visible side gutters instead of stretching nearly edge to edge in a wide terminal.",
-    );
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::system(
+            "This is a long centered-mode system notification that should keep visible side gutters instead of stretching nearly edge to edge in a wide terminal.",
+        );
 
-    let lines = render_system_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        })
-        .collect();
+        let lines = render_system_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
 
-    assert!(
-        rendered.iter().all(|line| line.starts_with("          ")),
-        "centered system message should retain visible left padding in wide layouts: {rendered:?}"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(
+            rendered.iter().all(|line| line.starts_with("          ")),
+            "centered system message should retain visible left padding in wide layouts: {rendered:?}"
+        );
+    });
 }
 
 #[test]
@@ -1367,80 +1344,76 @@ fn render_system_message_uses_connection_card_for_reconnect_status() {
 
 #[test]
 fn render_swarm_message_centered_mode_caps_wrap_width_for_long_notifications() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage::swarm(
-        "File activity",
-        "/home/jeremy/jcode/src/tui/ui_messages.rs - moss just edited this file while you were working nearby, so the notification should still read as centered in wide layouts.",
-    );
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage::swarm(
+            "File activity",
+            "/home/jeremy/jcode/src/tui/ui_messages.rs - moss just edited this file while you were working nearby, so the notification should still read as centered in wide layouts.",
+        );
 
-    let lines = render_swarm_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
-    let first_pad = rendered[0].chars().take_while(|c| *c == ' ').count();
+        let lines = render_swarm_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines.iter().map(extract_line_text).collect();
+        let first_pad = rendered[0].chars().take_while(|c| *c == ' ').count();
 
-    assert!(
-        first_pad >= 8,
-        "centered swarm notification should keep a clearly visible left gutter: {rendered:?}"
-    );
-    assert!(
-        rendered
-            .iter()
-            .all(|line| line.is_empty() || line.starts_with(&" ".repeat(first_pad))),
-        "centered swarm notification should share one left pad across wrapped lines: {rendered:?}"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(
+            first_pad >= 8,
+            "centered swarm notification should keep a clearly visible left gutter: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .all(|line| line.is_empty() || line.starts_with(&" ".repeat(first_pad))),
+            "centered swarm notification should share one left pad across wrapped lines: {rendered:?}"
+        );
+    });
 }
 
 #[test]
 fn render_swarm_message_collapsed_shows_tldr_and_expand_badge_only() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let content = jcode_tui_messages::encode_collapsible_swarm_content(
-        "fixed the flaky test",
-        "The flaky test was caused by a race in the setup helper.\n\nI rewrote it to use a barrier.",
-    );
-    let msg = DisplayMessage::swarm("DM from sheep", content);
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let content = jcode_tui_messages::encode_collapsible_swarm_content(
+            "fixed the flaky test",
+            "The flaky test was caused by a race in the setup helper.\n\nI rewrote it to use a barrier.",
+        );
+        let msg = DisplayMessage::swarm("DM from sheep", content);
 
-    let lines = render_swarm_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_swarm_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains("fixed the flaky test"), "{plain}");
-    assert!(plain.contains(super::SWARM_EXPAND_BADGE), "{plain}");
-    assert!(
-        !plain.contains("race in the setup helper"),
-        "collapsed card must hide the full body: {plain}"
-    );
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(plain.contains("fixed the flaky test"), "{plain}");
+        assert!(plain.contains(super::SWARM_EXPAND_BADGE), "{plain}");
+        assert!(
+            !plain.contains("race in the setup helper"),
+            "collapsed card must hide the full body: {plain}"
+        );
+    });
 }
 
 #[test]
 fn render_swarm_message_expanded_shows_body_and_collapse_badge() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    let collapsed = jcode_tui_messages::encode_collapsible_swarm_content(
-        "fixed the flaky test",
-        "The flaky test was caused by a race in the setup helper.",
-    );
-    let expanded =
-        jcode_tui_messages::toggle_collapsible_swarm_content(&collapsed).expect("toggle");
-    let msg = DisplayMessage::swarm("DM from sheep", expanded);
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        let collapsed = jcode_tui_messages::encode_collapsible_swarm_content(
+            "fixed the flaky test",
+            "The flaky test was caused by a race in the setup helper.",
+        );
+        let expanded =
+            jcode_tui_messages::toggle_collapsible_swarm_content(&collapsed).expect("toggle");
+        let msg = DisplayMessage::swarm("DM from sheep", expanded);
 
-    let lines = render_swarm_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    let plain = lines
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+        let lines = render_swarm_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+        let plain = lines
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
 
-    assert!(plain.contains("fixed the flaky test"), "{plain}");
-    assert!(plain.contains(super::SWARM_COLLAPSE_BADGE), "{plain}");
-    assert!(plain.contains("race in the setup helper"), "{plain}");
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(plain.contains("fixed the flaky test"), "{plain}");
+        assert!(plain.contains(super::SWARM_COLLAPSE_BADGE), "{plain}");
+        assert!(plain.contains("race in the setup helper"), "{plain}");
+    });
 }
 
 #[test]
@@ -1680,107 +1653,103 @@ fn render_tool_message_full_inline_mode_shows_full_diff() {
 
 #[test]
 fn render_tool_message_memory_recall_centered_mode_left_aligns_with_padding() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage {
-        role: "tool".to_string(),
-        content: concat!(
-            "- [fact] Centered mode should keep the recall card centered\n",
-            "- [preference] The user likes visible side gutters"
-        )
-        .to_string(),
-        tool_calls: Vec::new(),
-        duration_secs: None,
-        title: None,
-        tool_data: Some(crate::message::ToolCall {
-            id: "call_memory_recall_centered".to_string(),
-            name: "memory".to_string(),
-            input: serde_json::json!({
-                "action": "recall",
-                "query": "centered mode"
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage {
+            role: "tool".to_string(),
+            content: concat!(
+                "- [fact] Centered mode should keep the recall card centered\n",
+                "- [preference] The user likes visible side gutters"
+            )
+            .to_string(),
+            tool_calls: Vec::new(),
+            duration_secs: None,
+            title: None,
+            tool_data: Some(crate::message::ToolCall {
+                id: "call_memory_recall_centered".to_string(),
+                name: "memory".to_string(),
+                input: serde_json::json!({
+                    "action": "recall",
+                    "query": "centered mode"
+                }),
+                intent: None,
+                thought_signature: None,
             }),
-            intent: None,
-            thought_signature: None,
-        }),
-    };
+        };
 
-    let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        })
-        .collect();
+        let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
 
-    assert!(!rendered.is_empty(), "expected rendered recall card");
-    assert!(
-        rendered.iter().all(|line| line.starts_with("  ")),
-        "centered recall card should include shared left padding: {rendered:?}"
-    );
-    assert_eq!(
-        lines[0].alignment,
-        Some(ratatui::layout::Alignment::Left),
-        "centered recall card header should be left-aligned after padding"
-    );
-    assert!(
-        rendered[0]
-            .trim_start()
-            .starts_with("🧠 recalled 2 memories"),
-        "unexpected recall header: {rendered:?}"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(!rendered.is_empty(), "expected rendered recall card");
+        assert!(
+            rendered.iter().all(|line| line.starts_with("  ")),
+            "centered recall card should include shared left padding: {rendered:?}"
+        );
+        assert_eq!(
+            lines[0].alignment,
+            Some(ratatui::layout::Alignment::Left),
+            "centered recall card header should be left-aligned after padding"
+        );
+        assert!(
+            rendered[0]
+                .trim_start()
+                .starts_with("🧠 recalled 2 memories"),
+            "unexpected recall header: {rendered:?}"
+        );
+    });
 }
 
 #[test]
 fn render_tool_message_memory_store_centered_mode_left_aligns_with_padding() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(true);
-    let msg = DisplayMessage {
-        role: "tool".to_string(),
-        content: "Saved memory".to_string(),
-        tool_calls: Vec::new(),
-        duration_secs: None,
-        title: None,
-        tool_data: Some(crate::message::ToolCall {
-            id: "call_memory_store_centered".to_string(),
-            name: "memory".to_string(),
-            input: serde_json::json!({
-                "action": "remember",
-                "category": "fact",
-                "content": "Centered mode should pad saved memory cards too"
+    crate::tui::markdown::with_center_code_blocks_override(true, || {
+        let msg = DisplayMessage {
+            role: "tool".to_string(),
+            content: "Saved memory".to_string(),
+            tool_calls: Vec::new(),
+            duration_secs: None,
+            title: None,
+            tool_data: Some(crate::message::ToolCall {
+                id: "call_memory_store_centered".to_string(),
+                name: "memory".to_string(),
+                input: serde_json::json!({
+                    "action": "remember",
+                    "category": "fact",
+                    "content": "Centered mode should pad saved memory cards too"
+                }),
+                intent: None,
+                thought_signature: None,
             }),
-            intent: None,
-            thought_signature: None,
-        }),
-    };
+        };
 
-    let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
-    let rendered: Vec<String> = lines
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        })
-        .collect();
+        let lines = render_tool_message(&msg, 120, crate::config::DiffDisplayMode::Off);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            })
+            .collect();
 
-    assert!(!rendered.is_empty(), "expected rendered saved-memory card");
-    assert!(
-        rendered.iter().all(|line| line.starts_with("  ")),
-        "centered saved-memory card should include shared left padding: {rendered:?}"
-    );
-    assert_eq!(
-        lines[0].alignment,
-        Some(ratatui::layout::Alignment::Left),
-        "centered saved-memory card should be left-aligned after padding"
-    );
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+        assert!(!rendered.is_empty(), "expected rendered saved-memory card");
+        assert!(
+            rendered.iter().all(|line| line.starts_with("  ")),
+            "centered saved-memory card should include shared left padding: {rendered:?}"
+        );
+        assert_eq!(
+            lines[0].alignment,
+            Some(ratatui::layout::Alignment::Left),
+            "centered saved-memory card should be left-aligned after padding"
+        );
+    });
 }
 
 #[test]
@@ -1894,90 +1863,50 @@ fn render_agentgrep_output_body_caps_huge_output() {
 
 #[test]
 fn render_assistant_message_plan_card_wraps_instead_of_truncating() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-    // Long paragraph and long list items must wrap inside the card, not be
-    // clipped at the right border by render_rounded_box's truncation.
-    let plan_body = "# Long content plan\n\n\
-        Goal\n\
-        Produce an up-to-date ranked report grounded in current crate paths, then fix the highest-leverage low-risk offenders without destabilizing active work.\n\n\
-        Approach\n\
-        1. Write an audit document that regenerates metrics with current crate paths, ranks the top issues with evidence, and marks which items from the previous audit are complete versus stale.\n\
-        2. Map the provider migration and record whether each module is a thin wrapper, partial duplicate, or full duplicate of the extracted crate.\n";
-    let content = format!("Intro text.\n\n```plan\n{plan_body}```\n\nAfter the card.");
-    let msg = DisplayMessage::assistant(&content);
+    crate::tui::markdown::with_center_code_blocks_override(false, || {
+        // Long paragraph and long list items must wrap inside the card, not be
+        // clipped at the right border by render_rounded_box's truncation.
+        let plan_body = "# Long content plan\n\n\
+            Goal\n\
+            Produce an up-to-date ranked report grounded in current crate paths, then fix the highest-leverage low-risk offenders without destabilizing active work.\n\n\
+            Approach\n\
+            1. Write an audit document that regenerates metrics with current crate paths, ranks the top issues with evidence, and marks which items from the previous audit are complete versus stale.\n\
+            2. Map the provider migration and record whether each module is a thin wrapper, partial duplicate, or full duplicate of the extracted crate.\n";
+        let content = format!("Intro text.\n\n```plan\n{plan_body}```\n\nAfter the card.");
+        let msg = DisplayMessage::assistant(&content);
 
-    for width in [40u16, 60, 80, 100, 140] {
-        let lines = render_assistant_message(&msg, width, crate::config::DiffDisplayMode::Off);
-        let squashed = lines
-            .iter()
-            .map(extract_line_text)
-            .collect::<Vec<_>>()
-            .join(" ")
-            .replace(['│', '╭', '╮', '╰', '╯', '─'], " ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        for phrase in [
-            "without destabilizing active work.",
-            "complete versus stale.",
-            "or full duplicate of the extracted crate.",
-        ] {
-            assert!(
-                squashed.contains(phrase),
-                "width {width}: plan card lost trailing content {phrase:?}\n{squashed}"
-            );
+        for width in [40u16, 60, 80, 100, 140] {
+            let lines = render_assistant_message(&msg, width, crate::config::DiffDisplayMode::Off);
+            let squashed = lines
+                .iter()
+                .map(extract_line_text)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .replace(['│', '╭', '╮', '╰', '╯', '─'], " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            for phrase in [
+                "without destabilizing active work.",
+                "complete versus stale.",
+                "or full duplicate of the extracted crate.",
+            ] {
+                assert!(
+                    squashed.contains(phrase),
+                    "width {width}: plan card lost trailing content {phrase:?}\n{squashed}"
+                );
+            }
+            // Card borders stay intact.
+            for line in lines
+                .iter()
+                .map(extract_line_text)
+                .filter(|l| l.contains('│'))
+            {
+                assert!(
+                    line.trim_end().ends_with('│'),
+                    "width {width}: card row missing right border: {line:?}"
+                );
+            }
         }
-        // Card borders stay intact.
-        for line in lines
-            .iter()
-            .map(extract_line_text)
-            .filter(|l| l.contains('│'))
-        {
-            assert!(
-                line.trim_end().ends_with('│'),
-                "width {width}: card row missing right border: {line:?}"
-            );
-        }
-    }
-    crate::tui::markdown::set_center_code_blocks(saved);
-}
-
-#[test]
-fn render_swarm_message_preserves_inline_image_placeholder_lines() {
-    let saved = crate::tui::markdown::center_code_blocks();
-    crate::tui::markdown::set_center_code_blocks(false);
-
-    // Simulate a rendered mermaid diagram inside a swarm message body: the
-    // marker line plus its blank fill rows must survive rendering without a
-    // rail prefix or blank-line cleanup so the image draws at full height.
-    let placeholder = crate::tui::mermaid::inline_image_placeholder_lines(0xabcd1234, 4, 20);
-    assert_eq!(placeholder.len(), 4);
-    let marker_text = placeholder[0]
-        .spans
-        .iter()
-        .map(|s| s.content.as_ref())
-        .collect::<String>();
-
-    let msg = DisplayMessage::swarm(
-        "Plan graph · v3",
-        "```mermaid\nflowchart TD\n    a --> b\n```",
-    );
-    // Rendering the real message goes through the markdown pipeline; whether a
-    // real image materializes depends on protocol availability, so test the
-    // line-preservation path directly through render_swarm_message with a body
-    // the markdown renderer maps to placeholder lines is not deterministic in
-    // tests. Instead assert the parser round-trips the marker we emit.
-    let parsed = crate::tui::mermaid::parse_inline_image_placeholder(&placeholder[0]);
-    assert_eq!(parsed, Some((0xabcd1234, 4, 20)));
-    assert!(
-        marker_text.starts_with('\u{0}'),
-        "marker must keep its sentinel prefix"
-    );
-
-    // And the swarm renderer must not panic or drop content for a mermaid body.
-    let lines = render_swarm_message(&msg, 100, crate::config::DiffDisplayMode::Off);
-    assert!(!lines.is_empty());
-
-    crate::tui::markdown::set_center_code_blocks(saved);
+    });
 }

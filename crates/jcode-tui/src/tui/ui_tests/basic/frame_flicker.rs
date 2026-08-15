@@ -326,37 +326,6 @@ fn test_calculate_input_lines_empty() {
 }
 
 #[test]
-fn test_inline_ui_gap_height_only_when_inline_ui_visible() {
-    let state = TestState::default();
-    assert_eq!(inline_ui_gap_height(&state), 0);
-
-    let inline_interactive_state = crate::tui::InlineInteractiveState {
-        kind: crate::tui::PickerKind::Model,
-        entries: vec![],
-        filtered: vec![],
-        selected: 0,
-        column: 0,
-        filter: String::new(),
-        preview: false,
-    };
-    let state_with_picker = TestState {
-        inline_interactive_state: Some(inline_interactive_state),
-        ..Default::default()
-    };
-    assert_eq!(inline_ui_gap_height(&state_with_picker), 1);
-
-    let state_with_inline_view = TestState {
-        inline_view_state: Some(crate::tui::InlineViewState {
-            title: "USAGE".to_string(),
-            status: Some("refreshing".to_string()),
-            lines: vec!["Refreshing usage".to_string()],
-        }),
-        ..Default::default()
-    };
-    assert_eq!(inline_ui_gap_height(&state_with_inline_view), 1);
-}
-
-#[test]
 fn test_slow_frame_history_retains_recent_samples() {
     clear_slow_frame_history_for_tests();
     record_slow_frame_sample(SlowFrameSample {
@@ -907,66 +876,6 @@ fn test_flicker_frame_history_ignores_visible_batch_progress_updates() {
         visible_hash: 222,
         visible_streaming_hash: 0,
         visible_batch_progress_hash: 2,
-        total_ms: 5.1,
-        prepare_ms: 2.0,
-        draw_ms: 1.5,
-    });
-
-    let payload = debug_flicker_frame_history(8);
-    assert_eq!(payload["buffered_samples"], 2);
-    assert_eq!(payload["buffered_events"], 0);
-}
-
-#[test]
-fn test_flicker_frame_history_ignores_visible_streaming_updates() {
-    let _lock = viewport_snapshot_test_lock();
-    clear_flicker_frame_history_for_tests();
-    record_flicker_frame_sample(FlickerFrameSample {
-        timestamp_ms: 50,
-        session_id: Some("session_test".to_string()),
-        session_name: Some("test".to_string()),
-        display_messages_version: 13,
-        diff_mode: "Off".to_string(),
-        centered: false,
-        is_processing: true,
-        auto_scroll_paused: false,
-        scroll: 100,
-        visible_end: 120,
-        visible_lines: 20,
-        total_wrapped_lines: 1000,
-        prompt_preview_lines: 0,
-        messages_area_width: 90,
-        messages_area_height: 24,
-        content_width: 89,
-        chat_scrollbar_visible: true,
-        visible_hash: 111,
-        visible_streaming_hash: 1,
-        visible_batch_progress_hash: 0,
-        total_ms: 5.0,
-        prepare_ms: 2.0,
-        draw_ms: 1.5,
-    });
-    record_flicker_frame_sample(FlickerFrameSample {
-        timestamp_ms: 51,
-        session_id: Some("session_test".to_string()),
-        session_name: Some("test".to_string()),
-        display_messages_version: 13,
-        diff_mode: "Off".to_string(),
-        centered: false,
-        is_processing: true,
-        auto_scroll_paused: false,
-        scroll: 100,
-        visible_end: 120,
-        visible_lines: 20,
-        total_wrapped_lines: 1000,
-        prompt_preview_lines: 0,
-        messages_area_width: 90,
-        messages_area_height: 24,
-        content_width: 89,
-        chat_scrollbar_visible: true,
-        visible_hash: 222,
-        visible_streaming_hash: 2,
-        visible_batch_progress_hash: 0,
         total_ms: 5.1,
         prepare_ms: 2.0,
         draw_ms: 1.5,

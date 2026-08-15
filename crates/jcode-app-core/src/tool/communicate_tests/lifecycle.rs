@@ -70,6 +70,9 @@ async fn communicate_run_plan_stall_still_collects_finished_workers() {
         .expect("worker spawn should succeed");
     let worker_session = spawn_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()

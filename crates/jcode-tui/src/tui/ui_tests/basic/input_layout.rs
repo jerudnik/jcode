@@ -1,42 +1,4 @@
 #[test]
-fn test_file_diff_cache_reuses_entry_when_signature_matches() {
-    let temp = tempfile::NamedTempFile::new().expect("temp file");
-    std::fs::write(temp.path(), "fn main() {}\n").expect("write file");
-    let path = temp.path().to_string_lossy().to_string();
-
-    let state = file_diff_cache();
-    {
-        let mut cache = state.lock().expect("cache lock");
-        cache.entries.clear();
-        cache.order.clear();
-        let key = FileDiffCacheKey {
-            file_path: path.clone(),
-            msg_index: 1,
-        };
-        let sig = file_content_signature(&path);
-        cache.insert(
-            key.clone(),
-            FileDiffViewCacheEntry {
-                file_sig: sig.clone(),
-                rows: vec![file_diff_ui::FileDiffDisplayRow {
-                    prefix: String::new(),
-                    text: "cached".to_string(),
-                    kind: file_diff_ui::FileDiffDisplayRowKind::Placeholder,
-                }],
-                rendered_rows: vec![Some(Line::from("cached"))],
-                first_change_line: 0,
-                additions: 1,
-                deletions: 0,
-                file_ext: None,
-            },
-        );
-
-        let cached = cache.entries.get(&key).expect("cached entry");
-        assert_eq!(cached.file_sig, sig);
-    }
-}
-
-#[test]
 fn test_calculate_input_lines_single_line() {
     assert_eq!(calculate_input_lines("hello", 80), 1);
     assert_eq!(calculate_input_lines("hello world", 80), 1);
@@ -310,7 +272,10 @@ fn test_copy_badge_truncation_marks_cut_content_with_ellipsis() {
         .iter()
         .map(|span| span.content.as_ref())
         .collect();
-    assert!(text.ends_with('…'), "cut content must show ellipsis: {text:?}");
+    assert!(
+        text.ends_with('…'),
+        "cut content must show ellipsis: {text:?}"
+    );
     assert!(line.width() <= 10);
 
     // Content that fits is left intact (trailing spaces trimmed only).

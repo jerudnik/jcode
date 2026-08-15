@@ -338,6 +338,8 @@ pub enum AuthMethod {
     OpenRouterApiKey,
     /// OpenCode API key
     OpenCodeApiKey,
+    /// Kimi Code membership OAuth
+    KimiOAuth,
     /// GitHub Copilot OAuth
     CopilotOAuth,
     /// Google Gemini OAuth

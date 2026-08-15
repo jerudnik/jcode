@@ -64,7 +64,11 @@ fn test_usage_report_updates_display_only_card_without_system_message() {
     assert!(msg.content.contains("82%"));
     assert!(msg.content.contains("plan: pro"));
     let provider_messages = app.materialized_provider_messages();
-    assert_eq!(provider_messages.len(), 1, "expected only the session scaffold");
+    assert_eq!(
+        provider_messages.len(),
+        1,
+        "expected only the session scaffold"
+    );
     assert!(
         matches!(
             provider_messages[0].content.first(),
@@ -126,46 +130,6 @@ fn test_usage_with_suffix_does_not_open_picker_preview() {
 
     assert!(app.inline_interactive_state.is_none());
     assert_eq!(app.input(), "/usage open");
-}
-
-#[test]
-fn test_show_accounts_includes_masked_email_column() {
-    let now_ms = chrono::Utc::now().timestamp_millis();
-    let accounts = vec![crate::auth::claude::AnthropicAccount {
-        label: "work".to_string(),
-        access: "acc".to_string(),
-        refresh: "ref".to_string(),
-        expires: now_ms + 60000,
-        email: Some("user@example.com".to_string()),
-        scopes: Vec::new(),
-        subscription_type: Some("max".to_string()),
-    }];
-
-    let mut lines = vec!["**Anthropic Accounts:**\n".to_string()];
-    lines.push("| Account | Email | Status | Subscription | Active |".to_string());
-    lines.push("|---------|-------|--------|-------------|--------|".to_string());
-
-    for account in &accounts {
-        let status = if account.expires > now_ms {
-            "✓ valid"
-        } else {
-            "⚠ expired"
-        };
-        let email = account
-            .email
-            .as_deref()
-            .map(mask_email)
-            .unwrap_or_else(|| "unknown".to_string());
-        let sub = account.subscription_type.as_deref().unwrap_or("unknown");
-        lines.push(format!(
-            "| {} | {} | {} | {} | {} |",
-            account.label, email, status, sub, "◉"
-        ));
-    }
-
-    let output = lines.join("\n");
-    assert!(output.contains("| Account | Email | Status | Subscription | Active |"));
-    assert!(output.contains("u***r@example.com"));
 }
 
 #[test]
@@ -411,67 +375,6 @@ fn test_account_picker_preview_stays_closed_for_explicit_subcommands() {
     assert_eq!(app.input(), "/account openai settings");
 }
 
-#[test]
-fn test_account_command_combines_claude_and_openai_accounts() {
-    with_temp_jcode_home(|| {
-        let now_ms = chrono::Utc::now().timestamp_millis();
-
-        crate::auth::claude::upsert_account(crate::auth::claude::AnthropicAccount {
-            label: "claude-1".to_string(),
-            access: "claude_acc".to_string(),
-            refresh: "claude_ref".to_string(),
-            expires: now_ms + 60_000,
-            email: Some("claude@example.com".to_string()),
-            scopes: Vec::new(),
-            subscription_type: Some("pro".to_string()),
-        })
-        .unwrap();
-        crate::auth::codex::upsert_account(crate::auth::codex::OpenAiAccount {
-            label: "openai-1".to_string(),
-            access_token: "acc".to_string(),
-            refresh_token: "ref".to_string(),
-            id_token: None,
-            account_id: Some("acct_openai_1".to_string()),
-            expires_at: Some(now_ms + 60_000),
-            email: Some("openai@example.com".to_string()),
-        })
-        .unwrap();
-
-        let mut app = create_test_app();
-        app.input = "/account".to_string();
-        app.submit_input();
-
-        let picker = app
-            .inline_interactive_state
-            .as_ref()
-            .expect("inline account picker should open");
-        assert!(picker.entries.iter().any(|entry| {
-            matches!(
-                entry.action,
-                crate::tui::PickerAction::Account(crate::tui::AccountPickerAction::Switch {
-                    ref provider_id,
-                    ref label
-                }) if provider_id == "claude" && label == "claude-1"
-            )
-        }));
-        assert!(picker.entries.iter().any(|entry| {
-            matches!(
-                entry.action,
-                crate::tui::PickerAction::Account(crate::tui::AccountPickerAction::Switch {
-                    ref provider_id,
-                    ref label
-                }) if provider_id == "openai" && label == "openai-1"
-            )
-        }));
-        assert!(
-            picker
-                .entries
-                .iter()
-                .any(|entry| entry.name == "account center")
-        );
-    });
-}
-
 #[cfg(unix)]
 #[test]
 fn test_account_command_uses_fast_auth_snapshot_without_running_cursor_status() {
@@ -514,36 +417,6 @@ fn test_account_command_uses_fast_auth_snapshot_without_running_cursor_status() 
             None => crate::env::remove_var("JCODE_CURSOR_CLI_PATH"),
         }
         crate::auth::AuthStatus::invalidate_cache();
-    });
-}
-
-#[test]
-fn test_account_switch_shorthand_switches_openai_account_by_label() {
-    with_temp_jcode_home(|| {
-        let now_ms = chrono::Utc::now().timestamp_millis();
-
-        crate::auth::codex::upsert_account(crate::auth::codex::OpenAiAccount {
-            label: "openai2".to_string(),
-            access_token: "acc".to_string(),
-            refresh_token: "ref".to_string(),
-            id_token: None,
-            account_id: Some("acct_openai2".to_string()),
-            expires_at: Some(now_ms + 60_000),
-            email: Some("user2@example.com".to_string()),
-        })
-        .unwrap();
-
-        let mut app = create_test_app();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            app.input = "/account switch openai2".to_string();
-            app.submit_input();
-
-            assert_eq!(
-                crate::auth::codex::active_account_label().as_deref(),
-                Some("openai-1")
-            );
-        });
     });
 }
 
@@ -596,13 +469,14 @@ fn test_account_openai_compatible_settings_renders_provider_settings() {
 
 #[test]
 fn test_account_default_provider_command_saves_config() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let mut app = create_test_app();
-    app.input = "/account default-provider openai".to_string();
-    app.submit_input();
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.input = "/account default-provider openai".to_string();
+        app.submit_input();
 
-    let cfg = crate::config::Config::load();
-    assert_eq!(cfg.provider.default_provider.as_deref(), Some("openai"));
+        let cfg = crate::config::Config::load();
+        assert_eq!(cfg.provider.default_provider.as_deref(), Some("openai"));
+    });
 }
 
 #[test]

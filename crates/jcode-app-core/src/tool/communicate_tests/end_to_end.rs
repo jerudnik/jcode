@@ -1,3 +1,44 @@
+/// Gate the peer provider on a semaphore so the peer stays visibly
+/// running until the test explicitly releases it after the await_members
+/// call. A fixed sleep is a race on both ends: too short and the peer
+/// finishes before the await arrives (inline all-done path instead of the
+/// background hand-off these tests assert on); too long and the test
+/// client wait_for_done deadline expires.
+struct GatedTestProvider {
+    gate: Arc<tokio::sync::Semaphore>,
+}
+
+#[async_trait]
+impl Provider for GatedTestProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let gate = Arc::clone(&self.gate);
+        let stream = futures::stream::once(async move {
+            let _permit = gate.acquire().await;
+            Ok(StreamEvent::TextDelta("ok".to_string()))
+        })
+        .chain(futures::stream::once(async {
+            Ok(StreamEvent::MessageEnd { stop_reason: None })
+        }));
+        Ok(Box::pin(stream))
+    }
+
+    fn name(&self) -> &str {
+        "test"
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self {
+            gate: Arc::clone(&self.gate),
+        })
+    }
+}
+
 #[tokio::test]
 async fn communicate_list_and_await_members_work_end_to_end() {
     let _env_lock = crate::storage::lock_test_env();
@@ -7,47 +48,6 @@ async fn communicate_list_and_await_members_work_end_to_end() {
     let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
     let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
-
-    // Gate the peer provider on a semaphore so the peer stays visibly
-    // running until this test explicitly releases it after the
-    // await_members call below. A fixed sleep is a race on both ends: too
-    // short and the peer finishes before the await arrives (inline
-    // all-done path instead of the background hand-off this test asserts
-    // on); too long and the test client wait_for_done deadline expires.
-    struct GatedTestProvider {
-        gate: Arc<tokio::sync::Semaphore>,
-    }
-
-    #[async_trait]
-    impl Provider for GatedTestProvider {
-        async fn complete(
-            &self,
-            _messages: &[Message],
-            _tools: &[ToolDefinition],
-            _system: &str,
-            _resume_session_id: Option<&str>,
-        ) -> Result<EventStream> {
-            let gate = Arc::clone(&self.gate);
-            let stream = futures::stream::once(async move {
-                let _permit = gate.acquire().await;
-                Ok(StreamEvent::TextDelta("ok".to_string()))
-            })
-            .chain(futures::stream::once(async {
-                Ok(StreamEvent::MessageEnd { stop_reason: None })
-            }));
-            Ok(Box::pin(stream))
-        }
-
-        fn name(&self) -> &str {
-            "test"
-        }
-
-        fn fork(&self) -> Arc<dyn Provider> {
-            Arc::new(Self {
-                gate: Arc::clone(&self.gate),
-            })
-        }
-    }
 
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
     let provider: Arc<dyn Provider> = Arc::new(GatedTestProvider {
@@ -181,8 +181,13 @@ async fn communicate_await_members_background_returns_immediately_and_notifies()
     let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
     let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
 
-    let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
-        delay: Duration::from_millis(300),
+    // Gate the peer so it stays running until after the await hand-off is
+    // confirmed below. The 300ms DelayedTestProvider used here before raced
+    // under nextest load: the peer could finish before await_members ran,
+    // producing the inline all-done path instead of the background hand-off.
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let provider: Arc<dyn Provider> = Arc::new(GatedTestProvider {
+        gate: Arc::clone(&gate),
     });
     let server = Arc::new(Server::new(provider));
     let mut server_task = {
@@ -243,6 +248,9 @@ async fn communicate_await_members_background_returns_immediately_and_notifies()
         "expected background hand-off message, got: {}",
         await_output.output
     );
+
+    // Release the peer now that the background hand-off is confirmed.
+    gate.add_permits(16);
 
     peer.wait_for_done(peer_message_id)
         .await
@@ -611,6 +619,9 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
         .expect("spawn with prompt should succeed");
     let spawned_session = spawn_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()
@@ -693,6 +704,9 @@ async fn communicate_spawn_with_prompt_and_summary_work_end_to_end() {
         .expect("spawn with prompt should succeed");
     let spawned_session = spawn_output
         .output
+        .lines()
+        .next()
+        .expect("spawn output should include first line")
         .strip_prefix("Spawned new agent: ")
         .expect("spawn output should include session id")
         .trim()

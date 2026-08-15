@@ -2,9 +2,10 @@ use crate::auth::{AuthState, AuthStatus};
 
 use super::pricing::cheapness_for_route;
 use super::{
-    ALL_OPENAI_MODELS, AccountModelAvailabilityState, ModelRoute, MultiProvider, Provider,
-    anthropic_api_key_route_availability, anthropic_oauth_route_availability, bedrock,
-    build_anthropic_oauth_route, build_copilot_route, build_openai_api_key_route,
+    ALL_OPENAI_MODELS, AccountModelAvailabilityState, GROK_BUILD_PROFILE_ID,
+    KIMI_CODE_ACP_PROFILE_ID, ModelRoute, MultiProvider, Provider, ProviderRegistry,
+    REASONIX_PROFILE_ID, anthropic_api_key_route_availability, anthropic_oauth_route_availability,
+    bedrock, build_anthropic_oauth_route, build_copilot_route, build_openai_api_key_route,
     build_openai_oauth_route, build_openrouter_auto_route, build_openrouter_endpoint_route,
     build_openrouter_fallback_provider_route, configured_standard_openrouter_profile_routes,
     copilot, dedupe_model_routes, direct_openai_compatible_profile_routes,
@@ -269,7 +270,7 @@ pub(super) fn multiprovider_model_routes(provider: &MultiProvider) -> Vec<ModelR
     // flooded with hundreds of unusable entries.
     routes.retain(|route| is_listable_model_name(&route.model));
 
-    let routes = dedupe_model_routes(routes);
+    let mut routes = dedupe_model_routes(routes);
 
     // Structured, always-on summary of catalog route building. This is the
     // single most useful line for the recurring "model picker empty / only
@@ -290,6 +291,47 @@ pub(super) fn multiprovider_model_routes(provider: &MultiProvider) -> Vec<ModelR
         added_direct_openai_compatible_routes,
         total_ms,
     );
+
+    if let Some(grok) = ProviderRegistry::new(provider).compatible_profile(GROK_BUILD_PROFILE_ID) {
+        for mut route in grok.model_routes() {
+            route.model = format!("grok-build:{}", route.model);
+            route.provider = "Grok Build".to_string();
+            route.api_method = "grok-build-acp".to_string();
+            if !routes.iter().any(|existing| {
+                existing.model == route.model && existing.api_method == route.api_method
+            }) {
+                routes.push(route);
+            }
+        }
+    }
+
+    if let Some(kimi) = ProviderRegistry::new(provider).compatible_profile(KIMI_CODE_ACP_PROFILE_ID)
+    {
+        for mut route in kimi.model_routes() {
+            route.model = format!("kimi-code-acp:{}", route.model);
+            route.provider = "Kimi Code (official CLI)".to_string();
+            route.api_method = "kimi-code-acp".to_string();
+            if !routes.iter().any(|existing| {
+                existing.model == route.model && existing.api_method == route.api_method
+            }) {
+                routes.push(route);
+            }
+        }
+    }
+
+    if let Some(reasonix) = ProviderRegistry::new(provider).compatible_profile(REASONIX_PROFILE_ID)
+    {
+        for mut route in reasonix.model_routes() {
+            route.model = format!("reasonix:{}", route.model);
+            route.provider = "Reasonix".to_string();
+            route.api_method = "reasonix-acp".to_string();
+            if !routes.iter().any(|existing| {
+                existing.model == route.model && existing.api_method == route.api_method
+            }) {
+                routes.push(route);
+            }
+        }
+    }
 
     routes
 }

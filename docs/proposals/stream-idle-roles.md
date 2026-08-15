@@ -30,10 +30,39 @@ Session role is already known at spawn time (subagent/swarm spawns are
 distinguishable from operator-attached sessions). Resolution order:
 role-specific key → global key → built-in default.
 
-Possible refinement (later, not v1): adaptive idle — a stream that has
+Refinement (later, not v1): adaptive idle — a stream that has
 produced *no bytes at all* gets a shorter budget than one that was mid-flow
 and paused, since the former is the broken-model signature and the latter is
 the slow-network signature. Keep v1 dumb and role-based.
+
+## Watchdog refinement (promoted from "later": operator-reported, evidence attached)
+
+The adaptive-idle refinement matters sooner than v1 planning assumed, because
+stream idleness is only one instance of a wider gap: **nothing monitors swarm
+member liveness and completion on the coordinator's behalf.** Operator-observed
+failure modes, all reproduced in the 2026-08-12/13 test-audit sessions:
+
+- Coordinators do not use `swarm await` consistently, and their behavior when
+  a member finishes is inconsistent — some react, some never notice.
+- Members finish real work but never file a completion report, or file one and
+  are still marked `failed` (observed repeatedly: workers whose full output was
+  on disk carried `failed` lifecycle status after provider errors on the final
+  turn).
+- Members wedge: one `xai/grok-4.5` worker produced no output for ~45 minutes
+  before being manually stopped; the same task completed in minutes after a
+  respawn on a different route.
+- Swarms can spin out of control entirely (see `swarm-runaway-growth.md`).
+
+Proposed direction: a **watchdog** that monitors member activity (stream
+bytes, tool calls, journal writes) against role-aware idle budgets — the same
+budgets this proposal introduces — and alerts the coordinator instead of only
+killing streams. Escalation ladder: notify coordinator → mark member suspect
+in `swarm list` → offer stop/respawn. A member that dies abnormally should
+still yield a machine-readable last-known state for the coordinator.
+
+This is the runtime-signal complement to `swarm-lifecycle-remediation.md`
+(which covers PID-liveness and marker cleanup); the two should share the
+liveness probe.
 
 ## Acceptance criteria (v1)
 

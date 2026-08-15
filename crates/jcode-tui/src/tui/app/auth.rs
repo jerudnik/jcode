@@ -342,20 +342,31 @@ impl App {
             }
             LoginProviderTarget::OpenAiCompatible(profile) => {
                 let resolved = crate::provider_catalog::resolve_openai_compatible_profile(profile);
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
-                    crate::auth::kimi::clear_tokens()?;
-                    crate::auth::kimi::set_auth_mode(None)?;
-                }
-                Self::clear_api_key_login(&resolved.api_key_env, &resolved.env_file)?;
-                crate::provider_catalog::save_env_value_to_env_file(
-                    crate::provider_catalog::OPENAI_COMPAT_LOCAL_ENABLED_ENV,
-                    &resolved.env_file,
-                    None,
-                )?;
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
-                    Ok("Logged out of Kimi OAuth and API-key credentials.".to_string())
-                } else {
-                    Ok(format!("Logged out of {} API key.", resolved.display_name))
+                match profile.auth_strategy.managed_oauth_provider() {
+                    Some(crate::provider_catalog::ManagedOAuthProvider::Kimi) => {
+                        crate::auth::kimi::clear_tokens()?;
+                        crate::auth::kimi::set_auth_mode(None)?;
+                        Self::clear_api_key_login(&resolved.api_key_env, &resolved.env_file)?;
+                        crate::provider_catalog::save_env_value_to_env_file(
+                            crate::provider_catalog::OPENAI_COMPAT_LOCAL_ENABLED_ENV,
+                            &resolved.env_file,
+                            None,
+                        )?;
+                        Ok("Logged out of Kimi OAuth and API-key credentials.".to_string())
+                    }
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect) => {
+                        crate::auth::grok_direct::clear_credentials()?;
+                        Ok("Logged out of Grok Direct OAuth credentials.".to_string())
+                    }
+                    None => {
+                        Self::clear_api_key_login(&resolved.api_key_env, &resolved.env_file)?;
+                        crate::provider_catalog::save_env_value_to_env_file(
+                            crate::provider_catalog::OPENAI_COMPAT_LOCAL_ENABLED_ENV,
+                            &resolved.env_file,
+                            None,
+                        )?;
+                        Ok(format!("Logged out of {} API key.", resolved.display_name))
+                    }
                 }
             }
             LoginProviderTarget::Cursor => {
@@ -469,13 +480,21 @@ impl App {
         }
         for profile in crate::provider_catalog::openai_compatible_profiles() {
             let resolved = crate::provider_catalog::resolve_openai_compatible_profile(*profile);
-            Self::clear_api_key_logout_summary(
-                &mut summary,
-                &mut errors,
-                &format!("{} API key", resolved.display_name),
-                &resolved.api_key_env,
-                &resolved.env_file,
-            );
+            if !matches!(
+                profile.auth_strategy,
+                crate::provider_catalog::OpenAiCompatibleAuthStrategy::ManagedOAuth {
+                    api_key_fallback: false,
+                    ..
+                }
+            ) {
+                Self::clear_api_key_logout_summary(
+                    &mut summary,
+                    &mut errors,
+                    &format!("{} API key", resolved.display_name),
+                    &resolved.api_key_env,
+                    &resolved.env_file,
+                );
+            }
             if let Err(err) = crate::provider_catalog::save_env_value_to_env_file(
                 crate::provider_catalog::OPENAI_COMPAT_LOCAL_ENABLED_ENV,
                 &resolved.env_file,
@@ -503,6 +522,12 @@ impl App {
             Ok(()) if kimi_configured => summary.push("Kimi OAuth".to_string()),
             Ok(()) => {}
             Err(err) => errors.push(format!("Kimi OAuth: {}", err)),
+        }
+        let grok_direct_configured = crate::auth::grok_direct::is_configured();
+        match crate::auth::grok_direct::clear_credentials() {
+            Ok(()) if grok_direct_configured => summary.push("Grok Direct OAuth".to_string()),
+            Ok(()) => {}
+            Err(err) => errors.push(format!("Grok Direct OAuth: {}", err)),
         }
 
         crate::auth::AuthStatus::invalidate_cache();
@@ -599,14 +624,58 @@ impl App {
             crate::provider_catalog::LoginProviderTarget::Bedrock => self.start_bedrock_login(),
             crate::provider_catalog::LoginProviderTarget::Azure => self.start_azure_login(),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile)
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id =>
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(crate::provider_catalog::ManagedOAuthProvider::Kimi)
+                ) =>
             {
                 self.start_kimi_login()
+            }
+            crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile)
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect)
+                ) =>
+            {
+                self.start_grok_direct_login()
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 self.start_openai_compatible_profile_login(profile)
             }
             crate::provider_catalog::LoginProviderTarget::Cursor => self.start_cursor_login(),
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => {
+                crate::telemetry::record_auth_surface_blocked(
+                    provider.id,
+                    provider.auth_kind.label(),
+                );
+                self.push_display_message(DisplayMessage::system(
+                    "Grok Build authentication is owned by the Grok CLI. Run `jcode login grok` in a terminal, then reopen the model picker. Use `jcode login grok --no-browser` for device authentication."
+                        .to_string(),
+                ));
+                self.set_status_notice("Grok Build: use terminal login");
+            }
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => {
+                crate::telemetry::record_auth_surface_blocked(
+                    provider.id,
+                    provider.auth_kind.label(),
+                );
+                self.push_display_message(DisplayMessage::system(
+                    "Kimi Code authentication is owned by its official CLI. Run `jcode login kimi-code-acp` in a terminal, then reopen the model picker."
+                        .to_string(),
+                ));
+                self.set_status_notice("Kimi Code ACP: use terminal login");
+            }
+            crate::provider_catalog::LoginProviderTarget::Reasonix => {
+                crate::telemetry::record_auth_surface_blocked(
+                    provider.id,
+                    provider.auth_kind.label(),
+                );
+                self.push_display_message(DisplayMessage::system(
+                    "Reasonix setup is owned by its CLI. Run `jcode login reasonix` in a terminal, then reopen the model picker."
+                        .to_string(),
+                ));
+                self.set_status_notice("Reasonix: use terminal login");
+            }
             crate::provider_catalog::LoginProviderTarget::Copilot => self.start_copilot_login(),
             crate::provider_catalog::LoginProviderTarget::Gemini => self.start_gemini_login(),
             crate::provider_catalog::LoginProviderTarget::Antigravity => {
@@ -1553,6 +1622,96 @@ impl App {
         ));
     }
 
+    fn start_grok_direct_login(&mut self) {
+        self.set_status_notice("Login: Grok Direct device flow...");
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.begin_pending_login(PendingLogin::GrokDirect {
+            cancelled: Arc::clone(&cancelled),
+        });
+
+        tokio::spawn(async move {
+            let device = match crate::auth::grok_direct::request_device_authorization().await {
+                Ok(device) => device,
+                Err(error) => {
+                    Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                        provider: "grok-direct".to_string(),
+                        success: false,
+                        message: format!("Grok Direct device flow failed: {}", error),
+                    }));
+                    return;
+                }
+            };
+
+            let verification_url = device.verification_url().to_string();
+            let clipboard_ok = copy_to_clipboard(&device.user_code);
+            let clipboard_msg = if clipboard_ok {
+                " (copied to clipboard)"
+            } else {
+                ""
+            };
+            let qr_section = crate::login_qr::markdown_section_for_tui(
+                &verification_url,
+                "Scan this on another device to open the xAI verification page:",
+            )
+            .map(|section| format!("\n\n{section}"))
+            .unwrap_or_else(|| {
+                crate::logging::warn("Grok Direct login: QR section unavailable");
+                String::new()
+            });
+            Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                provider: "grok_direct_code".to_string(),
+                success: true,
+                message: format!(
+                    "Grok Direct Login (Experimental)\n\nUse your Grok subscription. This does not log into the Grok Build CLI and does not create or consume an xAI API key.\n\nYour code: {}{}\n\nOpening browser to {} ...\nAuthorize Jcode with your xAI account.{}\n\nWaiting for authorization... (type /cancel to abort)",
+                    device.user_code, clipboard_msg, verification_url, qr_section
+                ),
+            }));
+
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if !Self::open_auth_browser(&verification_url) {
+                crate::logging::warn(
+                    "Grok Direct login: could not open the verification URL in a browser",
+                );
+            }
+
+            let credentials =
+                match crate::auth::grok_direct::poll_for_credentials_with_cancellation(
+                    &device, cancelled,
+                )
+                .await
+                {
+                    Ok(credentials) => credentials,
+                    Err(error) => {
+                        Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                            provider: "grok-direct".to_string(),
+                            success: false,
+                            message: format!("Grok Direct login failed: {}", error),
+                        }));
+                        return;
+                    }
+                };
+
+            match crate::auth::grok_direct::save_credentials(&credentials) {
+                Ok(()) => Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                    provider: "grok-direct".to_string(),
+                    success: true,
+                    message: "Authenticated with Grok Direct.\n\nGrok subscription models are now available in /model."
+                        .to_string(),
+                })),
+                Err(error) => Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
+                    provider: "grok-direct".to_string(),
+                    success: false,
+                    message: format!("Failed to save Grok Direct credentials: {}", error),
+                })),
+            }
+        });
+
+        self.push_display_message(DisplayMessage::system(
+            "Grok Direct Login (Experimental)\n\nUse your Grok subscription. This is separate from the Grok Build CLI and xAI API-key login.\n\nStarting xAI device flow... please wait. Type /cancel to abort."
+                .to_string(),
+        ));
+    }
+
     fn start_copilot_login(&mut self) {
         self.set_status_notice("Login: copilot device flow...");
         self.begin_pending_login(PendingLogin::Copilot);
@@ -1829,6 +1988,7 @@ impl App {
     pub(super) fn handle_login_input(&mut self, pending: PendingLogin, input: String) {
         let trimmed = input.trim();
         if trimmed == "/cancel" {
+            pending.cancel_background_poll();
             if let Some((provider, method)) = pending.telemetry_context() {
                 crate::telemetry::record_auth_cancelled(&provider, &method);
             }
@@ -2463,6 +2623,14 @@ impl App {
                 ));
                 self.pending_login = Some(PendingLogin::Kimi);
             }
+            PendingLogin::GrokDirect { cancelled } => {
+                self.push_display_message(DisplayMessage::system(
+                    "Grok Direct login is waiting for browser authorization.\n\
+                     Complete the login in your browser, or type /cancel to abort."
+                        .to_string(),
+                ));
+                self.pending_login = Some(PendingLogin::GrokDirect { cancelled });
+            }
             PendingLogin::AutoImportSelection { candidates } => {
                 let selected = match crate::external_auth::parse_external_auth_review_selection(
                     &input,
@@ -2639,6 +2807,22 @@ impl App {
         let provider = Arc::clone(&self.provider);
         let session_id = self.session.id.clone();
         let before_routes = provider.model_routes();
+        let activated_model = crate::provider_catalog::resolve_login_provider(&provider_id)
+            .and_then(|descriptor| match descriptor.target {
+                crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
+                    crate::provider_catalog::resolve_openai_compatible_profile(profile)
+                        .default_model
+                }
+                _ => None,
+            });
+        let activation = crate::auth::lifecycle::AuthActivationResult {
+            provider_id: Some(provider_id.clone()),
+            provider_label: Some(provider_label.clone()),
+            activated_model,
+            expected_runtime: Some("openai-compatible".to_string()),
+            expected_catalog_namespace: Some(provider_id.clone()),
+        };
+        let selected_model_before_refresh = provider.model();
         self.provider.on_auth_changed();
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -2677,21 +2861,17 @@ impl App {
                             before_provider_routes,
                             provider_routes.clone(),
                         );
-                        let selected = provider_routes
-                            .iter()
-                            .find(|route| {
-                                route.available
-                                    && route.api_method.eq_ignore_ascii_case(&expected_api_method)
-                                    && crate::provider::is_listable_model_name(&route.model)
-                            })
-                            .or_else(|| {
-                                provider_routes.iter().find(|route| {
-                                    route.available
-                                        && route.api_method.eq_ignore_ascii_case(&provider_id)
-                                        && crate::provider::is_listable_model_name(&route.model)
-                                })
-                            })
-                            .map(|route| route.model.clone());
+                        let selected = crate::auth::lifecycle::provider_model_to_select_after_auth(
+                            &activation,
+                            Some(&selected_model_before_refresh),
+                            &routes,
+                        )
+                        .or_else(|| {
+                            provider_routes
+                                .iter()
+                                .find(|route| route.model == selected_model_before_refresh)
+                                .map(|route| route.model.clone())
+                        });
 
                         if let Some(model) = selected {
                             let model_request = format!("{}:{}", provider_id, model);
@@ -2819,7 +2999,10 @@ impl App {
     }
 
     pub(super) fn handle_login_completed(&mut self, login: LoginCompleted) {
-        if matches!(login.provider.as_str(), "copilot_code" | "kimi_code") {
+        if matches!(
+            login.provider.as_str(),
+            "copilot_code" | "kimi_code" | "grok_direct_code"
+        ) {
             self.push_display_message(DisplayMessage::system(login.message.clone()));
             if let Some(code) = login
                 .message
@@ -2827,10 +3010,10 @@ impl App {
                 .nth(1)
                 .and_then(|s| s.split_whitespace().next())
             {
-                let destination = if login.provider == "kimi_code" {
-                    "Kimi"
-                } else {
-                    "GitHub"
+                let destination = match login.provider.as_str() {
+                    "kimi_code" => "Kimi",
+                    "grok_direct_code" => "xAI",
+                    _ => "GitHub",
                 };
                 self.set_status_notice(format!("Login: enter {} at {}", code, destination));
             }
@@ -2872,6 +3055,11 @@ impl App {
             self.set_status_notice(format!("Login: {} ready", login.provider));
             if Self::login_provider_is_azure(&login.provider) {
                 self.activate_azure_runtime_model_after_login();
+            } else if login.provider.eq_ignore_ascii_case("grok-direct") {
+                self.start_openai_compatible_post_login_activation(
+                    "grok-direct".to_string(),
+                    "Grok Direct".to_string(),
+                );
             } else {
                 self.trigger_provider_auth_changed();
             }

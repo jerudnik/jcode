@@ -13,12 +13,16 @@ pub mod external;
 pub mod gemini;
 pub mod google;
 pub(crate) mod google_oauth;
+pub mod grok_build;
+pub mod grok_direct;
 pub mod integration;
 pub mod kimi;
+pub mod kimi_code_acp;
 pub mod lifecycle;
 pub mod login_diagnostics;
 pub mod login_flows;
 pub mod oauth;
+pub mod reasonix;
 pub(crate) mod refresh_coordinator;
 pub mod refresh_state;
 mod status_types;
@@ -136,6 +140,7 @@ fn log_auth_status_snapshot(event: &str, status: &AuthStatus) {
             ("gemini", auth_state_label(status.gemini)),
             ("cursor", auth_state_label(status.cursor)),
             ("google", auth_state_label(status.google)),
+            ("reasonix", auth_state_label(status.reasonix)),
         ],
     );
 }
@@ -261,6 +266,9 @@ impl AuthStatus {
             || self.antigravity == AuthState::Available
             || self.gemini == AuthState::Available
             || self.cursor == AuthState::Available
+            || self.grok_build == AuthState::Available
+            || self.kimi_code_acp == AuthState::Available
+            || self.reasonix == AuthState::Available
     }
 
     /// Emit a structured, non-secret snapshot of which providers currently have
@@ -296,6 +304,9 @@ impl AuthStatus {
                 ("antigravity", self.antigravity.label().to_string()),
                 ("gemini", self.gemini.label().to_string()),
                 ("cursor", self.cursor.label().to_string()),
+                ("grok_build", self.grok_build.label().to_string()),
+                ("kimi_code_acp", self.kimi_code_acp.label().to_string()),
+                ("reasonix", self.reasonix.label().to_string()),
             ],
         );
     }
@@ -328,6 +339,10 @@ impl AuthStatus {
             LoginProviderAuthStateKey::Antigravity => self.antigravity,
             LoginProviderAuthStateKey::Gemini => self.gemini,
             LoginProviderAuthStateKey::Cursor => self.cursor,
+            LoginProviderAuthStateKey::GrokDirect => self.grok_direct,
+            LoginProviderAuthStateKey::GrokBuild => self.grok_build,
+            LoginProviderAuthStateKey::KimiCodeAcp => self.kimi_code_acp,
+            LoginProviderAuthStateKey::Reasonix => self.reasonix,
             LoginProviderAuthStateKey::Google => self.google,
         }
     }
@@ -385,6 +400,9 @@ impl AuthStatus {
             // Same split for OpenAI: `openai` is the ChatGPT/Codex OAuth login,
             // `openai-api` (handled above) is the API-key login.
             crate::provider_catalog::LoginProviderTarget::OpenAi => self.openai_oauth_state,
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => self.grok_build,
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => self.kimi_code_acp,
+            crate::provider_catalog::LoginProviderTarget::Reasonix => self.reasonix,
             crate::provider_catalog::LoginProviderTarget::Bedrock => {
                 if crate::provider::bedrock::BedrockProvider::has_credentials() {
                     AuthState::Available
@@ -393,10 +411,17 @@ impl AuthStatus {
                 }
             }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
-                if crate::provider_catalog::openai_compatible_profile_is_configured(profile) {
-                    AuthState::Available
-                } else {
-                    AuthState::NotConfigured
+                match profile.auth_strategy.managed_oauth_provider() {
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect) => {
+                        self.grok_direct
+                    }
+                    _ if crate::provider_catalog::openai_compatible_profile_is_configured(
+                        profile,
+                    ) =>
+                    {
+                        AuthState::Available
+                    }
+                    _ => AuthState::NotConfigured,
                 }
             }
             _ => self.state_for_key(provider.auth_state_key),
@@ -463,31 +488,88 @@ impl AuthStatus {
                     "not configured".to_string()
                 }
             }
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => {
+                if !grok_build::cli_available() {
+                    grok_build::runtime_not_installed_hint()
+                } else if self.grok_build == AuthState::Available {
+                    "Grok CLI cached subscription login detected; ACP validates it when the provider starts"
+                        .to_string()
+                } else {
+                    "Grok Build runtime installed; run `grok login` or `grok login --device-auth`"
+                        .to_string()
+                }
+            }
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => {
+                if !kimi_code_acp::cli_available() {
+                    kimi_code_acp::runtime_not_installed_hint()
+                } else if self.kimi_code_acp == AuthState::Available {
+                    "Kimi Code CLI-owned login detected; ACP validates it when the provider starts"
+                        .to_string()
+                } else {
+                    kimi_code_acp::authentication_required_hint().to_string()
+                }
+            }
+            crate::provider_catalog::LoginProviderTarget::Reasonix => {
+                let presence = reasonix::config_presence();
+                if !reasonix::cli_available() {
+                    reasonix::runtime_not_installed_hint()
+                } else if presence.project && presence.user {
+                    "Reasonix project and user configuration detected; ACP validates runtime setup when the provider starts"
+                        .to_string()
+                } else if presence.project {
+                    "Reasonix project configuration (`./reasonix.toml`) detected; ACP validates runtime setup when the provider starts"
+                        .to_string()
+                } else if presence.user {
+                    "Reasonix user configuration (`~/.reasonix/config.toml`) detected; ACP validates runtime setup when the provider starts"
+                        .to_string()
+                } else {
+                    reasonix::setup_required_hint().to_string()
+                }
+            }
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
                 let resolved = crate::provider_catalog::resolve_openai_compatible_profile(profile);
-                if self.state_for_provider(provider) == AuthState::Available {
-                    if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                        && crate::auth::kimi::has_oauth_tokens()
+                match profile.auth_strategy.managed_oauth_provider() {
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect) => {
+                        match self.grok_direct {
+                            AuthState::Available => {
+                                "Jcode-managed Grok Direct OAuth token (automatic refresh)"
+                                    .to_string()
+                            }
+                            AuthState::Expired => {
+                                "Grok Direct OAuth credentials need attention; run `/login grok-direct`"
+                                    .to_string()
+                            }
+                            AuthState::NotConfigured => "not configured".to_string(),
+                        }
+                    }
+                    Some(crate::provider_catalog::ManagedOAuthProvider::Kimi)
+                        if crate::auth::kimi::has_oauth_tokens() =>
                     {
                         "OAuth (automatic refresh)".to_string()
-                    } else if resolved.requires_api_key {
+                    }
+                    _ if self.state_for_provider(provider) == AuthState::Available
+                        && resolved.requires_api_key =>
+                    {
                         format!("API key (`{}`)", resolved.api_key_env)
-                    } else if crate::provider_catalog::load_api_key(
+                    }
+                    _ if self.state_for_provider(provider) == AuthState::Available
+                        && crate::provider_catalog::load_api_key(
                         &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
                             &resolved,
                         ),
                     )
                     .is_some()
+                    =>
                     {
                         format!(
                             "local endpoint (`{}`) + optional API key (`{}`)",
                             resolved.api_base, resolved.api_key_env
                         )
-                    } else {
+                    }
+                    _ if self.state_for_provider(provider) == AuthState::Available => {
                         format!("local endpoint (`{}`)", resolved.api_base)
                     }
-                } else {
-                    "not configured".to_string()
+                    _ => "not configured".to_string(),
                 }
             }
             _ => match provider.auth_state_key {
@@ -692,9 +774,70 @@ impl AuthStatus {
                     AuthValidationMethod::PresenceCheck,
                 )
             }
+            crate::provider_catalog::LoginProviderTarget::GrokBuild => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::LocalCliSession
+                } else {
+                    AuthCredentialSource::None
+                },
+                if !grok_build::cli_available() {
+                    grok_build::runtime_not_installed_hint()
+                } else if state == AuthState::Available {
+                    "Grok CLI cached subscription login".to_string()
+                } else {
+                    "Grok CLI installed; subscription login required".to_string()
+                },
+                AuthExpiryConfidence::Unknown,
+                AuthRefreshSupport::ExternalManaged,
+                AuthValidationMethod::PresenceCheck,
+            ),
+            crate::provider_catalog::LoginProviderTarget::KimiCodeAcp => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::LocalCliSession
+                } else {
+                    AuthCredentialSource::None
+                },
+                self.method_detail_for_provider(provider),
+                AuthExpiryConfidence::Unknown,
+                AuthRefreshSupport::ExternalManaged,
+                AuthValidationMethod::PresenceCheck,
+            ),
+            crate::provider_catalog::LoginProviderTarget::Reasonix => (
+                if state == AuthState::Available {
+                    AuthCredentialSource::LocalCliSession
+                } else {
+                    AuthCredentialSource::None
+                },
+                self.method_detail_for_provider(provider),
+                AuthExpiryConfidence::Unknown,
+                AuthRefreshSupport::ExternalManaged,
+                AuthValidationMethod::PresenceCheck,
+            ),
             crate::provider_catalog::LoginProviderTarget::OpenAiCompatible(profile) => {
-                if profile.id == crate::provider_catalog::KIMI_PROFILE.id
-                    && crate::auth::kimi::has_oauth_tokens()
+                if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(crate::provider_catalog::ManagedOAuthProvider::GrokDirect)
+                ) {
+                    (
+                        if state == AuthState::NotConfigured {
+                            AuthCredentialSource::None
+                        } else {
+                            AuthCredentialSource::JcodeManagedFile
+                        },
+                        "Jcode-managed Grok Direct OAuth token store (`~/.config/jcode/grok-direct/credentials.json`)"
+                            .to_string(),
+                        if state == AuthState::NotConfigured {
+                            AuthExpiryConfidence::Unknown
+                        } else {
+                            AuthExpiryConfidence::Exact
+                        },
+                        AuthRefreshSupport::Automatic,
+                        AuthValidationMethod::TimestampCheck,
+                    )
+                } else if matches!(
+                    profile.auth_strategy.managed_oauth_provider(),
+                    Some(crate::provider_catalog::ManagedOAuthProvider::Kimi)
+                ) && crate::auth::kimi::has_oauth_tokens()
                 {
                     (
                         AuthCredentialSource::JcodeManagedFile,
@@ -852,6 +995,30 @@ fn build_auth_status_uncached(mode: AuthProbeMode) -> (AuthStatus, Vec<(&'static
     });
     record_auth_probe_step(&mut timings, "cursor", || {
         probe_cursor_status(&mut status, mode)
+    });
+    record_auth_probe_step(&mut timings, "grok_build", || {
+        status.grok_build = if grok_build::is_available() {
+            AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
+    });
+    record_auth_probe_step(&mut timings, "grok_direct", || {
+        status.grok_direct = grok_direct::auth_state();
+    });
+    record_auth_probe_step(&mut timings, "kimi_code_acp", || {
+        status.kimi_code_acp = if kimi_code_acp::is_available() {
+            AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
+    });
+    record_auth_probe_step(&mut timings, "reasonix", || {
+        status.reasonix = if reasonix::is_available() {
+            AuthState::Available
+        } else {
+            AuthState::NotConfigured
+        }
     });
     record_auth_probe_step(&mut timings, "google", || probe_google_status(&mut status));
 
@@ -1133,6 +1300,72 @@ fn assessment_for_key(
                 AuthValidationMethod::CompositeProbe,
             )
         }
+        LoginProviderAuthStateKey::GrokBuild => (
+            if state == AuthState::Available {
+                AuthCredentialSource::LocalCliSession
+            } else {
+                AuthCredentialSource::None
+            },
+            if state == AuthState::Available {
+                "Grok CLI cached subscription login".to_string()
+            } else if grok_build::cli_available() {
+                "Grok CLI installed; subscription login required".to_string()
+            } else {
+                grok_build::runtime_not_installed_hint()
+            },
+            AuthExpiryConfidence::Unknown,
+            AuthRefreshSupport::ExternalManaged,
+            AuthValidationMethod::PresenceCheck,
+        ),
+        LoginProviderAuthStateKey::GrokDirect => (
+            if state == AuthState::NotConfigured {
+                AuthCredentialSource::None
+            } else {
+                AuthCredentialSource::JcodeManagedFile
+            },
+            "Jcode-managed Grok Direct OAuth token store".to_string(),
+            if state == AuthState::NotConfigured {
+                AuthExpiryConfidence::Unknown
+            } else {
+                AuthExpiryConfidence::Exact
+            },
+            AuthRefreshSupport::Automatic,
+            AuthValidationMethod::TimestampCheck,
+        ),
+        LoginProviderAuthStateKey::KimiCodeAcp => (
+            if state == AuthState::Available {
+                AuthCredentialSource::LocalCliSession
+            } else {
+                AuthCredentialSource::None
+            },
+            if !kimi_code_acp::cli_available() {
+                kimi_code_acp::runtime_not_installed_hint()
+            } else if state == AuthState::Available {
+                "Kimi Code CLI-owned login/configuration".to_string()
+            } else {
+                kimi_code_acp::authentication_required_hint().to_string()
+            },
+            AuthExpiryConfidence::Unknown,
+            AuthRefreshSupport::ExternalManaged,
+            AuthValidationMethod::PresenceCheck,
+        ),
+        LoginProviderAuthStateKey::Reasonix => (
+            if state == AuthState::Available {
+                AuthCredentialSource::LocalCliSession
+            } else {
+                AuthCredentialSource::None
+            },
+            if !reasonix::cli_available() {
+                reasonix::runtime_not_installed_hint()
+            } else if state == AuthState::Available {
+                "Reasonix project or user configuration".to_string()
+            } else {
+                reasonix::setup_required_hint().to_string()
+            },
+            AuthExpiryConfidence::Unknown,
+            AuthRefreshSupport::ExternalManaged,
+            AuthValidationMethod::PresenceCheck,
+        ),
         LoginProviderAuthStateKey::Google => {
             let (source, detail) = summarize_sources(vec![google_source()]);
             (

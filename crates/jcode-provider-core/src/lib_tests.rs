@@ -247,6 +247,11 @@ impl Provider for SnapshotTestProvider {
 
 #[test]
 fn model_catalog_snapshot_materializes_provider_catalog_contract() {
+    assert_eq!(
+        SnapshotTestProvider.provider_identity(),
+        "snapshot-provider"
+    );
+    assert!(!SnapshotTestProvider.capabilities().reasoning_context_replay);
     let snapshot = ModelCatalogSnapshot::from_provider(&SnapshotTestProvider);
 
     assert_eq!(snapshot.provider_name.as_deref(), Some("snapshot-provider"));

@@ -209,10 +209,37 @@ impl Agent {
                     &split_prompt.dynamic_part,
                     resume_session_id.as_deref(),
                 ));
+                // Bound the provider setup window (failover selection, lock
+                // acquisition, auth refresh, catalog/pricing lookups, request
+                // build). Connect, headers, and streaming run in the spawned
+                // stream task under their own timeouts; a stall here
+                // previously hung the turn forever in "working".
+                let pre_stream_deadline =
+                    tokio::time::sleep(jcode_base::provider::pre_stream_open_timeout());
+                tokio::pin!(pre_stream_deadline);
                 loop {
                     tokio::select! {
                         _ = keepalive.tick() => {
                             send_stream_keepalive_mpsc(&event_tx);
+                        }
+                        _ = &mut pre_stream_deadline => {
+                            let timeout =
+                                jcode_base::provider::pre_stream_open_timeout().as_secs();
+                            logging::error(&format!(
+                                "Pre-stream watchdog: provider did not open a stream within {}s; failing the turn. Last PRESTREAM waypoint in the log localizes the stall.",
+                                timeout
+                            ));
+                            return Err(self.append_and_classify_provider_error(
+                                provider.name(),
+                                provider.model(),
+                                api_start,
+                                anyhow::anyhow!(
+                                    "Provider did not open a response stream within {}s (pre-stream watchdog). The turn was aborted instead of hanging. Check the log for the last PRESTREAM waypoint to localize the stall.",
+                                    timeout
+                                ),
+                                EvidenceErrorClass::ProviderOpen,
+                                provider_correlation.clone(),
+                            ));
                         }
                         _ = self.graceful_shutdown.notified() => {
                             logging::info(
@@ -321,9 +348,9 @@ impl Agent {
             let mut stop_reason: Option<String> = None;
             let mut sdk_tool_results: std::collections::HashMap<String, (String, bool)> =
                 std::collections::HashMap::new();
-            let provider_name = self.provider.name().to_string();
+            let reasoning_provider_identity = self.provider.provider_identity();
             let store_reasoning_content =
-                crate::provider::stores_reasoning_content_for_context(&provider_name);
+                crate::provider::stores_reasoning_content_for_context(self.provider.as_ref());
             let mut reasoning_content = String::new();
             let mut reasoning_signature = String::new();
             // Whether a live reasoning region is currently streaming to the client.
@@ -1119,7 +1146,7 @@ impl Agent {
             }
             crate::message::push_reasoning_blocks(
                 &mut content_blocks,
-                &provider_name,
+                &reasoning_provider_identity,
                 &reasoning_content,
                 Some(&reasoning_signature),
                 store_reasoning_content,

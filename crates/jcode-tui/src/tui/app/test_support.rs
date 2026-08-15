@@ -151,12 +151,6 @@ impl TestEnvWriteScope {
     }
 }
 
-/// Acquire the shared environment lease retained by an App that only reads
-/// environment-derived configuration and auth state.
-pub(crate) fn lock_test_env_read() -> crate::storage::TestEnvReadLease {
-    crate::storage::lock_test_env_read()
-}
-
 /// Acquire the transferable environment lease retained by a test App. Under a
 /// same-thread writer this becomes a child lease that safely keeps exclusive
 /// exclusion alive if the App escapes or is moved into background work.

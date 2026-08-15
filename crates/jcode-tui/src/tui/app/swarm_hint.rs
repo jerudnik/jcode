@@ -85,6 +85,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::app::test_support::with_temp_jcode_home;
 
     #[test]
     fn shows_until_lifetime_cap() {
@@ -108,21 +109,12 @@ mod tests {
 
     #[test]
     fn state_persists_show_count() {
-        let _guard = crate::tui::app::test_support::lock_test_env();
-        let temp = tempfile::tempdir().expect("tempdir");
-        let prev = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
-
-        let mut state = load_state();
-        assert_eq!(state.shows, 0);
-        state.shows = 2;
-        save_state(&state);
-        assert_eq!(load_state().shows, 2);
-
-        if let Some(prev) = prev {
-            crate::env::set_var("JCODE_HOME", prev);
-        } else {
-            crate::env::remove_var("JCODE_HOME");
-        }
+        with_temp_jcode_home(|| {
+            let mut state = load_state();
+            assert_eq!(state.shows, 0);
+            state.shows = 2;
+            save_state(&state);
+            assert_eq!(load_state().shows, 2);
+        });
     }
 }

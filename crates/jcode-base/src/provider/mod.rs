@@ -143,13 +143,17 @@ use self::state::ProviderState;
 pub use self::state::{ProviderModelSelectionSource, ProviderRuntimeState, ProviderStateEvent};
 pub(crate) use active_handle::active_provider_generation;
 pub use active_handle::{
-    active_provider_fork, active_provider_fork_with_model_spec, set_active_provider,
-    stores_reasoning_content_for_context, stream_idle_timeout,
+    active_provider_fork, active_provider_fork_with_model_spec, pre_stream_open_timeout,
+    set_active_provider, stores_reasoning_content_for_context, stream_idle_timeout,
 };
 pub(super) use profile_routes::{
     configured_standard_openrouter_profile_routes, direct_openai_compatible_profile_routes,
     standard_openrouter_profile_configured,
 };
+
+pub(crate) const GROK_BUILD_PROFILE_ID: &str = "grok-build";
+pub(crate) const KIMI_CODE_ACP_PROFILE_ID: &str = "kimi-code-acp";
+pub(crate) const REASONIX_PROFILE_ID: &str = "reasonix";
 
 /// MultiProvider wraps multiple providers and allows seamless model switching
 pub struct MultiProvider {
@@ -208,6 +212,12 @@ pub struct MultiProvider {
     /// into one build per TTL window; auth/model changes invalidate it
     /// explicitly so pickers never see stale routes after a switch.
     pub(super) routes_memo: Mutex<Option<RoutesMemoEntry>>,
+    /// Working directory of the session this provider stack serves, bound via
+    /// [`Provider::set_session_working_dir`]. Forwarded to workspace-scoped
+    /// compatible profiles (ACP vendor CLIs) so their subprocess workspace
+    /// root is the session's directory, not the daemon process cwd. Copied
+    /// (not shared) across forks so concurrent sessions stay independent.
+    session_working_dir: RwLock<Option<std::path::PathBuf>>,
 }
 
 impl Default for MultiProvider {
@@ -266,6 +276,68 @@ impl Provider for MultiProvider {
             ActiveProvider::Bedrock => "Bedrock",
             ActiveProvider::OpenRouter => "OpenRouter",
         }
+    }
+
+    fn provider_identity(&self) -> String {
+        match self.active_provider() {
+            ActiveProvider::Claude => self
+                .anthropic_provider()
+                .or_else(|| self.claude_provider())
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::OpenAI => self
+                .openai_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Copilot => self
+                .copilot_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Antigravity => self
+                .antigravity_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Gemini => self
+                .gemini_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Cursor => self
+                .cursor_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::Bedrock => self
+                .bedrock_provider()
+                .map(|provider| provider.provider_identity()),
+            ActiveProvider::OpenRouter => self
+                .active_openrouter_execution_provider()
+                .map(|provider| provider.provider_identity()),
+        }
+        .unwrap_or_else(|| self.name().trim().to_ascii_lowercase())
+    }
+
+    fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        match self.active_provider() {
+            ActiveProvider::Claude => self
+                .anthropic_provider()
+                .or_else(|| self.claude_provider())
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::OpenAI => self
+                .openai_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Copilot => self
+                .copilot_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Antigravity => self
+                .antigravity_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Gemini => self
+                .gemini_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Cursor => self
+                .cursor_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::Bedrock => self
+                .bedrock_provider()
+                .map(|provider| provider.capabilities()),
+            ActiveProvider::OpenRouter => self
+                .active_openrouter_execution_provider()
+                .map(|provider| provider.capabilities()),
+        }
+        .unwrap_or_default()
     }
 
     fn display_name(&self) -> String {
@@ -474,6 +546,65 @@ impl Provider for MultiProvider {
         let requested_model = model.trim();
         if requested_model.is_empty() {
             anyhow::bail!("Model cannot be empty");
+        }
+
+        if let Some(target_model) = requested_model.strip_prefix("grok-build:") {
+            let target_model = target_model.trim();
+            if target_model.is_empty() {
+                anyhow::bail!("Grok Build model cannot be empty");
+            }
+            let registry = ProviderRegistry::new(self);
+            let provider = registry
+                .compatible_profile(GROK_BUILD_PROFILE_ID)
+                .or_else(|| {
+                    external::instantiate_expected_external_provider(external::GROK_BUILD_RUNTIME)
+                })
+                .ok_or_else(|| anyhow!("Grok Build is not authenticated"))?;
+            provider.set_model(target_model)?;
+            registry.install_compatible_profile(GROK_BUILD_PROFILE_ID, provider);
+            registry.set_active_compatible_profile(GROK_BUILD_PROFILE_ID);
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
+        }
+
+        if let Some(target_model) = requested_model.strip_prefix("kimi-code-acp:") {
+            let target_model = target_model.trim();
+            if target_model.is_empty() {
+                anyhow::bail!("Kimi Code model cannot be empty");
+            }
+            let registry = ProviderRegistry::new(self);
+            let provider = registry
+                .compatible_profile(KIMI_CODE_ACP_PROFILE_ID)
+                .or_else(|| {
+                    external::instantiate_expected_external_provider(
+                        external::KIMI_CODE_ACP_RUNTIME,
+                    )
+                })
+                .ok_or_else(|| anyhow!("Kimi Code CLI is not authenticated"))?;
+            provider.set_model(target_model)?;
+            registry.install_compatible_profile(KIMI_CODE_ACP_PROFILE_ID, provider);
+            registry.set_active_compatible_profile(KIMI_CODE_ACP_PROFILE_ID);
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
+        }
+
+        if let Some(target_model) = requested_model.strip_prefix("reasonix:") {
+            let target_model = target_model.trim();
+            if target_model.is_empty() {
+                anyhow::bail!("Reasonix model cannot be empty");
+            }
+            let registry = ProviderRegistry::new(self);
+            let provider = registry
+                .compatible_profile(REASONIX_PROFILE_ID)
+                .or_else(|| {
+                    external::instantiate_expected_external_provider(external::REASONIX_RUNTIME)
+                })
+                .ok_or_else(|| anyhow!("Reasonix is not configured"))?;
+            provider.set_model(target_model)?;
+            registry.install_compatible_profile(REASONIX_PROFILE_ID, provider);
+            registry.set_active_compatible_profile(REASONIX_PROFILE_ID);
+            self.set_active_provider(ActiveProvider::OpenRouter);
+            return Ok(());
         }
 
         let cfg = crate::config::config();
@@ -866,7 +997,10 @@ impl Provider for MultiProvider {
                 .map(|o| o.handles_tools_internally())
                 .unwrap_or(false),
             ActiveProvider::Bedrock => false, // jcode executes Bedrock tool calls
-            ActiveProvider::OpenRouter => false, // jcode executes tools
+            ActiveProvider::OpenRouter => ProviderRegistry::new(self)
+                .active_openrouter_execution()
+                .map(|provider| provider.handles_tools_internally())
+                .unwrap_or(false),
         }
     }
 
@@ -1362,6 +1496,12 @@ impl Provider for MultiProvider {
             startup_notices: RwLock::new(Vec::new()),
             forced_provider: self.forced_provider,
             routes_memo: Mutex::new(None),
+            session_working_dir: RwLock::new(
+                self.session_working_dir
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone(),
+            ),
         };
 
         provider.spawn_anthropic_catalog_refresh_if_needed();
@@ -1369,6 +1509,15 @@ impl Provider for MultiProvider {
         let switch_request = self.fork_model_switch_request(active, &current_model);
         let _ = provider.set_model(&switch_request);
         Arc::new(provider)
+    }
+
+    fn set_session_working_dir(&self, dir: Option<&std::path::Path>) {
+        *self
+            .session_working_dir
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            dir.map(std::path::Path::to_path_buf);
+        self.propagate_session_working_dir();
     }
 
     fn fork_with_model_spec(&self, model_spec: &str) -> Result<Arc<dyn Provider>> {

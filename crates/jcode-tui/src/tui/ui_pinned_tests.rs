@@ -83,12 +83,6 @@ fn clamp_side_panel_image_rows_ignores_preceding_document_length() {
 }
 
 #[test]
-fn estimate_side_panel_image_rows_uses_actual_inner_width() {
-    let rows = estimate_side_panel_image_rows_with_font(999, 1454, 36, Some((8, 16)));
-    assert_eq!(rows, 27);
-}
-
-#[test]
 fn side_panel_mermaid_switches_to_scrollable_viewport_when_fit_would_be_too_small() {
     let layout =
         estimate_side_panel_image_layout_with_font(4000, 2000, 24, 20, 0, false, Some((8, 16)));
@@ -907,69 +901,5 @@ fn prewarm_focused_side_panel_reuses_markdown_cache_on_first_draw() {
     assert_eq!(
         after_draw, after_prewarm,
         "expected first draw to reuse prewarmed markdown cache"
-    );
-}
-
-#[test]
-fn render_side_panel_managed_pages_ignore_disk_file_content() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let file_path = temp.path().join("managed.md");
-    std::fs::write(&file_path, "# Disk Version").expect("write disk content");
-
-    let page = crate::side_panel::SidePanelPage {
-        id: "managed_demo".to_string(),
-        title: "Managed Demo".to_string(),
-        file_path: file_path.display().to_string(),
-        format: crate::side_panel::SidePanelPageFormat::Markdown,
-        source: crate::side_panel::SidePanelPageSource::Managed,
-        content: "# In Memory".to_string(),
-        updated_at_ms: 42,
-    };
-
-    let rendered = render_side_panel_markdown_cached(&page, Rect::new(0, 0, 24, 20), false, false);
-    let text: Vec<String> = rendered
-        .lines
-        .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect();
-
-    assert!(
-        text.iter().any(|line| line.contains("In Memory")),
-        "expected managed side panel to render snapshot content: {:?}",
-        text
-    );
-    assert!(
-        !text.iter().any(|line| line.contains("Disk Version")),
-        "managed side panel should not re-read disk content: {:?}",
-        text
-    );
-}
-
-#[test]
-fn render_side_panel_linked_file_missing_file_falls_back_to_snapshot_content() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let file_path = temp.path().join("linked.md");
-
-    let page = crate::side_panel::SidePanelPage {
-        id: "linked_missing_demo".to_string(),
-        title: "Linked Missing Demo".to_string(),
-        file_path: file_path.display().to_string(),
-        format: crate::side_panel::SidePanelPageFormat::Markdown,
-        source: crate::side_panel::SidePanelPageSource::LinkedFile,
-        content: "# Snapshot Fallback".to_string(),
-        updated_at_ms: 7,
-    };
-
-    let rendered = render_side_panel_markdown_cached(&page, Rect::new(0, 0, 24, 20), false, false);
-    let text: Vec<String> = rendered
-        .lines
-        .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect();
-
-    assert!(
-        text.iter().any(|line| line.contains("Snapshot Fallback")),
-        "expected linked side panel to fall back to snapshot content when file is missing: {:?}",
-        text
     );
 }

@@ -105,7 +105,9 @@ fn test_refresh_model_list_command_shows_summary_and_status_notice() {
     assert!(last.content.contains("cerebras-reasoning"));
     assert!(app.display_messages.iter().any(|message| {
         message.role == "background_task"
-            && message.content.contains("**Background task progress** `refresh-model-list`")
+            && message
+                .content
+                .contains("**Background task progress** `refresh-model-list`")
             && message.content.contains("Model list refresh")
     }));
 }
@@ -157,7 +159,10 @@ fn test_remote_available_models_updated_after_refresh_shows_summary_and_updates_
         &mut remote,
     );
 
-    assert!(needs_redraw, "model refresh completion must redraw immediately");
+    assert!(
+        needs_redraw,
+        "model refresh completion must redraw immediately"
+    );
     assert_eq!(
         app.status_notice(),
         Some("Model list refreshed: +1 models, +1 routes, ~1 changed".to_string())
@@ -316,97 +321,77 @@ fn test_model_picker_copilot_models_have_copilot_route() {
 
 #[test]
 fn test_model_picker_remote_comtegra_model_uses_comtegra_route_not_copilot() {
-    let _env_guard = crate::tui::app::test_support::lock_test_env();
-    let prev_key = std::env::var("COMTEGRA_API_KEY").ok();
-    crate::env::set_var("COMTEGRA_API_KEY", "test-key");
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var("COMTEGRA_API_KEY", "test-key");
 
-    let mut app = create_test_app();
-    app.is_remote = true;
-    app.remote_available_entries = vec!["glm-51-nvfp4".to_string()];
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.remote_available_entries = vec!["glm-51-nvfp4".to_string()];
 
-    app.open_model_picker();
+        app.open_model_picker();
 
-    match prev_key {
-        Some(value) => crate::env::set_var("COMTEGRA_API_KEY", value),
-        None => crate::env::remove_var("COMTEGRA_API_KEY"),
-    }
+        // The key must be gone before the picker is inspected: the assertions below
+        // check the *rendered* route list, not a live credential lookup.
+        crate::env::remove_var("COMTEGRA_API_KEY");
 
-    let picker = app
-        .inline_interactive_state
-        .as_ref()
-        .expect("model picker should be open");
-    let glm_entry = picker
-        .entries
-        .iter()
-        .find(|m| m.name == "glm-51-nvfp4")
-        .expect("glm-51-nvfp4 should be in picker");
+        let picker = app
+            .inline_interactive_state
+            .as_ref()
+            .expect("model picker should be open");
+        let glm_entry = picker
+            .entries
+            .iter()
+            .find(|m| m.name == "glm-51-nvfp4")
+            .expect("glm-51-nvfp4 should be in picker");
 
-    assert!(
-        glm_entry.options.iter().any(|r| {
-            r.provider == "Comtegra GPU Cloud"
-                && r.api_method == "openai-compatible:comtegra"
-                && r.available
-        }),
-        "glm route should be Comtegra/api key, got: {:?}",
-        glm_entry.options
-    );
-    assert!(
-        !glm_entry.options.iter().any(|r| r.api_method == "copilot"),
-        "glm route should not fall back to Copilot, got: {:?}",
-        glm_entry.options
-    );
+        assert!(
+            glm_entry.options.iter().any(|r| {
+                r.provider == "Comtegra GPU Cloud"
+                    && r.api_method == "openai-compatible:comtegra"
+                    && r.available
+            }),
+            "glm route should be Comtegra/api key, got: {:?}",
+            glm_entry.options
+        );
+        assert!(
+            !glm_entry.options.iter().any(|r| r.api_method == "copilot"),
+            "glm route should not fall back to Copilot, got: {:?}",
+            glm_entry.options
+        );
+    });
 }
 
 #[test]
 fn test_model_picker_remote_bedrock_model_has_bedrock_route_when_configured() {
-    let _guard = crate::tui::app::test_support::lock_test_env();
-    let prev_home = std::env::var("JCODE_HOME").ok();
-    let prev_key = std::env::var(crate::provider::bedrock::API_KEY_ENV).ok();
-    let prev_region = std::env::var(crate::provider::bedrock::REGION_ENV).ok();
-    let temp = tempfile::tempdir().expect("tempdir");
-    crate::env::set_var("JCODE_HOME", temp.path().display().to_string());
-    crate::env::set_var(crate::provider::bedrock::API_KEY_ENV, "test-bedrock-key");
-    crate::env::set_var(crate::provider::bedrock::REGION_ENV, "us-east-2");
-    crate::auth::AuthStatus::invalidate_cache();
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::env::set_var(crate::provider::bedrock::API_KEY_ENV, "test-bedrock-key");
+        crate::env::set_var(crate::provider::bedrock::REGION_ENV, "us-east-2");
+        crate::auth::AuthStatus::invalidate_cache();
 
-    let mut app = create_test_app();
-    app.is_remote = true;
-    app.remote_available_entries = vec!["us.amazon.nova-micro-v1:0".to_string()];
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.remote_available_entries = vec!["us.amazon.nova-micro-v1:0".to_string()];
 
-    app.open_model_picker();
+        app.open_model_picker();
 
-    match prev_home {
-        Some(value) => crate::env::set_var("JCODE_HOME", value),
-        None => crate::env::remove_var("JCODE_HOME"),
-    }
-    match prev_key {
-        Some(value) => crate::env::set_var(crate::provider::bedrock::API_KEY_ENV, value),
-        None => crate::env::remove_var(crate::provider::bedrock::API_KEY_ENV),
-    }
-    match prev_region {
-        Some(value) => crate::env::set_var(crate::provider::bedrock::REGION_ENV, value),
-        None => crate::env::remove_var(crate::provider::bedrock::REGION_ENV),
-    }
-    crate::auth::AuthStatus::invalidate_cache();
-
-    let picker = app
-        .inline_interactive_state
-        .as_ref()
-        .expect("model picker should be open");
-    let nova_entry = picker
-        .entries
-        .iter()
-        .find(|m| m.name == "us.amazon.nova-micro-v1:0")
-        .expect("Bedrock Nova model should be in picker");
-
-    assert!(
-        nova_entry
-            .options
+        let picker = app
+            .inline_interactive_state
+            .as_ref()
+            .expect("model picker should be open");
+        let nova_entry = picker
+            .entries
             .iter()
-            .any(|r| { r.provider == "AWS Bedrock" && r.api_method == "bedrock" && r.available }),
-        "Bedrock route should be available with credentials, got: {:?}",
-        nova_entry.options
-    );
+            .find(|m| m.name == "us.amazon.nova-micro-v1:0")
+            .expect("Bedrock Nova model should be in picker");
+
+        assert!(
+            nova_entry.options.iter().any(|r| {
+                r.provider == "AWS Bedrock" && r.api_method == "bedrock" && r.available
+            }),
+            "Bedrock route should be available with credentials, got: {:?}",
+            nova_entry.options
+        );
+    });
 }
 
 #[test]
@@ -526,7 +511,11 @@ fn test_model_picker_preserves_recommendation_priority_order() {
         .filter(|entry| entry.recommended)
         .map(|entry| {
             let route = entry.active_option().expect("recommended entry has route");
-            (entry.name.as_str(), route.provider.as_str(), route.api_method.as_str())
+            (
+                entry.name.as_str(),
+                route.provider.as_str(),
+                route.api_method.as_str(),
+            )
         })
         .collect();
     assert_eq!(
