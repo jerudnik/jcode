@@ -1654,7 +1654,10 @@ impl App {
                 "Scan this on another device to open the xAI verification page:",
             )
             .map(|section| format!("\n\n{section}"))
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                crate::logging::warn("Grok Direct login: QR section unavailable");
+                String::new()
+            });
             Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
                 provider: "grok_direct_code".to_string(),
                 success: true,
