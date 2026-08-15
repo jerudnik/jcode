@@ -169,7 +169,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let secret = home.path().join(".reasonix/.env");
         std::fs::create_dir_all(secret.parent().unwrap()).unwrap();
-        std::fs::write(secret, "DEEPSEEK_API_KEY=secret\n").unwrap();
+        std::fs::write(secret, "DEEPSEEK_API_KEY=secret\n").unwrap(); // gitleaks:allow
         assert_eq!(
             config_presence_from(Some(project.path()), Some(home.path()), None, None),
             ReasonixConfigPresence::default()
