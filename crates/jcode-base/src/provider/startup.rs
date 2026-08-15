@@ -1,6 +1,26 @@
 use super::*;
 
 impl MultiProvider {
+    /// Push the bound session working directory into every installed
+    /// compatible profile. Workspace-scoped runtimes (ACP vendor CLIs) use it
+    /// as their subprocess workspace root; network providers ignore it. Called
+    /// when the binding changes and before each failover dispatch so profiles
+    /// installed later (model switches) are covered too.
+    pub(super) fn propagate_session_working_dir(&self) {
+        let dir = self
+            .session_working_dir
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let profiles = self
+            .openai_compatible_profiles
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for provider in profiles.values() {
+            provider.set_session_working_dir(dir.as_deref());
+        }
+    }
+
     pub(super) fn grok_build_provider_for_auth_status(
         auth_status: &auth::AuthStatus,
     ) -> Option<Arc<dyn Provider>> {
@@ -355,6 +375,7 @@ impl MultiProvider {
             startup_notices: RwLock::new(Vec::new()),
             forced_provider,
             routes_memo: Mutex::new(None),
+            session_working_dir: RwLock::new(None),
         };
 
         if let Some(model) = provider_state.default_model() {

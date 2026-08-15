@@ -16,6 +16,10 @@ impl MultiProvider {
         crate::logging::info("PRESTREAM: failover enter");
         self.spawn_anthropic_catalog_refresh_if_needed();
         self.spawn_openai_catalog_refresh_if_needed();
+        // Ensure workspace-scoped compatible profiles (ACP vendor CLIs) serve
+        // this turn with the session's working directory, including profiles
+        // installed after the initial binding (mid-session model switches).
+        self.propagate_session_working_dir();
 
         // Downscale any images whose pixel dimensions exceed provider per-image
         // limits before they reach the wire. Resuming a session with >20 large

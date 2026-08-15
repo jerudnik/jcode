@@ -291,6 +291,12 @@ pub struct AcpProvider<P> {
     engine: Arc<AcpEngine>,
     selected_model: Arc<RwLock<Option<String>>>,
     catalog: Arc<RwLock<DiscoveredModels>>,
+    /// Workspace root bound by the host session via
+    /// [`Provider::set_session_working_dir`]. Used as the ACP `session/new`
+    /// and `session/resume` cwd when the policy does not pin one, so a
+    /// workspace-scoped vendor CLI never silently operates on the daemon
+    /// process cwd. Fresh on every fork (each session binds its own).
+    session_cwd: Arc<RwLock<Option<PathBuf>>>,
 }
 
 impl<P: AcpProviderPolicy> AcpProvider<P> {
@@ -308,6 +314,7 @@ impl<P: AcpProviderPolicy> AcpProvider<P> {
             engine: Arc::new(AcpEngine::new(config, permission_broker)),
             selected_model: Arc::new(RwLock::new(None)),
             catalog: Arc::new(RwLock::new(DiscoveredModels::default())),
+            session_cwd: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -345,6 +352,7 @@ impl<P: AcpProviderPolicy> Provider for AcpProvider<P> {
             engine: Arc::clone(&self.engine),
             selected_model: read_lock(&self.selected_model).clone(),
             catalog: Arc::clone(&self.catalog),
+            session_cwd: Arc::clone(&self.session_cwd),
             resume_session_id: resume_session_id.map(ToOwned::to_owned),
             prompt,
             tx: tx.clone(),
@@ -442,7 +450,14 @@ impl<P: AcpProviderPolicy> Provider for AcpProvider<P> {
             engine: Arc::clone(&self.engine),
             selected_model: Arc::new(RwLock::new(read_lock(&self.selected_model).clone())),
             catalog: Arc::new(RwLock::new(read_lock(&self.catalog).clone())),
+            // Each fork serves a different session; the host binds its own
+            // workspace via `set_session_working_dir` after forking.
+            session_cwd: Arc::new(RwLock::new(None)),
         })
+    }
+
+    fn set_session_working_dir(&self, dir: Option<&std::path::Path>) {
+        *write_lock(&self.session_cwd) = dir.map(std::path::Path::to_path_buf);
     }
 }
 
@@ -474,6 +489,7 @@ struct TurnSpec<P> {
     engine: Arc<AcpEngine>,
     selected_model: Option<String>,
     catalog: Arc<RwLock<DiscoveredModels>>,
+    session_cwd: Arc<RwLock<Option<PathBuf>>>,
     resume_session_id: Option<String>,
     prompt: Vec<acp::ContentBlock>,
     tx: mpsc::Sender<Result<StreamEvent>>,
@@ -511,10 +527,21 @@ fn run_turn_thread<P: AcpProviderPolicy>(turn: TurnSpec<P>) -> Result<()> {
                 else {
                     return Ok(());
                 };
+                // Workspace root for the ACP session. Precedence:
+                // 1. policy-pinned cwd (test fixtures, deliberate pins);
+                // 2. the host session's working directory, bound via
+                //    `Provider::set_session_working_dir` — the normal path
+                //    for workspace-scoped runtimes (Reasonix sets `cwd: None`
+                //    and passes `-workspace-only`, so this MUST be the
+                //    session workspace, not the daemon process cwd);
+                // 3. the process cwd, which for single-session CLI/TUI use is
+                //    already the session workspace. A daemon serving many
+                //    sessions should always have (2) set.
                 let cwd = policy
                     .process()
                     .cwd
                     .map(Ok)
+                    .or_else(|| read_lock(&turn.session_cwd).clone().map(Ok))
                     .unwrap_or_else(std::env::current_dir)
                     .context("Failed to determine ACP working directory")?;
                 let resumed = turn.resume_session_id.is_some();

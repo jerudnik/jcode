@@ -205,6 +205,7 @@ fn test_multi_provider_with_openai() -> MultiProvider {
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
 }
 
@@ -989,6 +990,7 @@ fn test_multi_provider_with_isolated_slot(
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
 }
 
@@ -1026,6 +1028,7 @@ fn test_multi_provider_with_compatible_profile(
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     };
     (provider, runtime)
 }
@@ -1315,6 +1318,7 @@ fn test_multi_provider_with_cursor() -> MultiProvider {
         startup_notices: RwLock::new(Vec::new()),
         forced_provider: None,
         routes_memo: std::sync::Mutex::new(None),
+        session_working_dir: std::sync::RwLock::new(None),
     }
 }
 

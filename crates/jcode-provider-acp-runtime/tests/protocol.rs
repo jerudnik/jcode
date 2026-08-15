@@ -71,6 +71,13 @@ impl TestPolicy {
         self
     }
 
+    /// Drop the policy-pinned cwd, matching production workspace-scoped
+    /// runtimes (Reasonix/Kimi/Grok Build all set `cwd: None`).
+    fn no_process_cwd(mut self) -> Self {
+        self.process.cwd = None;
+        self
+    }
+
     fn mutate_config(mut self) -> Self {
         self.mutate_config = true;
         self
@@ -572,6 +579,55 @@ async fn process_init_auth_catalog_and_new_resume_lifecycle_work() {
         Some(&json!("resumed=true;latest=latest prompt"))
     );
     assert!(!prompts[1].to_string().contains("old history"));
+}
+
+/// Cursor security review on PR #147: with `cwd: None` (the production
+/// workspace-scoped runtime shape), the ACP session root must come from the
+/// host session's working directory bound via
+/// `Provider::set_session_working_dir`, never silently from the daemon
+/// process cwd.
+#[tokio::test(flavor = "current_thread")]
+async fn session_new_and_resume_cwd_come_from_bound_session_working_dir() {
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let workspace_path = workspace.path().to_path_buf();
+    let policy = TestPolicy::new("happy").no_process_cwd();
+    let log_path = policy.log_path.clone();
+    let provider = test_provider(policy, None, Duration::from_secs(2), Duration::from_secs(1));
+    provider.set_session_working_dir(Some(workspace.path()));
+
+    let first = collect_turn(&provider, None).await;
+    assert!(
+        error_text(&first).is_none(),
+        "unexpected first-turn error: {:?}",
+        error_text(&first)
+    );
+    let resumed = collect_turn(&provider, Some("persisted-session")).await;
+    assert!(
+        error_text(&resumed).is_none(),
+        "unexpected resume error: {:?}",
+        error_text(&resumed)
+    );
+
+    let log = read_log(&log_path);
+    let expected = json!(workspace_path.display().to_string());
+    let new_session = log
+        .iter()
+        .find(|entry| entry.get("method") == Some(&json!("session/new")))
+        .expect("session/new request");
+    assert_eq!(
+        new_session.pointer("/params/cwd"),
+        Some(&expected),
+        "session/new cwd must be the bound session workspace"
+    );
+    let resume = log
+        .iter()
+        .find(|entry| entry.get("method") == Some(&json!("session/resume")))
+        .expect("session/resume request");
+    assert_eq!(
+        resume.pointer("/params/cwd"),
+        Some(&expected),
+        "session/resume cwd must be the bound session workspace"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -224,6 +224,8 @@ impl Agent {
             return;
         }
         self.session.working_dir = Some(dir.to_string());
+        self.provider
+            .set_session_working_dir(Some(std::path::Path::new(dir)));
         self.session.refresh_initial_session_context_message();
         self.log_env_snapshot("working_dir");
     }

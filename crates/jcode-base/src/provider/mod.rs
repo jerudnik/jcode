@@ -212,6 +212,12 @@ pub struct MultiProvider {
     /// into one build per TTL window; auth/model changes invalidate it
     /// explicitly so pickers never see stale routes after a switch.
     pub(super) routes_memo: Mutex<Option<RoutesMemoEntry>>,
+    /// Working directory of the session this provider stack serves, bound via
+    /// [`Provider::set_session_working_dir`]. Forwarded to workspace-scoped
+    /// compatible profiles (ACP vendor CLIs) so their subprocess workspace
+    /// root is the session's directory, not the daemon process cwd. Copied
+    /// (not shared) across forks so concurrent sessions stay independent.
+    session_working_dir: RwLock<Option<std::path::PathBuf>>,
 }
 
 impl Default for MultiProvider {
@@ -1490,6 +1496,12 @@ impl Provider for MultiProvider {
             startup_notices: RwLock::new(Vec::new()),
             forced_provider: self.forced_provider,
             routes_memo: Mutex::new(None),
+            session_working_dir: RwLock::new(
+                self.session_working_dir
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone(),
+            ),
         };
 
         provider.spawn_anthropic_catalog_refresh_if_needed();
@@ -1497,6 +1509,15 @@ impl Provider for MultiProvider {
         let switch_request = self.fork_model_switch_request(active, &current_model);
         let _ = provider.set_model(&switch_request);
         Arc::new(provider)
+    }
+
+    fn set_session_working_dir(&self, dir: Option<&std::path::Path>) {
+        *self
+            .session_working_dir
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            dir.map(std::path::Path::to_path_buf);
+        self.propagate_session_working_dir();
     }
 
     fn fork_with_model_spec(&self, model_spec: &str) -> Result<Arc<dyn Provider>> {

@@ -1654,7 +1654,7 @@ impl App {
                 "Scan this on another device to open the xAI verification page:",
             )
             .map(|section| format!("\n\n{section}"))
-            .unwrap_or_else(String::new);
+            .unwrap_or_default();
             Bus::global().publish(BusEvent::LoginCompleted(LoginCompleted {
                 provider: "grok_direct_code".to_string(),
                 success: true,
