@@ -1040,7 +1040,7 @@ pre-state, and the 22 is back-computed from that error. Verified three times by
 set arithmetic on the array bounds, and independently by piglet. Separately,
 `scripts/required-checks.json` carried **31** entries in `protected_paths.required`
 before G10A against the workflow's 32: the two lists disagreed by the
-railway test under `tests/`, which the workflow protected and the JSON did not. The drift predates G10A and is not caused by it.
+one test path under `tests/` that the workflow protected and the JSON did not. The drift predates G10A and is not caused by it.
 
 **Why not Option A, a protected digest manifest.** Three findings, in
 increasing order of severity.
@@ -1353,3 +1353,79 @@ python3 -I scripts/governance_compare.py \
 
 which reports the number of paths it believes are enforced and exits non-zero on
 disagreement.
+
+## D037
+
+**Docs lint is blind to the change it exists to catch.**
+
+Date: 2026-08-17. Status: recorded, not fixed.
+
+`Docs lint` is gated on `inputs.docs_only`, so it runs only for pull requests that
+touch nothing but documentation. The job it runs includes the `stale-code-path`
+check, whose purpose is to catch a document that still points at a code path
+after that path has moved. A pull request that moves a code path is, by
+definition, not docs-only. The check is therefore structurally absent from every
+pull request that can trip it, and present only on the ones that cannot.
+
+This was found by watching the final pull request's own checks: `Docs lint`
+reported `skipped`, on a pull request whose description claimed to have repaired
+that very job.
+
+Not fixed here, deliberately, but the cost was measured rather than guessed.
+Running the whole recipe against a pristine `main` shows two separate problems.
+The style checker crashes before it lints anything: one skill file carries a
+frontmatter description containing an unquoted colon, which is not valid YAML,
+and the parser stops there. With that single line quoted, the checker completes
+and reports 27 errors and 4 warnings across 120 files, all of them from two
+vocabulary rules rather than anything structural. The document checker itself
+passes at 122 active documents.
+
+So the blast radius is one malformed line and 27 wording fixes, not an unknown.
+That is a tractable pull request, and it is a different pull request from this
+one: this is a window change, and a window is the worst place to be editing
+prose across 120 files. Recording the number here is the point. It converts
+"nobody knows what happens if we turn it on" into a task with a size.
+
+The generalisation is the recurring one in this log: a control that cannot fire
+in the situation it was written for reads exactly like a control that has nothing
+to report.
+
+## D038
+
+**A hardening fix that broke the harness that proved the hardening.**
+
+Date: 2026-08-17. Status: closed.
+
+The guard-bypass fix (D036) needs the three budget guards to keep importing a
+sibling module while running under `-I`, which removes the script directory from
+`sys.path`. The first version appended that directory back and left it there.
+Every claim in the guards still held, the shadowing attack was still blocked, and
+`tests/test_guard_nonvacuity.py` went red anyway: it asserts that `sys.path` does
+not contain `scripts/` after the harness runs, and the guards were now putting it
+back in-process.
+
+Two things are worth recording.
+
+The assertion was stricter than the threat. Appending to the *end* of `sys.path`
+leaves the standard library ahead of `scripts/`, so the planted-module attack
+fails either way. The harness was still right to reject it: an entry left on the
+path is a hazard for every later import, not just the one it was added for. The
+fix borrows the entry for the duration of a single import and removes it in a
+`finally`.
+
+A second version resolved the sibling by explicit file path and avoided
+`sys.path` entirely. It was cleaner and it was wrong twice: the harness copies a
+guard into a temporary directory and relies on the sibling resolving through the
+path, and its static import-closure walk follows a literal `import` statement
+that `importlib` no longer provides. Both failures were mechanical and immediate.
+Neither would have been predicted from reading the guard alone.
+
+The same leak already existed in `tests/test_ci_workflow_commands.py`, which
+inserted `scripts/` at the front of `sys.path` and never removed it. That made
+the scrub assertion order-dependent on `main`: running the two suites in one
+command with the CI-contract suite last fails, and has failed since the harness
+landed. Both suites now borrow and return, and both orders pass under Python 3.9
+and 3.14.
+
+A harness earns its keep when it rejects its author's own work. This one did, on
+consecutive attempts, for reasons that were correct each time.
