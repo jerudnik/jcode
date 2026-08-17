@@ -304,6 +304,67 @@ class TheProductionFilterClaim(unittest.TestCase):
         self.assertIn("could not apply the weakening", outcome.detail)
 
 
+class TheImportShadowingClaim(unittest.TestCase):
+    """Adding `scripts/<name>.py` rebinds `import <name>` for every guard.
+
+    Measured: a `scripts/hashlib.py` returning a fixed `sha256` freezes
+    `scope_digest()`, so lifecycle/swallowed_error can go 441 -> 9999 and
+    `--expect-digest 5ed12e31...` still passes. It defeats the pin itself,
+    which is the only mechanism that otherwise forces a ceiling change through
+    review.
+    """
+
+    def test_the_tree_is_clean_today(self) -> None:
+        self.assertEqual(harness._check_no_import_shadowing(), [])
+
+    def test_a_shadow_of_a_real_import_is_reported(self) -> None:
+        with _shadow("hashlib"):
+            failures = harness._check_no_import_shadowing()
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("scripts/hashlib.py", failures[0])
+        self.assertIn("check_critical_path_budget.py", failures[0])
+
+    def test_an_intended_local_import_is_not_reported(self) -> None:
+        """rust_production_filter is a real local module, not a shadow."""
+
+        self.assertIn(
+            "rust_production_filter", harness.INTENDED_LOCAL_IMPORTS
+        )
+        self.assertEqual(harness._check_no_import_shadowing(), [])
+
+    def test_a_shadow_of_an_unimported_name_is_not_reported(self) -> None:
+        """The claim is about names guards actually import, not every file."""
+
+        with _shadow("zoneinfo"):
+            self.assertEqual(harness._check_no_import_shadowing(), [])
+
+    def test_one_file_is_reported_once(self) -> None:
+        """Two registry entries share the budget guard's file."""
+
+        scripts = [
+            g.script
+            for g in harness.GUARDS
+            if g.script.startswith("scripts/check_critical_path_budget.py")
+        ]
+        self.assertGreater(len(scripts), 1, "precondition: the file has 2 entries")
+        with _shadow("hashlib"):
+            self.assertEqual(len(harness._check_no_import_shadowing()), 1)
+
+
+@contextlib.contextmanager
+def _shadow(name: str):
+    """Create scripts/<name>.py for the duration of the block."""
+
+    path = harness.REPO_ROOT / "scripts" / f"{name}.py"
+    if path.exists():
+        raise AssertionError(f"{path} already exists; refusing to clobber it")
+    path.write_text("# planted shadow\n", encoding="utf-8")
+    try:
+        yield
+    finally:
+        path.unlink()
+
+
 class TheHarnessGoesRed(unittest.TestCase):
     """Each failure mode the harness claims to detect, observed red."""
 

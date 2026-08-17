@@ -56,6 +56,7 @@ surface as a passing run.
 from __future__ import annotations
 
 import argparse
+import ast
 import dataclasses
 import datetime as dt
 import importlib.util
@@ -616,6 +617,73 @@ def _check_registry_covers_every_guard() -> list[str]:
     return failures
 
 
+# Local modules a gating guard is meant to import from `scripts/`. Any other
+# name a gating guard imports must resolve outside `scripts/`; see
+# _check_no_import_shadowing.
+INTENDED_LOCAL_IMPORTS = frozenset({"rust_production_filter"})
+
+
+def _imported_top_level_names(source: str) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+def _check_no_import_shadowing() -> list[str]:
+    """No file in `scripts/` may capture a name a gating guard imports.
+
+    Python puts a script's own directory first on `sys.path`, so adding
+    `scripts/<name>.py` silently rebinds `import <name>` for every guard run as
+    `python3 scripts/...`. Measured on this tree: a `scripts/hashlib.py`
+    returning a fixed `sha256` freezes `scope_digest()`, so raising
+    lifecycle/swallowed_error from 441 to 9999 still prints the pinned
+    5ed12e31... and `--expect-digest` passes. That defeats the pin itself,
+    which is the one mechanism that otherwise forces a ceiling change through
+    review, and it unlocks all six constant tables at once.
+
+    The attack adds a file. It edits no guard, touches nothing the ruleset
+    covers, and moves no digest, so every other claim here stays green --
+    this one was written after watching the harness pass while the budget
+    was 22x weaker.
+
+    Adding a legitimate local module means adding its name to
+    INTENDED_LOCAL_IMPORTS, which shows up in the diff as a widened allowlist
+    rather than as an unchanged green run.
+    """
+
+    failures: list[str] = []
+    present = {path.stem for path in (REPO_ROOT / "scripts").glob("*.py")}
+    # Several registry entries can name the same file (a guard with more than
+    # one claim), and the file's imports are a property of the file.
+    scripts = sorted(
+        {g.script.split("::")[0] for g in GUARDS if g.status == GATING}
+    )
+    for script in scripts:
+        path = REPO_ROOT / script
+        if path.suffix != ".py" or not path.exists():
+            continue
+        try:
+            imported = _imported_top_level_names(
+                path.read_text(encoding="utf-8")
+            )
+        except SyntaxError as exc:
+            failures.append(f"{script}: could not be parsed to check imports: {exc}")
+            continue
+        for name in sorted(imported & present - INTENDED_LOCAL_IMPORTS - {path.stem}):
+            failures.append(
+                f"{script}: imports `{name}`, and `scripts/{name}.py` exists, so "
+                f"the guard resolves it to that file rather than to the module it "
+                f"expects. A shadow of `hashlib` freezes the scope digest and lets "
+                f"every ceiling be raised behind a passing --expect-digest. If the "
+                f"local module is intended, add `{name}` to INTENDED_LOCAL_IMPORTS."
+            )
+    return failures
+
+
 def _run_plant(guard: Guard) -> list[str]:
     """Run one plant, converting a harness crash into a claim failure, never a pass."""
 
@@ -717,6 +785,11 @@ def run() -> tuple[list[str], list[str]]:
 
     failures = _check_registry_covers_every_guard()
     passes: list[str] = []
+
+    shadowing = _check_no_import_shadowing()
+    failures += shadowing
+    if not shadowing:
+        passes.append("scripts/: no gating guard's imports are shadowed")
 
     for guard in GUARDS:
         if guard.status == DORMANT:
