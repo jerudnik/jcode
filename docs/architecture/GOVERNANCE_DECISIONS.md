@@ -1471,3 +1471,18 @@ exactly the event that most needs it.
 The generalisation, again, is the one this log keeps recording: a skipped job and
 a passing job are the same green tick. Gating work on a classifier is only
 acceptable when the failure mode of the classifier is to do more work, not less.
+
+Measured afterwards rather than predicted, on two pull requests against the same
+base. #163 changed the route-defining workflows and so took the full route:
+Rust checks 927s, Nix validate 787s, Nix package build 944s, Smoke 791s. #164
+changed only `.vale.ini` and took the cheap one: Rust checks 317s, Nix validate
+84s, package build and Smoke reported `skipped` by the jobs API rather than
+inferred from a green tick. Critical path 15m44s to 5m17s; total job wall clock
+3449s to 401s.
+
+The symptom that prompted this was a governance-workflow edit paying for the full
+product route, and that case is answered: a change to `governance-root.yml` or
+`main.yml` alone now classifies as inert. The five workflows that define the
+product legs -- `ci.yml`, `pr.yml`, `fork-ci.yml`, `nix.yml`, `freebsd-smoke.yml`
+-- deliberately keep the full route, because they are the files that decide what
+runs, and a route that could exempt its own definition would be no route at all.
