@@ -13,7 +13,7 @@
 ///
 /// Asserting on a single repeat would pass against a gate that merely fired
 /// every other turn, so this drives many turns and demands a constant.
-/// See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
+/// See docs/issues/blank-continuation-turn.md.
 #[test]
 fn test_todo_confidence_gate_does_not_pump_across_many_turns() {
     with_temp_jcode_home(|| {
@@ -173,7 +173,7 @@ fn test_finish_turn_auto_poke_queues_confidence_summary_when_todos_done() {
         // re-firing re-evaluates identical state and re-queues the identical
         // reminder every turn: an unbounded empty-content send loop at model
         // round-trip speed, observed as 361 blank turns in one session.
-        // See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
+        // See docs/issues/blank-continuation-turn.md.
         app.hidden_queued_system_messages.clear();
         app.pending_queued_dispatch = false;
         app.is_processing = true;

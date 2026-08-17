@@ -1,3 +1,0 @@
-$ python3 static workflow/quick-release invariant checks
-quick-release-and-workflow-invariants-ok
-exit=0

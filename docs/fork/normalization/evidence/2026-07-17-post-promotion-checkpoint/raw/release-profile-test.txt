@@ -1,1 +1,0 @@
-install_release profile-qualified label test: ok
