@@ -101,8 +101,15 @@ mod ambient_root_tests {
     /// rule. That is the canonical resolver's rule minus the test-harness
     /// redirect, so every path built from it (status file, log file) escaped
     /// isolation. Reverting the body to a hand-rolled resolver fails this.
+    ///
+    /// Holds a read lease for the same reason as
+    /// `log_dir_never_resolves_into_the_real_home`: `jcode_home()` and
+    /// `jcode_dir()` each resolve `JCODE_HOME` on their own, so a sibling
+    /// writer landing between them fails the equality on two valid homes.
     #[test]
     fn mobile_server_paths_never_resolve_into_the_real_home() {
+        let _env = crate::storage::lock_test_env_read();
+
         let real = dirs::home_dir()
             .expect("developer home exists")
             .join(".jcode");

@@ -699,8 +699,14 @@ fn wi4_copilot_premium_preserves_values_and_fallback() {
 /// that touched a Copilot provider read (and, on first use, created) a
 /// `machine_id` in the developer's real `~/.jcode`. Reverting the resolver to
 /// `dirs::home_dir()` fails this.
+///
+/// Holds a read lease because `machine_id_path()` and `jcode_dir()` resolve
+/// `JCODE_HOME` independently; a sibling writer between them fails the
+/// equality on two legitimate homes.
 #[test]
 fn machine_id_never_resolves_into_the_real_home() {
+    let _env = jcode_base::storage::lock_test_env_read();
+
     let resolved = CopilotApiProvider::machine_id_path();
     let real = dirs::home_dir()
         .expect("developer home exists")

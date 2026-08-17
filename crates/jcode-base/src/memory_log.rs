@@ -452,8 +452,17 @@ mod tests {
     /// the redirect target is a random per-process temp dir, and pinning it
     /// would test the harness rather than this function. Reverting `log_dir()`
     /// to `dirs::home_dir()` fails this.
+    ///
+    /// The read lease is load-bearing. Both assertions resolve `JCODE_HOME`
+    /// independently, and sibling tests in this binary set and clear it around
+    /// their own temp homes. Without the lease a writer can land between the
+    /// two resolutions, so `log_dir()` sees the harness redirect while
+    /// `jcode_dir()` sees the sibling's `JCODE_HOME` and the equality fails on
+    /// two legitimate values.
     #[test]
     fn log_dir_never_resolves_into_the_real_home() {
+        let _env = crate::storage::lock_test_env_read();
+
         let resolved = log_dir().expect("log dir resolves under a test harness");
         let real = dirs::home_dir()
             .expect("developer home exists")
