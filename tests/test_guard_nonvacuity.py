@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import subprocess
 import sys
 import tempfile
@@ -96,27 +97,70 @@ class TheControlIsItselfWiredIn(unittest.TestCase):
         self.assertIn("scripts/check_guard_nonvacuity.py", self._check_recipe())
 
     def test_this_test_file_runs_in_just_check(self) -> None:
-        """Otherwise the assertion above is itself never evaluated."""
+        """Otherwise the assertion above is itself never evaluated.
 
-        self.assertIn("tests.test_guard_nonvacuity", self._check_recipe())
-
-    def test_the_harness_does_not_claim_to_be_a_protected_path(self) -> None:
-        """It is not one, and a control must not overstate its own standing.
-
-        `scripts/check_guard_nonvacuity.py` is not in the ruleset's protected
-        paths, so editing it needs no maintenance window. An earlier draft of
-        the failure message said otherwise. A guard that misdescribes the
-        process protecting it teaches the reader to trust a step that is not
-        there, which is how D034's claim outlived D034's behaviour.
+        `check` no longer names this module: it depends on `test-python`, which
+        globs every file in tests/. So the chain is checked link by link rather
+        than by looking for a literal name. Asserting the glob alone would pass
+        even if nothing ran the recipe holding it, which is the shape of the
+        defect this class exists to prevent.
         """
 
-        source = Path("scripts/check_guard_nonvacuity.py").read_text()
-        offenders = [
-            line.strip()
-            for line in source.splitlines()
-            if "protected path" in line or "protected file" in line
-        ]
-        self.assertEqual(offenders, [], "\n".join(offenders))
+        justfile = Path("justfile").read_text()
+        header = next(
+            line for line in justfile.splitlines() if line.startswith("check:")
+        )
+        self.assertIn(
+            "test-python",
+            header.split(":", 1)[1].split(),
+            "`check` must depend on the recipe that runs the tests",
+        )
+
+        runner = harness._justfile_recipe_body(justfile, "test-python")
+        self.assertIsNotNone(runner, "justfile has no `test-python` recipe")
+        glob = next(
+            (line for line in runner.splitlines() if "tests/test_*.py" in line), None
+        )
+        self.assertIsNotNone(glob, "`test-python` must run every file in tests/")
+        self.assertIn("unittest", glob)
+        self.assertTrue(
+            Path("tests/test_guard_nonvacuity.py").exists(),
+            "this file must match the glob that recipe expands",
+        )
+
+    def test_the_control_reads_its_own_standing_from_the_manifest(self) -> None:
+        """A control must not describe the process protecting it from memory.
+
+        This assertion used to run the other way: it forbade the harness from
+        calling itself a protected path, because at the time it was not one and
+        an earlier draft of a failure message had said otherwise. Then
+        c04dc0932 added `scripts/check_guard_nonvacuity.py` and this file to the
+        governance gate's protected array, and the standing reversed. Nothing
+        failed. The test asserted the absence of a string, and absence is what a
+        stale claim looks like -- the same shape as D034's claim outliving
+        D034's behaviour, which the old docstring cited while committing it.
+
+        So read the set instead of remembering it. Editing either file does now
+        cost a maintenance window (see the 'Ruleset maintenance window' section
+        of docs/architecture/GOVERNANCE_DECISIONS.md); if that is ever undone,
+        this fails and says so, rather than quietly meaning nothing.
+        """
+
+        manifest = json.loads(Path("scripts/required-checks.json").read_text())
+        protected = set(manifest["protected_paths"]["required"])
+
+        for path in (
+            "scripts/check_guard_nonvacuity.py",
+            "tests/test_guard_nonvacuity.py",
+        ):
+            with self.subTest(path=path):
+                self.assertIn(
+                    path,
+                    protected,
+                    f"{path} is no longer a protected path. Editing it no longer "
+                    f"costs a maintenance window; anything in the harness that "
+                    f"says otherwise is now wrong and must be corrected with it.",
+                )
 
 
 class TheD034WeakeningIsCaught(unittest.TestCase):

@@ -9,7 +9,9 @@ Tests that:
 4. Urgent interrupts: tool_results are added for skipped tools
 5. No API errors about tool_use/tool_result pairing
 
-Run with: python tests/test_injection_thorough.py
+Requires a running jcode with the debug control socket enabled, so it
+cannot run in CI. Run it by hand against a live instance:
+  python3 scripts/probe_injection_thorough.py
 """
 
 import socket

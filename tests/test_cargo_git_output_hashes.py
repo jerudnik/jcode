@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -83,6 +84,33 @@ def main() -> int:
 
     print(f"ok: {len(locked)} git dependency pin(s) match Cargo.lock exactly")
     return 0
+
+
+class CargoGitOutputHashTests(unittest.TestCase):
+    """Expose the same comparison to `unittest` so `just check` runs it."""
+
+    def test_every_locked_git_source_is_pinned(self) -> None:
+        missing = sorted(set(locked_git_sources()) - pinned_hash_keys())
+        self.assertEqual(
+            missing,
+            [],
+            "git dependencies in Cargo.lock with no outputHashes pin in "
+            "nix/package.nix; Nix would fetch these over the network",
+        )
+
+    def test_no_pin_names_a_source_that_left_the_lockfile(self) -> None:
+        stale = sorted(pinned_hash_keys() - set(locked_git_sources()))
+        self.assertEqual(
+            stale,
+            [],
+            "nix/package.nix pins an outputHash for a source that is no longer "
+            "in Cargo.lock; the pin is silently ignored",
+        )
+
+    def test_the_lockfile_actually_has_git_sources(self) -> None:
+        # Without this, both checks above pass vacuously if the parser breaks
+        # or every git dependency is dropped from Cargo.lock.
+        self.assertGreater(len(locked_git_sources()), 0)
 
 
 if __name__ == "__main__":

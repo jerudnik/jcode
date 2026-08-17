@@ -22,6 +22,16 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
+        with:
+          # `just check` now runs every module in tests/, and some of them ask
+          # the repository about its own history: fork-health walks from the
+          # `fork-point` tag to main, and the branch-handoff gate reasons about
+          # main. A depth-1 detached checkout has neither the tag nor the
+          # ancestry, so those checks correctly refuse to answer and the suite
+          # ends up measuring the checkout rather than the repository.
+          # Governance Root clones in full for the same reason.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Install Nix
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31

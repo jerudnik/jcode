@@ -13,7 +13,15 @@ SCRIPT = REPO_ROOT / "scripts" / "release_check.py"
 
 
 def run(cmd: list[str], cwd: Path) -> str:
-    result = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # The fixture repositories must not inherit the developer's git config.
+    # A global `tag.gpgsign = true`, for example, turns the plain `git tag`
+    # calls below into annotated signed tags, which then fail with
+    # "Terminal is dumb, but EDITOR unset" on a machine that has it set and
+    # pass on a CI runner that does not.
+    env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+    result = subprocess.run(
+        cmd, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     if result.returncode != 0:
         raise AssertionError(f"{cmd} failed\nstdout={result.stdout}\nstderr={result.stderr}")
     return result.stdout.strip()
