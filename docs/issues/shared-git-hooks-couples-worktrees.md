@@ -11,16 +11,18 @@ opened: 2026-08-17
 ## Symptom
 
 While looking for the PM-surface hook, `.git/hooks/pre-commit` in the primary
-checkout (`/Users/jrudnik/labs/jcode`) was found to exec out of a *different*
+checkout (`$WORKTREE_PRIMARY`) was found to exec out of a *different*
 worktree:
 
     $ cat .git/hooks/pre-commit
     #!/usr/bin/env bash
     # Managed by scripts/install-git-hooks.sh for jcode
-    exec "/Users/jrudnik/labs/jcode-guardrail/scripts/git-hooks/pre-commit" "$@"
+    exec "$WORKTREE_GUARDRAIL/scripts/git-hooks/pre-commit" "$@"
 
-Same for `pre-push`. Both files were rewritten at `Aug 17 05:41`.
-`/Users/jrudnik/labs/jcode-guardrail` is a linked worktree belonging to a
+Same for `pre-push`. Both files were rewritten at `Aug 17 05:41`. (Absolute
+home-directory paths are shown as `$WORKTREE_PRIMARY` / `$WORKTREE_GUARDRAIL`
+throughout; the hook files hold the expanded paths.)
+`$WORKTREE_GUARDRAIL` is a linked worktree belonging to a
 concurrent agent session, checked out on `automation/guard-nonvacuity`.
 
 ## Verified
@@ -29,7 +31,7 @@ concurrent agent session, checked out on `automation/guard-nonvacuity`.
   (`scripts/git-hooks/pre-commit`, `pre-push`) and are **byte-identical**. No
   behavioural divergence has occurred, so nothing has actually misbehaved yet.
 - `.git/hooks/check-backlog-tracking.sh` is a symlink to
-  `/Users/jrudnik/labs/jcode/scripts/git-hooks/check-backlog-tracking.sh`,
+  `$WORKTREE_PRIMARY/scripts/git-hooks/check-backlog-tracking.sh`,
   which does not exist — a pre-existing broken symlink, unrelated to the above
   but noticed at the same time. It is not referenced by `pre-commit`, so it is
   inert.

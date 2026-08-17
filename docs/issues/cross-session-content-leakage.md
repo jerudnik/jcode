@@ -73,7 +73,7 @@ narrow item 5 considerably. All file paths under `~/.jcode/`.
 2. **The only freshly-written todos matching the observation were from a jcode
    session.** `todos/session_rose_1786957987850_ed471b6456696972.json`
    (mtime `09:30:36Z`, 4 min 7 s before the question; session cwd
-   `/Users/jrudnik/labs/jcode`) contains an "adversarial review" plan for
+   `$WORKTREE_PRIMARY`) contains an "adversarial review" plan for
    D033/F23/D034 — unmistakably jcode-repo work. Older sessions (piglet, crab,
    cactus) also predate the question but by 20+ minutes.
 3. **Storage and agent-tool paths verified correctly scoped.**

@@ -14,7 +14,7 @@ a plan document. Implementation is a separate, later session.
 
 ## Why you are here
 
-Two jcode sessions were working the same repo (`/Users/jrudnik/labs/jcode`,
+Two jcode sessions were working the same repo (`$WORKTREE_PRIMARY`,
 GitHub `jerudnik/jcode`) and needed to coordinate to avoid a collision. One
 (`piglet`) was about to open a repo-wide governance window; the other
 (`retriever`, `session_hibiscus_1786957248681_6b38b29947ce2b74`) was mid-task
@@ -111,7 +111,7 @@ state in ways neither expects. Confirm or dismiss it explicitly.
   normalization, truncation, name handling.
 - `crates/jcode-swarm-core/src/control_log.rs` — the control log, which is the
   authoritative record of what was actually enqueued and delivered. Find its
-  on-disk location. The swarm keyed at `/Users/jrudnik/labs/jcode/.git` was at
+  on-disk location. The swarm keyed at `$WORKTREE_PRIMARY/.git` was at
   control log offset `5786201` as of `09:15:25Z`.
 - `crates/jcode-protocol/src/comm_format.rs` — the second truncation site.
 - The `swarm` tool's `dm`/`message`/`broadcast` handlers and whatever maps
@@ -139,8 +139,8 @@ happened, which is the thing under suspicion.
   throwaway pair of agents in a scratch directory** and instrument that. Do not
   experiment on the live pair.
 - The repo has an active second writer. Do not create branches, do not push,
-  and do not run anything that writes to `/Users/jrudnik/labs/jcode`.
-  `retriever` works in a separate worktree at `/Users/jrudnik/labs/jcode-guardrail`;
+  and do not run anything that writes to `$WORKTREE_PRIMARY`.
+  `retriever` works in a separate worktree at `$WORKTREE_GUARDRAIL`;
   leave that alone too.
 - `gh` in that checkout had no default repo and silently resolved to
   `upstream` (`1jehuang/jcode`) rather than the fork. It has since been pinned,
