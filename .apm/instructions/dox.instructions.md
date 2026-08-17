@@ -12,8 +12,13 @@ applyTo: "**"
 - Keep one rule at the narrowest durable scope. Remove stale or duplicated guidance instead of explaining its history.
 - Validate primitive syntax with `apm compile --validate`; preview placement with `apm compile --dry-run`; regenerate with `apm compile --clean` when files move or disappear.
 
+## Documentation surfaces
+
+- `docs/` holds current docs; `docs/issues/` holds open issues (delete solved). Use `~/notes/projects/jcode/{proposals/,maintenance/,project.md}` for proposals, incident evidence, and PM tracking; keep other records out of `docs/`.
+
 ## Child DOX index
 
-- `.apm/AGENTS.md`: APM sources and generation rules.
-- `docs/AGENTS.md`: independent hard-fork maintenance and integration documentation.
-- `crates/jcode-desktop/AGENTS.md`: desktop-specific self-development guidance.
+- `.apm/AGENTS.md`: APM rules.
+- `docs/AGENTS.md`: docs placement rules.
+- `docs/issues/AGENTS.md`: open issue rules.
+- `crates/jcode-desktop/AGENTS.md`: desktop self-development rules.
