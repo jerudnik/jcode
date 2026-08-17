@@ -959,7 +959,7 @@ visible; choosing the replacement control is separate work.
 
 **What happened.** Commit `621f4d44d` ("Change local governance definition",
 Modernization-Node G10A, 2026-08-08) cut the Governance Root protected set from
-27 entries to 5:
+32 entries to 5:
 
 ```
 .github/workflows            scripts/governance_compare.py
@@ -967,7 +967,7 @@ scripts/required-checks.json scripts/generate_governance_fixture.py
 scripts/fork-health.sh
 ```
 
-The 22 dropped entries were mostly guard scripts and their tests:
+The 27 dropped entries were mostly guard scripts and their tests:
 `check_panic_budget.py`, `check_warning_budget.sh`, `check_code_size_budget.py`,
 `check_critical_path_budget.py`, `check_tui_render_lock.py`,
 `check_env_lease_drop_order.py`, `rust_production_filter.py`,
@@ -985,7 +985,11 @@ document a later reader would trust.
 `18509013 protect-fork-rails` still requires `Governance Root` and `PR Gate`,
 still sets `strict_required_status_checks_policy: true`, still carries
 `deletion` and `non_fast_forward`, still allows only `merge`, and
-`bypass_actors` is still empty. G10A's acceptance criteria asked for exactly
+`bypass_actors` is still empty — verified 2026-08-17 by authenticated read of
+`repos/jerudnik/jcode/rulesets/18509013`, where the key is present and `[]` and
+`current_user_can_bypass` is `never`. The *list* endpoint `/rulesets` omits the
+key entirely; per `scripts/governance_compare.py` an omitted key is an
+unauthorized read and must never be recorded as emptiness. G10A's acceptance criteria asked for exactly
 that, and it delivered it.
 
 **What is partly compensated.** The guard scripts still execute: `PR Gate` →
@@ -1004,10 +1008,10 @@ files were protected, so touching either forced the maintenance window.
 **Why this matters more on this repository than the coverage delta suggests.**
 `required_approving_review_count` is `0`. On a single-maintainer fork the
 governance window *was* the review forcing function: the only mechanism that
-stopped a change from attesting to its own correctness. Removing 22 paths from
+stopped a change from attesting to its own correctness. Removing 27 paths from
 that window removed the forcing function without substituting another.
 
-**Not adjudicated here.** Reverting to a 27-path list is one option and probably
+**Not adjudicated here.** Reverting to the pre-G10A 32-path list is one option and probably
 the worst one: it restores coverage by making every routine guard edit demand a
 ruleset transaction, which is the ergonomics cost G10A was right to reject. The
 open question is a control that is cheap in the common case and still refuses
