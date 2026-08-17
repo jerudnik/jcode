@@ -442,11 +442,27 @@ class BranchHandoffTest(unittest.TestCase):
         self.assertIn("automation/stranded", noisy.stdout)
 
     def test_real_tree_is_inspectable(self):
-        """The gate must be runnable here, whatever today's verdict is.
+        """The gate must be runnable here, or say exactly why it is not.
 
         Deliberately not asserting a pass: this checkout legitimately carries
-        in-flight branches. Exit 2 (uninspectable) is the real failure.
+        in-flight branches, so 1 is as honest a verdict as 0. Exit 2 --
+        uninspectable -- is the real failure.
+
+        Except on a CI runner, where `actions/checkout` leaves a detached HEAD
+        with no local `main` and refusing to inspect is the correct answer, not
+        a defect. This test never ran in CI until the tests/ glob landed, so
+        the blanket `(0, 1)` had only ever been evaluated against a developer's
+        working tree. That case is asserted rather than skipped: the checker
+        has to name the missing branch, so an exit 2 for any other reason is
+        still a failure here.
         """
+        inspectable = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", "main"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).returncode == 0
         result = subprocess.run(
             [sys.executable, str(CHECKER)],
             cwd=REPO_ROOT,
@@ -454,7 +470,12 @@ class BranchHandoffTest(unittest.TestCase):
             text=True,
             check=False,
         )
-        self.assertIn(result.returncode, (0, 1), result.stdout + result.stderr)
+        output = result.stdout + result.stderr
+        if inspectable:
+            self.assertIn(result.returncode, (0, 1), output)
+        else:
+            self.assertEqual(result.returncode, 2, output)
+            self.assertIn("no main branch", output)
 
 
 if __name__ == "__main__":
