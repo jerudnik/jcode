@@ -35,9 +35,27 @@ jobs:
             scripts/fork-health.sh
             scripts/governance_compare.py
             scripts/generate_governance_fixture.py
+            justfile
+            scripts/check_guard_nonvacuity.py
+            tests/test_guard_nonvacuity.py
           )
           if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
-            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (design.md section 4)"
+            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (docs/architecture/GOVERNANCE_DECISIONS.md, 'Ruleset maintenance window')"
             git diff --name-only "$base" HEAD -- "${protected[@]}"
             exit 1
+          fi
+
+          # The decision log is protected against destructive edits only. Appending an
+          # entry is routine -- 34 commits in the three months to 2026-08-17 -- and must
+          # not cost a maintenance window, or the control would penalise recording
+          # decisions. Losing the log is the failure PR #155 nearly caused. A rename
+          # reads as a deletion here, which is correct: moving the log is a governance
+          # event.
+          log=docs/architecture/GOVERNANCE_DECISIONS.md
+          if ! git diff --quiet "$base" HEAD -- "$log"; then
+            removed="$(git diff --numstat "$base" HEAD -- "$log" | awk '{print $2}')"
+            if [ ! -f "$log" ] || [ "${removed:-0}" -ne 0 ]; then
+              echo "::error::$log lost ${removed:-all} line(s) or was removed; the decision log is append-only (see its 'Ruleset maintenance window' section)"
+              exit 1
+            fi
           fi

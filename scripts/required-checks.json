@@ -61,7 +61,10 @@
       "scripts/required-checks.json",
       "scripts/fork-health.sh",
       "scripts/governance_compare.py",
-      "scripts/generate_governance_fixture.py"
+      "scripts/generate_governance_fixture.py",
+      "justfile",
+      "scripts/check_guard_nonvacuity.py",
+      "tests/test_guard_nonvacuity.py"
     ],
     "proposed_additions": []
   },

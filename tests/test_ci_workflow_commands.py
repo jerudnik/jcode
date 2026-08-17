@@ -12,9 +12,21 @@ import unittest
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-import ci_workflow_commands as cwc
+# Borrowed, not donated. Leaving scripts/ on sys.path is exactly the shadowing
+# hazard the guards were hardened against, and it leaks into every module that
+# runs after this one: `python3 -m unittest tests.test_guard_nonvacuity
+# tests.test_ci_workflow_commands` fails that suite's sys.path scrub assertion
+# purely because this import ran last. Append rather than insert so the standard
+# library keeps precedence even inside the window.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    import ci_workflow_commands as cwc
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_DIR)
 
 
 class JustfileRecipeTests(unittest.TestCase):
@@ -75,6 +87,13 @@ class JustfileRecipeTests(unittest.TestCase):
             "git ls-files -z -- '*.md' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini",
             script,
         )
+
+    def test_lint_docs_recipe_runs_the_docs_reference_checker(self) -> None:
+        # The checker is fatal-by-design and had no caller until it was wired
+        # here; lint-docs is the recipe CI already runs. `-I` keeps scripts/ off
+        # sys.path so a sibling module cannot shadow the standard library.
+        script = cwc.recipe_script("lint-docs")
+        self.assertIn("python3 -I scripts/check_docs_references.py", script)
 
     def test_missing_recipe_fails_loudly(self) -> None:
         with self.assertRaises(SystemExit):

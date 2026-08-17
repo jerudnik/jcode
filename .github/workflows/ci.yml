@@ -24,7 +24,7 @@ jobs:
         uses: cachix/install-nix-action@v31
 
       - name: Run docs lint recipe
-        run: nix shell nixpkgs#just nixpkgs#vale -c just lint-docs
+        run: nix shell nixpkgs#just nixpkgs#vale nixpkgs#python3 -c just lint-docs
 
   fork-ci:
     name: Fork CI

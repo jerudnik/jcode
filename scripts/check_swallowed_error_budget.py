@@ -25,9 +25,26 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# These scripts are invoked as `python3 scripts/...`, which puts the scripts
-# directory on sys.path and makes this sibling import available.
-from rust_production_filter import production_lines, production_rust_files
+# Sibling import, hardened without leaving scripts/ on sys.path.
+# Under a bare `python3 scripts/foo.py` the script directory is sys.path[0] and
+# outranks the standard library, so any file dropped into scripts/ (an
+# unprotected path) can shadow a stdlib module this guard depends on -- planting
+# scripts/hashlib.py is enough to make --expect-digest accept any digest. The
+# caller runs this file under `-I`, which drops that implicit entry entirely;
+# the one legitimate sibling is then reached by appending this directory to the
+# *end* of sys.path (so stdlib still wins) for the duration of that single
+# import, and removing it again. Leaving it in place would re-open the hole for
+# every later import and would break the sys.path scrub asserted by
+# scripts/check_guard_nonvacuity.py.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    from rust_production_filter import production_lines, production_rust_files
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_DIR)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_FILE = REPO_ROOT / "scripts" / "swallowed_error_budget.json"
