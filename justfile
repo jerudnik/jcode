@@ -4,9 +4,9 @@
 
 # Throttled check loop - type-checks + tests, skips codegen. Fast feedback.
 check:
-    python3 scripts/check_critical_path_budget.py --expect-digest 5ed12e310519a1258ddd0cf9b67674b8aa3198a863f1712771c36b10c5d052ed --report target/critical-path-budget.json
+    python3 -I scripts/check_critical_path_budget.py --expect-digest 5ed12e310519a1258ddd0cf9b67674b8aa3198a863f1712771c36b10c5d052ed --report target/critical-path-budget.json
     python3 -m unittest tests.test_guard_nonvacuity
-    python3 scripts/check_guard_nonvacuity.py
+    python3 -I scripts/check_guard_nonvacuity.py
     scripts/cargo_exec.sh check --locked --workspace --all-targets --all-features
 
 # Fast test gate - compiles the workspace test graph without running it.
@@ -48,3 +48,4 @@ release-check:
 # Live documentation linting against the repository Vale config.
 lint-docs:
     git ls-files -z -- '*.md' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini
+    python3 -I scripts/check_docs_references.py

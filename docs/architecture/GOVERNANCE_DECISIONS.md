@@ -1025,3 +1025,331 @@ repository.
 **Reopen trigger for this entry:** any change to the protected-path set, the
 `justfile` digest pin, or `required_approving_review_count`; or the adoption of
 a replacement control, which should supersede this entry rather than amend it.
+
+## D035. The replacement for the G10A protected set is a non-vacuity check plus three protected paths, not a digest manifest
+
+**Status:** adjudicated. Supersedes D034, which recorded the reversal and
+deferred the choice of control. D034's corrected counts are carried forward
+here; its reopen trigger is replaced by the one at the end of this entry.
+
+**Correction to D034's arithmetic.** The `protected=(...)` array in
+`.github/workflows/governance-root.yml` either side of `621f4d44d` holds **32
+entries before and 5 after: 27 dropped, 0 added.** D034 reports "27 entries to
+5" and "22 dropped"; the 27 is the count of dropped paths mislabelled as the
+pre-state, and the 22 is back-computed from that error. Verified three times by
+set arithmetic on the array bounds, and independently by piglet. Separately,
+`scripts/required-checks.json` carried **31** entries in `protected_paths.required`
+before G10A against the workflow's 32: the two lists disagreed by the
+railway test under `tests/`, which the workflow protected and the JSON did not. The drift predates G10A and is not caused by it.
+
+**Why not Option A, a protected digest manifest.** Three findings, in
+increasing order of severity.
+
+*It would pin bytes that nothing executes.* Of the guards this repository
+describes as load-bearing, five gate a pull request. Three budget guards exit 1
+against a clean, green `main`, and `scripts/test_critical_path_budget.py` is
+invoked by no workflow, recipe, or script in the tree. A manifest over the
+pre-G10A set would spend the ceremony of a ruleset transaction on files whose
+behaviour no gate observes.
+
+*Its ergonomic cost is the one G10A was right to reject, and it is now
+quantified.* Over the three months to 2026-08-17, commits on `main` touching the
+27 dropped paths number **78**, which is **41** first-parent merges. A window is
+opened per pull request, not per commit, so the ergonomic cost is 41 windows a
+quarter for routine guard work. Protecting instead the three paths this entry
+proposes costs **4** commits, **2** windows, over the same period. G10A traded
+coverage for ergonomics without substituting a control; reverting would trade it
+back at roughly twenty times the price.
+
+*A digest of guard sources is defeatable without touching the pinned bytes.*
+Measured on this tree: adding a `hashlib` module under `scripts/` whose `sha256` returns a fixed
+value freezes `scope_digest()`, so `check_critical_path_budget.py
+--expect-digest 5ed12e31...` still passes and exits 0 while the guard's
+lifecycle and swallowed-error ceilings are raised from 441 to 9999. Python puts
+a script's own directory at the front of `sys.path`, so *any* `python3
+scripts/...` invocation is exposed. The attack is a **file addition**, and a
+manifest enumerating existing guard files does not cover files that do not yet
+exist. Option A is therefore not merely expensive; against this class it does not
+work. G10A also dropped `scripts/rust_production_filter.py`, the unpinned
+dependency of the only live PR-blocking guard, which is what makes the
+count-preserving weakening of its line classifier reachable at all (piglet).
+
+**What is adopted: Option B, `scripts/check_guard_nonvacuity.py`.** A registry
+of ten claims, each binding a guard to a defect it must reject. Each claim
+plants the defect, runs the guard, and fails if the guard accepts it; a plant
+that no longer applies is reported as *unproven* rather than passing. Every
+claim also pins the clean control value, so a plant whose success value could
+coincide with the honest value cannot read as proof. Dormant guards carry a
+verified reason and a wiring check, so a guard that silently stops gating is
+reported rather than assumed. Cost: **0.6s** for the harness and **3.1s** for its
+42 tests, against a `PR Gate` of roughly 55 minutes. It requires no second
+human, which suits a repository whose `required_approving_review_count` is `0`
+with an empty `bypass_actors`.
+
+**What Option B does not cover, stated so the gap is inherited rather than
+rediscovered.** A defect no claim names passes. The registry pins behaviour, not
+bytes, so a rewrite that preserves the planted behaviour and loses everything
+else is invisible. Dependencies are covered only where a claim names them. And
+the harness was itself vulnerable to the shadow class above until
+`c7051251a`: a single `ast` module dropped into `scripts/`, returning empty parse trees, made every
+source look import-free and printed "10 claim(s) hold". It is fixed by scrubbing
+`scripts/` from `sys.path` through the unshadowable builtin `sys` before the
+first shadowable import, with the attack kept as a red test. That episode is
+evidence for the approach rather than against it -- the hole was found by
+adversarial review and closed with a control, not with an assertion -- but it is
+also the reason no one should read this entry as claiming the control is
+complete.
+
+**Why a hybrid is still required: Option B cannot protect itself.** Exactly one
+line in the tree invokes the harness, `justfile:9`, and at the time this entry
+was written `justfile` was not a protected path. A pull request that deletes that line removes the control, and
+nothing notices. No self-check can close this, because a control that is not
+invoked cannot report its own absence. The minimum protected surface that makes
+Option B durable is therefore three paths added to the surviving five:
+
+```
+justfile
+scripts/check_guard_nonvacuity.py
+tests/test_guard_nonvacuity.py
+```
+
+This is the boundary the harness was designed around: routine guard work -- new
+ceilings, new logic, new tests -- needs no window, while changing *the claim
+about what must fail* needs one. Measured cost, three months: 4 commits, 2 windows.
+
+**Decision.** Adopt Option B with that three-path hybrid. Do not restore the
+27-path list. Do not adopt a digest manifest, which is both more expensive and,
+against file-addition attacks, ineffective.
+
+**Residual gap, not closed here.** Every control in this entry runs inside the
+gate it is checking. None of them proves the wired pipeline actually goes red
+end to end -- the failure mode that gave `Fork Health` nineteen days of false
+success from `... | tee` without `pipefail`. The control that would close it is a
+scheduled mutation canary that plants a defect, opens a real pull request, and
+asserts `PR Gate` fails. It costs a full gate run per canary and is not proposed
+here; it is recorded so the next reader knows the difference between "the guard
+rejects the defect in process" and "the gate rejects the pull request".
+
+**Reopen trigger for this entry:** any change to the protected-path set, to
+`justfile:9`, or to `required_approving_review_count`; a claim in
+`scripts/check_guard_nonvacuity.py` that becomes permanently unproven; the
+registry disagreeing with the set of guards `PR Gate` actually runs; or adoption
+of the end-to-end canary, which would supersede the residual-gap paragraph.
+
+**Editorial note on porting.** This entry was adjudicated on
+`docs/fork/ideal-base/DECISIONS.md`, a path PR #155 deletes, and is reproduced
+here at the surviving path. Three changes were made in the move, each because the
+original would otherwise describe a property this repository does not have --
+the D034 defect this entry exists to correct. First, the ergonomic figures are
+restated in windows as well as commits: a window is opened per pull request, so
+78 and 4 commits are 41 and 2 windows, reproducible with `git log --since
+'3 months ago' --first-parent main -- <paths>`. Second, the sentence stating that
+`justfile` is unprotected is put in the past tense, because the three paths this
+entry prescribes are protected as of the pull request carrying this port: the
+decision is implemented, not merely adopted. Third, the shadowing class described
+above is no longer confined to the harness -- every `python3 scripts/...` line in
+`justfile` now runs under `-I`, and the three guards that legitimately import a
+sibling re-add their own directory explicitly. See D036.
+
+## D036. Four controls were vacuous, and each failed by being absent rather than by breaking
+
+**Status:** recorded, with the repairs implemented in the pull request carrying
+this entry. Follows D035, which adjudicated the protected-path question; this
+entry records what a sweep of the surrounding machinery found while that work was
+in flight, and the residual risks left open.
+
+**The common shape.** Every defect below reads as success from the outside. A
+green check that never ran the assertion, a fatal rule no workflow invokes, a
+guard that verifies a digest it can be told to compute, an error message pointing
+at a file about to be deleted. None of them is a mechanism that broke; each is a
+mechanism that was never wired, or was wired through something that could be
+substituted. The corrective bias this entry argues for is to test for the red,
+not for the green: a control nobody has watched fail is a control nobody has
+evidence for.
+
+**1. `Fork Health` was green for nineteen days while exiting 2.** The workflow
+piped its checker into `| tee`. Under `bash -e` without `pipefail` the exit status
+of a pipeline is the status of its last command, so `tee` exiting 0 masked the
+checker exiting 2. Repaired by setting `pipefail`. The repair was verified by
+demonstration rather than by re-reading the code: the same pipeline in isolation
+exits 0 without `pipefail` and 2 with it, and the first run on the repaired
+workflow was dispatched and inspected rather than assumed.
+
+**2. Any `python3 scripts/...` invocation could be shadowed.** Python puts a
+script's own directory at the front of `sys.path`, ahead of the standard library.
+`justfile` invoked the critical-path digest guard as `python3
+scripts/check_critical_path_budget.py --expect-digest <sha>`, and `scripts/` is
+not a protected path. A six-line module dropped into that directory, named for
+the standard library's `hashlib` and returning a fixed sentinel, made the guard
+exit 0 against a digest that is not this repository's. The
+sentinel was chosen so it could not coincide with the honest value. This is the
+same class D035 records against `scripts/check_guard_nonvacuity.py`; what is new
+here is that it also reached the guard `just check` runs on every local
+iteration, and that a digest manifest -- Option A in D035 -- would not have
+covered it, because the attack is a file *addition*.
+
+Repaired by running every `python3 scripts/...` line in `justfile` under `-I`,
+which drops the script directory from `sys.path`, and by having the three guards
+that legitimately import a sibling module re-add their own directory explicitly.
+`-I` alone breaks those three, so the two halves are one change and were tested
+together. `PYTHONSAFEPATH` was rejected: it is a no-op on Python 3.9, which is
+old enough to be present on a contributor machine.
+
+**3. A fatal documentation rule was invoked by nothing.**
+`scripts/check_docs_references.py` fails the build on any machine-local path in a
+document, and its budget file records a ratchet of zero, so the rule is fatal by
+design. No workflow, recipe, or script called it: `grep` over `justfile` and
+`.github/workflows` returns no invocation. It is now wired into `lint-docs`, the
+recipe `Checks / Docs lint` already runs, which makes it cost nothing new; the
+lint step's `nix shell` had no interpreter, so `nixpkgs#python3` was added
+alongside `just` and `vale`. A contract test asserts the recipe still contains
+the invocation, so removing it fails a test rather than passing silently.
+
+**4. The governance gate's error message pointed at a file being deleted.**
+`.github/workflows/governance-root.yml` told a blocked contributor to "use the
+recorded ruleset maintenance procedure (design.md section 4)". PR #155 deletes
+that design document along with 1020 other files. Workflow YAML is invisible to
+the documentation checker in item 3, so nothing in the repository would have
+caught the dangling pointer. The message now points at the *Ruleset maintenance
+window* section below, and that section exists because this entry adds it.
+
+**The decision log is now append-only, which is not the same as protected.** The
+instruction behind this work was to add `docs/architecture/GOVERNANCE_DECISIONS.md`
+to the protected set. Measured first: the log took 34 commits, **33 first-parent
+merges**, in the three months to 2026-08-17. Listing it in `protected=(...)`
+would therefore cost 33 maintenance windows a quarter -- more than the 41 that
+D035 rejects as too expensive for twenty-seven guard files -- and every one of
+those windows would be the price of *recording a decision*. A control that taxes
+its own upkeep will be routed around, and the resulting silence looks exactly
+like agreement.
+
+What is enforced instead, inside `governance-root.yml`, which is itself
+protected: the log may gain lines freely and may not lose them. Deleting the
+file, truncating it, or renaming it all fail the gate; a rename is caught because
+it reads as a deletion, which is correct, since moving the log is a governance
+event. Appending an entry needs no window. The stanza was tested against six
+scenarios before merge -- no change, append, single-line deletion, removal,
+rename, and an unrelated protected path -- and behaves in all six. The cost of
+this choice is that a typo fix in the log needs a window; that is accepted, and
+is the ordinary meaning of an append-only record.
+
+This is not an original design. The 2026-08-17 reconciliation dissent recorded
+both options and chose full protection on the argument that appends are rare
+governance acts, while naming the append-only checker as the designed fallback
+"if the owner finds window-per-append too heavy in practice." The measurement
+above decides between them: appends are not rare, so the fallback is the primary.
+The dissent's reasoning was sound and its premise was wrong, which is the useful
+thing about writing the losing side down -- it stayed available to be corrected
+by a number rather than re-argued from scratch. The residual it identified stands:
+this protects the norm, not the content. Nothing here stops an appended entry from
+being false; it only stops a true one from vanishing quietly.
+
+**Residual risks, accepted rather than closed.**
+
+*The governance contract is materially smaller than the log used to claim.* D034
+records the reversal and D035 adjudicates the replacement. Eight paths are
+protected where thirty-two once were, and the argument for that is ergonomic, not
+security-theoretic. It is written down so a later reader inherits the trade
+rather than rediscovering it.
+
+*Tag protection is detected, not prevented.* A tag pushed outside the rails is
+surfaced by the scheduled fork-health run, which means detection can lag by up to
+roughly a day. No control here shortens that window.
+
+*Nothing proves the pipeline goes red end to end.* This is D035's residual gap and
+it survives this entry. Every control described above was verified in process --
+the defect was planted, the guard rejected it -- but none of them proves that a
+pull request carrying the defect is actually blocked by `PR Gate`. The control
+that would close it is a scheduled mutation canary that opens a real pull request
+and asserts the gate fails. It costs a full gate run per canary and is not
+adopted here. Item 1 of this entry is precisely what that gap looks like when it
+bites.
+
+*The stale-path class was checked, not assumed clear.* Wiring the documentation
+checker into `lint-docs` made it run for the first time against this entry as it
+was being written, and it rejected the draft: the text cited two scoreboard
+scripts as surviving hazards when the reorganisation removes the scripts
+themselves. The claim was wrong and is gone. A control that catches its author's
+error in its own first execution is the only kind worth adding.
+
+**Reopen trigger for this entry:** any change to the `| tee` handling or
+`pipefail` in a workflow that gates merges; a new `python3 scripts/...`
+invocation added without `-I`; `check_docs_references.py` losing its caller in
+`lint-docs`; the append-only stanza being weakened or the decision log moving
+again; or adoption of the end-to-end canary, which would supersede the third
+residual risk.
+
+## Ruleset maintenance window
+
+This section is the procedure `governance-root.yml` names when it blocks a pull
+request. It replaces section 4 of the design document PR #155 deletes.
+
+**When it applies.** A pull request that changes a protected path fails the
+`Governance Root` required check by design. The check is not advisory and is not
+to be bypassed with `--admin`; the window is the sanctioned way through, and it
+exists so the change is deliberate, brief, and reversible.
+
+**The invariant.** The ruleset is `18509013 protect-fork-rails` on
+`jerudnik/jcode`. What must round-trip is the *writable* contract, not the raw
+API response: `updated_at` and `_links` are server-managed and change on every
+write, so hashing the whole document cannot round-trip by construction. Canonical
+form is the writable keys only, and its baseline digest is:
+
+```
+99823fdb7ab60b4b4ab9592f414dc1cdbb494beb1cc4bf4464b1a26650aef374
+```
+
+Compute it with:
+
+```sh
+gh api repos/jerudnik/jcode/rulesets/18509013 > /tmp/rs.json
+python3 -I -c 'import json,sys,hashlib
+W=("name","target","enforcement","conditions","rules","bypass_actors")
+d=json.load(open("/tmp/rs.json"))
+print(hashlib.sha256(json.dumps({k:d[k] for k in W if k in d},
+      sort_keys=True,separators=(",",":")).encode()).hexdigest())'
+```
+
+At rest the ruleset is `active`, has empty `bypass_actors`, carries the
+`deletion`, `non_fast_forward` and `pull_request` rules, and requires exactly the
+`Governance Root` and `PR Gate` contexts.
+
+**The procedure.**
+
+1. Bring the pull request green on every check except `Governance Root`, which
+   will stay red for as long as the change is what it is. Confirm the branch is
+   `main` or `automation/**` and that the diff is only what the window is for;
+   an unrelated file merged under a window is the failure this ceremony exists
+   to prevent.
+2. Capture the ruleset to a file and assert the digest equals the baseline
+   before touching anything. If it does not, stop: something changed the
+   contract outside a window, and that is the incident, not the pull request.
+3. Open the window by removing the `Governance Root` context from the
+   `required_status_checks` rule and `PUT`ting the ruleset back. Change nothing
+   else.
+4. Merge through the REST endpoint,
+   `PUT /repos/jerudnik/jcode/pulls/<n>/merge` with `merge_method=merge`. The
+   GraphQL mutation is 503-flaky on this repository and merge method must be
+   merge-commit.
+5. Close the window by `PUT`ting the captured writable contract back verbatim.
+6. Verify independently. Re-`GET` the ruleset, recompute the digest, and compare
+   it to the baseline yourself rather than trusting the transcript of the script
+   that just ran. Also confirm the merge landed as exactly one first-parent
+   commit and that the merged diff matches the file and line counts expected.
+7. Append an entry to this log describing what changed and why. Appending needs
+   no window.
+
+**Keep the two lists in lockstep.** The protected set is declared twice, in the
+`protected=(...)` array in `.github/workflows/governance-root.yml` and in
+`protected_paths.required` in `scripts/required-checks.json`. The comparator
+checks set equality in both directions, so a path added to one and not the other
+turns `Governance Root` red on every subsequent pull request. Verify before
+merging with:
+
+```sh
+python3 -I scripts/governance_compare.py \
+  --manifest scripts/required-checks.json --live --workflows-dir .github/workflows
+```
+
+which reports the number of paths it believes are enforced and exits non-zero on
+disagreement.
