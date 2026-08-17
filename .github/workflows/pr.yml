@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.route.outputs.docs_only }}
+      product_impacting: ${{ steps.route.outputs.product_impacting }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -28,19 +29,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base='${{ github.event.pull_request.base.sha }}'
-          head='${{ github.event.pull_request.head.sha }}'
-          docs_only=true
-
-          while IFS= read -r path; do
-            [ -n "$path" ] || continue
-            if [[ "$path" != docs/* && "$path" != *.md && "$path" != README.md && "$path" != CONTRIBUTING.md && "$path" != RELEASING.md ]]; then
-              docs_only=false
-              break
-            fi
-          done < <(git diff --name-only "$base" "$head")
-
-          printf 'docs_only=%s\n' "$docs_only" >> "$GITHUB_OUTPUT"
+          python3 scripts/classify_pr_paths.py \
+            --base '${{ github.event.pull_request.base.sha }}' \
+            --head '${{ github.event.pull_request.head.sha }}' \
+            >> "$GITHUB_OUTPUT"
 
   checks:
     name: Checks
@@ -49,6 +41,9 @@ jobs:
     secrets: inherit
     with:
       docs_only: ${{ needs.classify.outputs.docs_only == 'true' }}
+      # Compared against 'false' rather than 'true' so an output the classifier
+      # never wrote runs the expensive legs instead of silently skipping them.
+      product_impacting: ${{ needs.classify.outputs.product_impacting != 'false' }}
 
   pr-gate:
     name: PR Gate
