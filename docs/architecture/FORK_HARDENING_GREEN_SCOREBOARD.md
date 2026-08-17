@@ -18,14 +18,14 @@ Verdict legend: **HELD** (model-accurate) / **DRIFT-OK** (drifted tolerably) /
 | 7 | .rs files with ZERO deletions | "most are additive" | **113 of 186** | `… \| awk '$2==0' \| wc -l` | HELD |
 | 8 | skill.rs "converted additive 20→0" | 0 deletions | **12 deletions** | `git diff --numstat … -- …/skill.rs` | DRIFT-BAD (claim false; but is a `.apm` *extension*, not rot — see note) |
 | 9 | agent.rs "additive-only" | additive-only | **19 deletions** (compaction-dispatch gating) | `git diff --numstat … -- …/agent.rs` | DRIFT-BAD (claim false; real behavior edit) |
-| 10 | swarm/comm files under ledger | (should be) | **0 rows** for swarm/comm/compaction/session_search | `grep -c … docs/fork/patch-ledger.md` | DRIFT-BAD |
+| 10 | swarm/comm files under ledger | (should be) | **0 rows** for swarm/comm/compaction/session_search | `grep -c … the former patch ledger` | DRIFT-BAD |
 | 11 | rerere cache | "resolve once, ever" | **100 entries, 199 tracked files, healthy, no GC** | `ls .rerere-cache/ \| wc -l` | HELD (functional); DRIFT-OK (unbounded) |
 | 12 | `jcode doctor` client+server+built-from | shipped (NS4) | **present, all 3 lines emit** | `jcode doctor` | HELD |
 | 13 | 6h CI rebase rail | shipped | **`sync.yml` cron `17 */6 * * *`, force-with-lease, rerere import, abort-on-new** | `.github/workflows/sync.yml` | HELD |
 | 14 | vendor/distro refs moving | (alive) | vendor `631935dd1` 2026-07-07; distro `e601b95b2` 2026-07-04 | `git log -1 --date=short github/vendor/upstream github/distro/nix` | HELD |
 | 15 | fork-health check 5 (no workflow diff main vs distro) | invariant | **FAILS: `sync.yml` differs** (`1f5cc7aac`) | `git diff --name-only github/distro/nix github/main -- .github/workflows/` | **BROKEN** |
 | 16 | model doc cites correct sync file | "`nix.yml`" | sync extracted to **`sync.yml`** | grep workflows | DRIFT-OK (doc-only) |
-| 17 | patch-ledger freshness | living index | 85 lines, last `2026-07-04`; ~half invasive files unlisted | `git log -1 --date=short -- docs/fork/patch-ledger.md` | DRIFT-BAD |
+| 17 | patch-ledger freshness | living index | 85 lines, last `2026-07-04`; ~half invasive files unlisted | historical ledger log at measured commit | DRIFT-BAD |
 | 18 | fork gate green | (should pass) | **exit 0** (186 fork-touched .rs, fmt clean) | `scripts/fork-touched-clippy.sh --fmt` | HELD |
 
 ## Referee adjudication of RED vs BLUE

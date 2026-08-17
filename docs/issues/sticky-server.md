@@ -96,4 +96,3 @@ single-process fallback). This pins the regression.
 
 Analysis complete and verified. NOT fixed (touching signal + reload paths and
 reloading the runtime is a coordinated action; deferred to a dedicated session).
-Actionable tracking mirrored to `~/notes/projects/jcode/proposals/`.

@@ -14,7 +14,7 @@ applyTo: "**"
 
 ## Documentation surfaces
 
-- `docs/` holds current docs; `docs/issues/` holds open issues (delete solved). Use `~/notes/projects/jcode/{proposals/,maintenance/,project.md}` for proposals, incident evidence, and PM tracking; keep other records out of `docs/`.
+- `docs/` holds current docs; `docs/issues/` holds open issues (delete solved). Use the operator's project notes repository for proposals, incident evidence, and PM tracking; keep other records out of `docs/`.
 
 ## Child DOX index
 

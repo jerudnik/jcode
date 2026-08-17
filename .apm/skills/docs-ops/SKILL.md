@@ -8,7 +8,7 @@ allowed-tools: bash, read, write, edit, grep, agentgrep, batch, todo
 
 - Read `docs/README.md` and the nearest `AGENTS.md` before editing docs.
 - Place open issues in `docs/issues/` with the required frontmatter.
-- Place proposals, project-management notes, and scratch work in `~/notes/projects/jcode/`, never in `docs/`.
+- Place proposals, project-management notes, and scratch work in the operator's project notes repository, never in `docs/`.
 - Do not create `docs/archive/`, `docs/fork/`, or `docs/proposals/`.
 - Do not edit generated `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` files. Edit `.apm/instructions/` primitives and run `apm compile`.
 - After moving files, run `scripts/check_docs_references.py` and `scripts/check_agent_instructions.py`.

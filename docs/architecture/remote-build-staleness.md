@@ -112,10 +112,7 @@ operator is working on, with no divergence check.
   (`local_git_hash=...`), sync-back handling (`--sync-back` flags).
 - `scripts/dev_cargo.sh` — remote delegation and down-cache logic
   (`remote_down_cache_*`).
-- `/tmp/jcode-test-audit/remediation/IMPL_NOTES.md` (session artifact) — fmt
-  no-sync-back journal entries and the `JCODE_REMOTE_CARGO=0` workaround.
 - Sibling proposals from the same session:
-  `docs/architecture/provider-confusion.md`,
-  `~/notes/projects/jcode/proposals/swarm-session-identity.md` — different subsystems, same
-  theme: the system reports state the operator reasonably believes is about
-  X while it is actually about Y.
+  `docs/architecture/provider-confusion.md` and `swarm-session-identity` —
+  different subsystems, same theme: the system reports state the operator
+  reasonably believes is about X while it is actually about Y.

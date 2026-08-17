@@ -134,6 +134,6 @@ route disambiguation problem deferred below.
   `selection_for_concrete_model`, `resolve_swarm_spawn_selection`,
   `explicit_route_for_configured_model` (doc comment documents the intended
   `openai-api:gpt-5.5` prefix behavior).
-- Related: `~/notes/projects/jcode/proposals/swarm-lifecycle-remediation.md` (trusting signals
-  that do not hold), `~/notes/projects/jcode/proposals/swarm-session-identity.md` (name reuse and
-  attachment ambiguity from the same incident).
+- Related proposal records: `swarm-lifecycle-remediation` (trusting signals
+  that do not hold) and `swarm-session-identity` (name reuse and attachment
+  ambiguity from the same incident).

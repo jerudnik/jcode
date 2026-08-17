@@ -7,7 +7,7 @@ applyTo: "docs/**"
 
 ## Purpose
 
-Current Jcode documentation. Open issues live in `docs/issues/`; working records live in `~/notes/projects/jcode/`.
+Current Jcode documentation. Open issues live in `docs/issues/`; working records live in the operator's project notes repository.
 
 ## Ownership
 

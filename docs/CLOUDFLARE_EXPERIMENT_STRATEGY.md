@@ -4,10 +4,10 @@ Status: frozen record, 2026-06-16. Retained as the reasoning behind a decision,
 not as current guidance.
 
 This document was written under the fork's earlier upstream-tracking branch
-model. That model no longer exists: `docs/fork/SYNC_MODEL.md` is the authority,
-and it defines a single-rail hard fork with `main` as the only long-lived branch and
-no upstream-tracking contract. The `distro/nix` packaging branch this document
-describes as current does not exist in the repository.
+model. That model no longer exists: [`BRANCHING.md`](./BRANCHING.md) is the
+authority, and it defines `main` as the only durable branch. The `distro/nix`
+packaging branch this document describes as current does not exist in the
+repository.
 
 Its Cloudflare findings (service latency as a ceiling for interactive recall,
 Cloudflare as a durability and batch substrate rather than a hot path) are the
