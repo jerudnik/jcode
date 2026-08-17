@@ -11,9 +11,8 @@ baseline may be moved. Their baselines
 (`panic_budget.json`, `swallowed_error_budget.json`, `code_size_budget.json`,
 `test_size_budget.json`, `warning_budget.txt`) are deliberately *unprotected*
 governance-wise, so that routine tightening after a cleanup needs no
-maintenance window (see
-`docs/fork/ideal-base/evidence/R07/integration-adjudication.md`). The accepted
-cost was that a *raise* is only "visible in review".
+maintenance window. The accepted cost is that a *raise* is only "visible in
+review".
 
 That trade is fine for the repository at large. It is not fine for the paths
 acceptance standard A6 calls critical: lifecycle, persistence, updater,

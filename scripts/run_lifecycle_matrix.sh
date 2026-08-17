@@ -9,13 +9,13 @@
 #      use real daemons + fake MCP servers only).
 #
 # Usage: scripts/run_lifecycle_matrix.sh [rounds]   (default 2)
-# Log: docs/fork/ideal-base/evidence/F14/lifecycle_matrix_run.log
+# Log: target/lifecycle-matrix/lifecycle_matrix_run.log
 
 set -uo pipefail
 
 ROUNDS="${1:-2}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EVID="$REPO/docs/fork/ideal-base/evidence/F14"
+EVID="$REPO/target/lifecycle-matrix"
 mkdir -p "$EVID"
 LOG="$EVID/lifecycle_matrix_run.log"
 FAIL=0

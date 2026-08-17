@@ -4,8 +4,8 @@
 These cover the parts that a planted-defect run cannot observe cheaply: the
 domain attribution rules, the digest's sensitivity to every field it claims to
 pin, the repository-trend comparison, and the coherence of the recorded
-ceilings and targets. The end-to-end red/green behaviour is proved separately by
-the planted defects recorded in docs/fork/ideal-base/evidence/F23/README.md.
+ceilings and targets. The end-to-end red/green behaviour is proved separately
+by planted-defect runs.
 """
 
 from __future__ import annotations

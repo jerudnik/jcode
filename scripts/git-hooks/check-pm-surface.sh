@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # check-pm-surface.sh — enforce the notes/repo surface contract.
 #
-# Contract (see ~/notes/projects/jcode/project.md ## Conventions):
-#   notes (~/notes/projects/jcode) = PM/tracking, stated once authoritatively.
-#   repo docs (~/labs/jcode/docs)  = documentation.
+# Contract: repo docs contain current documentation and open issues. Proposals,
+# PM/tracking, and incident evidence belong in the operator's project notes.
 #
 # PM/tracking must not accrete in the repo. This hook blocks a commit that adds
 # a NEW docs/ file whose primary purpose is tracking (a backlog, next-session
 # handoff, workplan, or a checkbox-heavy TODO list). Findings/analysis docs are
-# fine — their open-item tracking belongs in notes project.md, but the analysis
-# itself is documentation and stays.
+# fine when they describe current behavior; open product defects belong in
+# docs/issues/ and other tracking belongs in project notes.
 #
-# Scope: only newly-ADDED files under docs/ (not archive/, which is historical).
+# Scope: only newly-added Markdown under docs/.
 # Modifications to existing docs are not blocked (migrate deliberately, not by
 # hook). Set PM_SURFACE_OK=1 to bypass for a deliberate exception.
 
@@ -19,13 +18,13 @@ set -euo pipefail
 
 [ "${PM_SURFACE_OK:-}" = "1" ] && exit 0
 
-# Newly-added markdown files under docs/, excluding docs/archive/.
+# Newly-added Markdown files under docs/.
 # (portable readarray: macOS ships bash 3.2 without mapfile)
 added=()
 while IFS= read -r line; do
   [ -n "$line" ] && added+=("$line")
 done < <(
-  git diff --cached --name-only --diff-filter=A -- 'docs/' ':(exclude)docs/archive/' 2>/dev/null \
+  git diff --cached --name-only --diff-filter=A -- 'docs/' 2>/dev/null \
     | grep -E '\.md$' || true
 )
 [ "${#added[@]}" -eq 0 ] && exit 0
@@ -63,16 +62,15 @@ cat >&2 <<'EOF'
 ✗ PM surface contract violation (docs/ is for documentation, not tracking).
 
 The following newly-added repo docs read like PM/tracking. Per the surface
-contract, PM/tracking lives in ~/notes/projects/jcode, stated once:
+contract, PM/tracking lives in the operator's project notes repository:
 
 EOF
 for v in "${violations[@]}"; do printf '    - %s\n' "$v" >&2; done
 cat >&2 <<'EOF'
 
 Fix one of:
-  • Move the tracking to ~/notes/projects/jcode/ (proposals/ or project.md) and
-    drop it from the repo. A findings/analysis doc may stay in the repo, but its
-    open-item list belongs in notes.
+  • Move the tracking to project notes and drop it from the repo. A current
+    findings/analysis doc may stay, while product defects go in docs/issues/.
   • If this genuinely is code-adjacent documentation misread by the heuristic,
     rename it away from tracking vocabulary, or bypass once with:
         PM_SURFACE_OK=1 git commit ...

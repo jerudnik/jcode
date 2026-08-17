@@ -8,10 +8,9 @@ specifically because the rule they cover is easy to get backwards:
   test_prohibition_is_not_a_finding   the retired-rail rule must not fire on
                                       the policy sentence that retires the
                                       rail, or it would flag its own contract
-  test_exclusions_do_not_hide_live_docs
-                                      the path exclusions are load-bearing (25
-                                      findings instead of 143), so they must be
-                                      proven to exclude only frozen material
+  test_disallowed_docs_surface_is_flagged
+                                      removed historical docs surfaces must not
+                                      silently return under a broad exclusion
 """
 
 from __future__ import annotations
@@ -231,40 +230,62 @@ class DocsReferencesTest(unittest.TestCase):
                 findings = self.run_on({"docs/a.md": line + "\n"})
                 self.assertEqual(self.rules(findings), set(), line)
 
-    # --- scope -----------------------------------------------------------
+    # --- documentation surfaces ----------------------------------------
 
-    def test_archives_are_excluded(self):
-        findings = self.run_on({"docs/archive/old.md": "[gone](./nope.md)\n~/notes/x.md\n"})
-        self.assertEqual(self.rules(findings), set())
+    def test_disallowed_docs_surface_is_flagged(self):
+        for rel in (
+            "docs/archive/old.md",
+            "docs/fork/recovery/old.md",
+            "docs/proposals/draft.md",
+        ):
+            with self.subTest(rel=rel):
+                findings = self.run_on({rel: "historical\n"})
+                self.assertIn("disallowed-path", self.rules(findings))
 
-    def test_frozen_fork_records_are_excluded(self):
+    def test_issue_requires_yaml_frontmatter(self):
+        findings = self.run_on({"docs/issues/a.md": "# Missing metadata\n"})
+        self.assertIn("issue-frontmatter", self.rules(findings))
+
+    def test_issue_requires_all_fields(self):
         findings = self.run_on(
             {
-                "docs/fork/recovery/r.md": "/Users/someone/labs/jcode\n",
-                "docs/fork/normalization/n.md": "/Users/someone/labs/jcode\n",
+                "docs/issues/a.md": (
+                    "---\nstatus: open\npriority: high\nowner: maintainers\n---\n# Issue\n"
+                )
+            }
+        )
+        self.assertIn("issue-frontmatter", self.rules(findings))
+        self.assertIn("opened", " ".join(f.detail for f in findings))
+
+    def test_solved_issue_is_rejected(self):
+        for status in ("closed", "fixed", "wontfix"):
+            with self.subTest(status=status):
+                findings = self.run_on(
+                    {
+                        "docs/issues/a.md": (
+                            "---\n"
+                            f"status: {status}\n"
+                            "priority: low\nowner: maintainers\nopened: 2026-08-17\n"
+                            "---\n# Solved\n"
+                        )
+                    }
+                )
+                self.assertIn("issue-frontmatter", self.rules(findings))
+                self.assertIn(
+                    "delete solved issues instead of archiving them.",
+                    " ".join(f.detail for f in findings),
+                )
+
+    def test_open_issue_with_required_fields_is_clean(self):
+        findings = self.run_on(
+            {
+                "docs/issues/a.md": (
+                    "---\nstatus: open\npriority: high\nowner: maintainers\n"
+                    "opened: 2026-08-17\n---\n# Issue\n"
+                )
             }
         )
         self.assertEqual(self.rules(findings), set())
-
-    def test_exclusions_do_not_hide_live_docs(self):
-        # The load-bearing counter-check: a path that merely *resembles* an
-        # excluded one must still be checked, so the exclusion cannot be
-        # widened by accident into "skip everything under docs/fork".
-        findings = self.run_on({"docs/fork/ideal-base/STATE_NOTES.md": "[x](./gone.md)\n"})
-        self.assertIn("broken-link", self.rules(findings))
-
-    def test_audit_register_may_name_machine_local_paths(self):
-        findings = self.run_on(
-            {"docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md": "counts ~/notes/x.md references\n"}
-        )
-        self.assertEqual(self.rules(findings), set())
-
-    def test_audit_register_is_still_link_checked(self):
-        # Exempt from machine-local, NOT exempt from broken links.
-        findings = self.run_on(
-            {"docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md": "[x](./gone.md)\n"}
-        )
-        self.assertIn("broken-link", self.rules(findings))
 
     # --- exit behavior ---------------------------------------------------
 
