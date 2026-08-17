@@ -37,6 +37,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
         run: |
+          set -o pipefail
           scripts/fork-health.sh --live --repo "$GITHUB_REPOSITORY" \
             --fork-remote origin | tee health.txt
           {
