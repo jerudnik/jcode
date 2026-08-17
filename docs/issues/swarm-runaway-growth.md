@@ -1,3 +1,10 @@
+---
+status: open
+priority: critical
+owner: maintainers
+opened: 2026-08-11
+---
+
 # Swarm Runaway Growth
 
 Status: **problem capture** (no solution designed yet).
@@ -67,7 +74,7 @@ fail earlier in the session.
 
 ## Related
 
-- `docs/proposals/swarm-lifecycle-remediation.md` covers process-lifecycle
+- `~/notes/projects/jcode/proposals/swarm-lifecycle-remediation.md` covers process-lifecycle
   leaks (orphaned children, stale markers). This proposal is about logical
   runaway of a healthy swarm: same theme of trusting cooperative signals
   where enforcement is needed.

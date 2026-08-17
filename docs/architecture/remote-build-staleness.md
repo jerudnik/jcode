@@ -115,7 +115,7 @@ operator is working on, with no divergence check.
 - `/tmp/jcode-test-audit/remediation/IMPL_NOTES.md` (session artifact) — fmt
   no-sync-back journal entries and the `JCODE_REMOTE_CARGO=0` workaround.
 - Sibling proposals from the same session:
-  `docs/proposals/provider-confusion.md`,
-  `docs/proposals/swarm-session-identity.md` — different subsystems, same
+  `docs/architecture/provider-confusion.md`,
+  `~/notes/projects/jcode/proposals/swarm-session-identity.md` — different subsystems, same
   theme: the system reports state the operator reasonably believes is about
   X while it is actually about Y.
