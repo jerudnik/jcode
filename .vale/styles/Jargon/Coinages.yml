@@ -5,7 +5,6 @@ ignorecase: true
 swap:
   durable rail: long-lived branch
   durable rails: long-lived branches
-  maintenance window: merge record
   advertised surface: public API
   advertised-surface: public-API
   evidence defect: wrong or missing evidence

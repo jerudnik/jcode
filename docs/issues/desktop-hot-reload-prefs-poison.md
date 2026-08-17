@@ -23,7 +23,7 @@ Error: desktop hot reload env lock poisoned   # cascade from the panic above
 This is the same class DECISIONS.md already records for jcode-tui: "order-
 dependent flakes that pass singly but poison on process-global pollution in
 full-suite runs." It is filed, not fixed in-program, to avoid widening scope
-during W4/W5 signoff. No product runtime path is implicated.
+during W4/W5 approval. No product runtime path is implicated.
 
 ## Mechanism
 
