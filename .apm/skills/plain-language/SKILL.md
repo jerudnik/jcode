@@ -1,6 +1,6 @@
 ---
 name: plain-language
-description: Use when writing anything a human will read in this repository: commit messages, docs, plans, PR text, reports, comments, or instruction files. Also use when reviewing or rewriting existing text that is hard to understand, and when naming new things.
+description: "Use when writing anything a human will read in this repository: commit messages, docs, plans, PR text, reports, comments, or instruction files. Also use when reviewing or rewriting existing text that is hard to understand, and when naming new things."
 allowed-tools: bash, read, edit, grep, agentgrep, batch
 ---
 
