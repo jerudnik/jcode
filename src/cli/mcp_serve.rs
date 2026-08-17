@@ -671,8 +671,18 @@ fn validate_modern_request_meta(
     params: &Value,
 ) -> std::result::Result<ModernRequestMeta, RpcError> {
     let meta = params.get("_meta").and_then(Value::as_object);
+    let Some(meta) = meta else {
+        return Err(RpcError::with_data(
+            MCP_UNSUPPORTED_PROTOCOL_VERSION,
+            "Unsupported protocol version",
+            json!({
+                "supported": MCP_SUPPORTED_PROTOCOL_VERSIONS,
+                "requested": Value::Null,
+            }),
+        ));
+    };
     let requested = meta
-        .and_then(|meta| meta.get(MCP_PROTOCOL_VERSION_META_KEY))
+        .get(MCP_PROTOCOL_VERSION_META_KEY)
         .cloned()
         .unwrap_or(Value::Null);
     if requested.as_str() != Some(MCP_MODERN_PROTOCOL_VERSION) {
@@ -686,7 +696,6 @@ fn validate_modern_request_meta(
         ));
     }
 
-    let meta = meta.expect("supported protocol version requires an object _meta");
     let client_capabilities = meta
         .get(MCP_CLIENT_CAPABILITIES_META_KEY)
         .and_then(Value::as_object)
@@ -741,14 +750,13 @@ fn modern_complete_result(mut result: Value) -> Value {
             "_meta": server_info_meta(),
         });
     }
-    let result_object = result
-        .as_object_mut()
-        .expect("object type checked before mutation");
-    result_object.insert(
-        "resultType".to_string(),
-        Value::String("complete".to_string()),
-    );
-    result_object.insert("_meta".to_string(), server_info_meta());
+    if let Some(result_object) = result.as_object_mut() {
+        result_object.insert(
+            "resultType".to_string(),
+            Value::String("complete".to_string()),
+        );
+        result_object.insert("_meta".to_string(), server_info_meta());
+    }
     result
 }
 

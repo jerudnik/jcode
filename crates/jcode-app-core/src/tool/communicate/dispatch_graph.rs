@@ -135,13 +135,13 @@ pub(super) async fn handle_graph_action(
                         count, suffix
                     )));
                 };
-                if occupied.is_none() {
-                    let summary = fetch_plan_status(&ctx.session_id).await?;
-                    occupied = Some(plan_graph_node_ids(&summary));
-                }
-                let occupied = occupied
-                    .as_ref()
-                    .expect("occupied ids were initialized above");
+                let occupied = match occupied.as_ref() {
+                    Some(ids) => ids,
+                    None => {
+                        let summary = fetch_plan_status(&ctx.session_id).await?;
+                        occupied.insert(plan_graph_node_ids(&summary))
+                    }
+                };
                 let (remapped, mut remaps) = remap_conflicting_seed_nodes(
                     &seed_nodes,
                     occupied,
