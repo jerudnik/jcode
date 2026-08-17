@@ -8,6 +8,36 @@ if [ -z "$repo_root" ]; then
 fi
 
 managed_marker="# Managed by scripts/install-git-hooks.sh for jcode"
+
+# Write a managed hook shim that resolves the checkout at run time.
+#
+# Linked worktrees share one .git/hooks directory, so a repository path
+# expanded at install time is wrong for every other checkout, and becomes
+# wrong for all of them once the worktree that ran the installer is removed.
+# Resolving with git rev-parse on each invocation keeps every worktree
+# pointed at its own scripts/git-hooks copy.
+write_hook_shim() {
+  local dest="$1" hook_name="$2"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' "$managed_marker"
+    cat <<'SHIM_HEAD'
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+SHIM_HEAD
+    # shellcheck disable=SC2016  # $root is deliberately literal: it expands when the hook runs
+    printf 'hook="$root/scripts/git-hooks/%s"\n' "$hook_name"
+    cat <<'SHIM_TAIL'
+if [ ! -x "$hook" ]; then
+  echo "${0##*/}: $hook is missing or not executable; refusing to skip the guard" >&2
+  exit 1
+fi
+exec "$hook" "$@"
+SHIM_TAIL
+  } >"$dest"
+  chmod +x "$dest"
+}
+
 hook_path="$(git rev-parse --git-path hooks/pre-push)"
 hook_dir="$(dirname "$hook_path")"
 mkdir -p "$hook_dir"
@@ -18,12 +48,7 @@ if [ -e "$hook_path" ] && ! grep -Fq "$managed_marker" "$hook_path"; then
   exit 0
 fi
 
-cat >"$hook_path" <<EOF
-#!/usr/bin/env bash
-$managed_marker
-exec "$repo_root/scripts/git-hooks/pre-push" "\$@"
-EOF
-chmod +x "$hook_path"
+write_hook_shim "$hook_path" pre-push
 
 echo "install-git-hooks: installed pre-push branch rail guard"
 
@@ -36,11 +61,6 @@ if [ -e "$precommit_path" ] && [ ! -L "$precommit_path" ] \
   echo "install-git-hooks: run scripts/git-hooks/pre-commit from that hook to enable the surface guard" >&2
 else
   rm -f "$precommit_path"
-  cat >"$precommit_path" <<EOF
-#!/usr/bin/env bash
-$managed_marker
-exec "$repo_root/scripts/git-hooks/pre-commit" "\$@"
-EOF
-  chmod +x "$precommit_path"
+  write_hook_shim "$precommit_path" pre-commit
   echo "install-git-hooks: installed pre-commit surface-contract guard"
 fi
