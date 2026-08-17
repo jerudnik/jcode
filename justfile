@@ -3,11 +3,23 @@
 # release-check, and lint-docs.
 
 # Throttled check loop - type-checks + tests, skips codegen. Fast feedback.
-check:
+check: test-python
     python3 -I scripts/check_critical_path_budget.py --expect-digest 5ed12e310519a1258ddd0cf9b67674b8aa3198a863f1712771c36b10c5d052ed --report target/critical-path-budget.json
-    python3 -m unittest tests.test_guard_nonvacuity
     python3 -I scripts/check_guard_nonvacuity.py
+    python3 -I scripts/check_test_wiring.py
     scripts/cargo_exec.sh check --locked --workspace --all-targets --all-features
+
+# Every module in tests/, one process each. The glob is the wiring: a new test
+# file runs the day it lands, with nothing to remember to add here. Separate
+# processes because several of these modules assert on process-global state --
+# sys.path scrubbing, cwd -- that a shared runner perturbs, and because a
+# module that pollutes sys.path for a later one is a failure mode this repo has
+# already paid for. Needs python >= 3.11 for tomllib; CI runs these under
+# `nix shell nixpkgs#python3`, not the system interpreter.
+test-python:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for file in tests/test_*.py; do python3 -m unittest "tests.$(basename "$file" .py)"; done
 
 # Fast test gate - compiles the workspace test graph without running it.
 test:
@@ -47,5 +59,5 @@ release-check:
 
 # Live documentation linting against the repository Vale config.
 lint-docs:
-    git ls-files -z -- '*.md' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini
+    python3 -I scripts/lint_docs.py
     python3 -I scripts/check_docs_references.py

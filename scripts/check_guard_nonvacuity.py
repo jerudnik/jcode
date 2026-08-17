@@ -88,7 +88,7 @@ import tempfile
 import types
 import textwrap
 import traceback
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, Callable
 
@@ -450,6 +450,152 @@ def plant_governance_compare() -> Outcome:
     )
 
 
+_WIRED_TEST = """\
+import unittest
+
+
+class Wired(unittest.TestCase):
+    def test_something(self) -> None:
+        self.assertTrue(True)
+"""
+
+# The shape that reports `Ran 0 tests ... OK`: a module-level `def test_*`
+# with no TestCase, which unittest does not collect.
+_VACUOUS_TEST = """\
+def test_something():
+    assert True
+
+
+if __name__ == "__main__":
+    test_something()
+"""
+
+
+def plant_test_wiring() -> Outcome:
+    """A test file that nothing runs, and one that collects nothing, must be reported.
+
+    Both defects pass silently in the ordinary course: an unwired file is never
+    executed, and a script-style file executed by `unittest` prints
+    `Ran 0 tests ... OK` and exits 0.
+
+    Two recipe shapes are planted because the justfile uses one and the guard
+    accepts both. Under a `tests/test_*.py` glob every module is wired by
+    construction, so only the zero-collecting file can be caught; under a
+    hand-written list a file can also go unnamed. Planting only the shape the
+    repository happens to use today would leave the other branch unproven the
+    day someone switches. The clean control -- a glob over one healthy module
+    -- matters as much as the plants: findings there would mean the guard was
+    failing for an unrelated reason and its rejections would prove nothing.
+    """
+
+    guard = _load("scripts/check_test_wiring.py")
+
+    def run(files: dict[str, str], recipe: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            for name, source in files.items():
+                (root / "tests" / name).write_text(source, encoding="utf-8")
+            (root / "justfile").write_text(f"check:\n{recipe}\n", encoding="utf-8")
+            return guard.problems(root)
+
+    glob_recipe = '    for f in tests/test_*.py; do python3 -m unittest "$f"; done'
+    named_recipe = "\n".join(
+        f"    python3 -m unittest tests.{module}"
+        for module in ("test_wired", "test_vacuous")
+    )
+    tree = {
+        "test_wired.py": _WIRED_TEST,
+        "test_unwired.py": _WIRED_TEST,
+        "test_vacuous.py": _VACUOUS_TEST,
+    }
+
+    under_glob = run(tree, glob_recipe)
+    under_names = run(tree, named_recipe)
+    clean = run({"test_wired.py": _WIRED_TEST}, glob_recipe)
+
+    # The glob wires every module, so it must catch the zero-collecting file and
+    # must not report the file the named recipe leaves out.
+    vacuous_seen = any(f.startswith("test_vacuous:") for f in under_glob)
+    glob_wires_all = not any(f.startswith("test_unwired:") for f in under_glob)
+    unwired_seen = any(f.startswith("test_unwired:") for f in under_names)
+
+    return Outcome(
+        rejected=vacuous_seen and glob_wires_all and unwired_seen,
+        accepted=clean == [],
+        evidence="; ".join((under_glob + under_names)[:2]),
+        detail=(
+            f"planted a zero-collecting module (seen: {vacuous_seen}) and, under "
+            f"a hand-written recipe, an unnamed one (seen: {unwired_seen}); the "
+            f"glob recipe wired every module (no false unwired: {glob_wires_all}); "
+            f"healthy tree reported {len(clean)} finding(s) (want 0)"
+            f"{': ' + '; '.join(clean[:2]) if clean else ''}"
+        ),
+    )
+
+
+def plant_lint_docs() -> Outcome:
+    """A docs lint that read fewer files than it was given must not pass.
+
+    `vale` with no input files prints its usage banner and exits 0, so the
+    recipe this replaced reported a clean lint whenever the pathspec matched
+    nothing. The plants stand in for the three ways that ends in a green run
+    over unread files: no files selected at all, a summary reporting fewer
+    files than were handed over, and no summary at all. Each runs against a
+    stub `vale`, because the point is what the checker concludes from a
+    linter's report, not what the real linter finds. The control is the same
+    stub reporting the honest count, which must pass -- otherwise the
+    rejections would just be a checker that always says no.
+    """
+
+    guard = _load("scripts/lint_docs.py")
+    files = ["a.md", "b.md", "c.md"]
+
+    def run(summary: str | None, listed: list[str]) -> int:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stub = root / "vale-stub"
+            line = f'echo "{summary}"' if summary is not None else "true"
+            stub.write_text(f"#!/bin/sh\n{line}\n", encoding="utf-8")
+            stub.chmod(0o755)
+            listing = root / "files.txt"
+            listing.write_text("\n".join(listed), encoding="utf-8")
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                return guard.main(
+                    [
+                        "--root",
+                        str(root),
+                        "--vale",
+                        str(stub),
+                        "--files-from",
+                        str(listing),
+                    ]
+                )
+
+    honest = f"0 errors, 0 warnings and 0 suggestions in {len(files)} files."
+    short = "0 errors, 0 warnings and 0 suggestions in 1 file."
+
+    no_files = run(honest, [])
+    under_reported = run(short, files)
+    no_summary = run(None, files)
+    clean = run(honest, files)
+
+    return Outcome(
+        rejected=all(rc != 0 for rc in (no_files, under_reported, no_summary)),
+        accepted=clean == 0,
+        evidence=(
+            f"empty selection exited {no_files}, under-reported run exited "
+            f"{under_reported}, summaryless run exited {no_summary}"
+        ),
+        detail=(
+            f"planted an empty file list ({no_files}), a linter claiming 1 of "
+            f"{len(files)} files ({under_reported}), and one reporting no count "
+            f"at all ({no_summary}) -- all want non-zero; the honest count "
+            f"exited {clean} (want 0)"
+        ),
+    )
+
+
 # --------------------------------------------------------------------------
 # The registry.
 # --------------------------------------------------------------------------
@@ -493,6 +639,32 @@ GUARDS: tuple[Guard, ...] = (
             ),
         ),
         plant=plant_advisory_policy,
+    ),
+    Guard(
+        script="scripts/check_test_wiring.py",
+        status=GATING,
+        wiring=(
+            Wiring(
+                where="justfile",
+                recipe="check",
+                must_contain="scripts/check_test_wiring.py",
+            ),
+            Wiring(where=".github/workflows/fork-ci.yml", must_contain="just check"),
+        ),
+        plant=plant_test_wiring,
+    ),
+    Guard(
+        script="scripts/lint_docs.py",
+        status=GATING,
+        wiring=(
+            Wiring(
+                where="justfile",
+                recipe="lint-docs",
+                must_contain="scripts/lint_docs.py",
+            ),
+            Wiring(where=".github/workflows/ci.yml", must_contain="just lint-docs"),
+        ),
+        plant=plant_lint_docs,
     ),
     Guard(
         script="scripts/governance_compare.py",
@@ -645,7 +817,7 @@ def _check_registry_covers_every_guard() -> list[str]:
     on_disk = {
         str(path.relative_to(REPO_ROOT))
         for pattern in ("check_*.py", "check_*.sh", "*_compare.py", "*_preflight.sh",
-                        "*_filter.py", "generate_governance_fixture.py")
+                        "*_filter.py", "lint_*.py", "generate_governance_fixture.py")
         for path in (REPO_ROOT / "scripts").glob(pattern)
     }
     missing = sorted(on_disk - registered)

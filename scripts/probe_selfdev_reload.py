@@ -7,7 +7,9 @@ This tests that:
 2. The reload context is saved
 3. After restart, the continuation message is sent to the model
 
-Run with: python tests/test_selfdev_reload.py
+Requires a running jcode with the debug control socket enabled, so it
+cannot run in CI. Run it by hand against a live instance:
+  python3 scripts/probe_selfdev_reload.py
 """
 
 import socket

@@ -82,11 +82,18 @@ class JustfileRecipeTests(unittest.TestCase):
         self.assertIn('"./target/$target/release/jcode" --version', script)
 
     def test_lint_docs_recipe_uses_vale_and_repository_config(self) -> None:
+        # The recipe used to pipe `git ls-files` straight into vale. vale with
+        # no input files prints its usage banner and exits 0, so an empty
+        # pathspec read as a clean lint. scripts/lint_docs.py owns the same
+        # pathspec and config now, and refuses to report success unless vale
+        # says it read every file it was handed.
         script = cwc.recipe_script("lint-docs")
-        self.assertIn(
-            "git ls-files -z -- '*.md' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini",
-            script,
-        )
+        self.assertIn("python3 -I scripts/lint_docs.py", script)
+        self.assertNotIn("xargs -0 vale", script)
+
+        runner = Path(_SCRIPTS_DIR, "lint_docs.py").read_text(encoding="utf-8")
+        self.assertIn('":!scripts/phone-server/**"', runner)
+        self.assertIn('".vale.ini"', runner)
 
     def test_lint_docs_recipe_runs_the_docs_reference_checker(self) -> None:
         # The checker is fatal-by-design and had no caller until it was wired

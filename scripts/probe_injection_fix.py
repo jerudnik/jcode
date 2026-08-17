@@ -7,7 +7,9 @@ This tests that:
 2. User messages ARE injected after all tool_results are added
 3. The API doesn't return errors about tool_use/tool_result pairing
 
-Run with: python tests/test_injection_fix.py
+Requires a running jcode with the debug control socket enabled, so it
+cannot run in CI. Run it by hand against a live instance:
+  python3 scripts/probe_injection_fix.py
 """
 
 import socket

@@ -14,7 +14,11 @@ permissions:
 jobs:
   docs:
     name: Docs lint
-    if: ${{ inputs.docs_only }}
+    # Runs on every pull request, not only docs-only ones. Gating it on
+    # docs_only meant a PR that touched one code file and one doc file skipped
+    # the linter entirely -- the docs were checked exactly when they were the
+    # only thing changed, and unchecked whenever they shipped alongside code.
+    # Measured over the 25 most recent runs: median 31s, max 34s.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
