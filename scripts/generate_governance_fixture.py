@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Regenerate a valid governance fixture from the manifest and workflow text.
 
-This command writes a current generated fixture under `target/` for offline
-`scripts/fork-health.sh --fixture` runs. Generated governance snapshots are not
-committed documentation.
+The retired ideal-base archive used to retain a checked-in fixture under
+`docs/fork/ideal-base/evidence/R07/fixtures/`. That fixture is historical and is
+not restored. This command now writes a current fixture outside the archive for
+offline `scripts/fork-health.sh --fixture` runs.
 
 Regenerate after changing the manifest or the required-context workflows:
 
