@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -304,6 +305,54 @@ class TheProductionFilterClaim(unittest.TestCase):
         self.assertIn("could not apply the weakening", outcome.detail)
 
 
+_HARNESS = "check_guard_nonvacuity.py"
+
+# Delegates to the real stdlib `ast` but hands back an empty parse tree, so
+# every source this control reads appears to import nothing and the shadow
+# scan reports nothing. Scanning our own file is not enough against this one:
+# a blinder narrow enough to spare the harness is caught by the self-scan, so
+# the attacker simply widens it. Measured on this tree: rc=0, "10 claim(s)
+# hold", with this file alone and the sys.path scrub removed.
+# A drop-in hashlib whose sha256 returns a fixed digest, so the digest pin
+# keeps reading 5ed12e31... no matter what the guard sources say. Functional
+# rather than a stub on purpose: a stub makes the harness crash, and a crash
+# exits 1 for reasons that have nothing to do with detection.
+_FROZEN_HASHLIB = """\
+class _Hash:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
+
+    def hexdigest(self):
+        return "5ed12e31" + "0" * 56
+
+
+def sha256(*args, **kwargs):
+    return _Hash()
+"""
+
+_BLINDING_AST = """\
+import importlib.util, os, sysconfig
+_p = os.path.join(sysconfig.get_paths()["stdlib"], "ast.py")
+_s = importlib.util.spec_from_file_location("_real_ast", _p)
+_m = importlib.util.module_from_spec(_s)
+_s.loader.exec_module(_m)
+
+
+def __getattr__(name):
+    return getattr(_m, name)
+
+
+def parse(source, *args, **kwargs):
+    tree = _m.parse(source, *args, **kwargs)
+    if isinstance(source, str):
+        tree.body = []
+    return tree
+"""
+
+
 class TheImportShadowingClaim(unittest.TestCase):
     """Adding `scripts/<name>.py` rebinds `import <name>` for every guard.
 
@@ -338,6 +387,79 @@ class TheImportShadowingClaim(unittest.TestCase):
         with _shadow("zoneinfo"):
             self.assertEqual(harness._check_no_import_shadowing(), [])
 
+    def test_the_scripts_directory_is_scrubbed_from_sys_path(self) -> None:
+        """The harness must not resolve its own imports through scripts/."""
+
+        scripts = str(harness.REPO_ROOT / "scripts")
+        self.assertNotIn(scripts, sys.path)
+        self.assertNotIn("", sys.path)
+
+    def test_the_closure_follows_local_imports(self) -> None:
+        """A dependency is scanned because it is followed from its caller.
+
+        Seeded with the caller alone -- rust_production_filter is also a gating
+        guard today, so seeding from GUARDS would reach it either way and prove
+        nothing about the walk. Before the walk existed, its imports were
+        covered only because they happened to be a subset of its caller's; the
+        day it gained one the caller lacked, a shadow there went unseen. An
+        unstated precondition that happens to hold is the shape that became G10A.
+        """
+
+        closure = harness._shadow_scan_closure(
+            seeds=frozenset({"scripts/check_critical_path_budget.py"})
+        )
+        self.assertIn(
+            "scripts/rust_production_filter.py",
+            closure,
+            "the closure walk did not follow a local import",
+        )
+
+    def test_the_harness_scans_itself(self) -> None:
+        """A shadow of a name only the harness imports is still reported."""
+
+        closure = harness._shadow_scan_closure()
+        self.assertIn("scripts/check_guard_nonvacuity.py", closure)
+        self.assertIn("textwrap", closure["scripts/check_guard_nonvacuity.py"])
+        with _shadow("textwrap"):
+            failures = harness._check_no_import_shadowing()
+        self.assertTrue(
+            any("textwrap" in f for f in failures),
+            f"a shadow of the harness's own import went unreported: {failures}",
+        )
+
+    def test_a_shadow_of_ast_cannot_blind_this_control(self) -> None:
+        """`scripts/ast.py` is the shadow that switches the shadow scan off.
+
+        The scan parses source to find imports, so an `ast` that returns empty
+        trees makes every file look import-free and every claim hold. Nothing
+        inside the scan can catch this -- it is the scan's own instrument that
+        has been replaced -- which is why the fix is upstream of it: this module
+        drops `scripts/` from sys.path before its first shadowable import.
+        Measured with the scrub removed: rc=0, "10 claim(s) hold".
+        """
+
+        with _shadow("ast", _BLINDING_AST):
+            completed = subprocess.run(
+                [sys.executable, str(harness.REPO_ROOT / "scripts" / _HARNESS)],
+                capture_output=True,
+                text=True,
+                cwd=harness.REPO_ROOT,
+            )
+        output = completed.stdout + completed.stderr
+        self.assertEqual(
+            completed.returncode, 1, f"the control was blinded: {output[-400:]}"
+        )
+        # rc=1 on its own is not evidence: a shadow that merely crashes the
+        # harness also exits 1. The control has to name what it caught.
+        self.assertIn("shadow", output, output[-400:])
+        self.assertIn("`ast`", output, output[-400:])
+
+    def test_both_shadows_of_a_pair_are_reported(self) -> None:
+        with _shadow("hashlib", _FROZEN_HASHLIB), _shadow("ast"):
+            failures = harness._check_no_import_shadowing()
+        self.assertTrue(any("`hashlib`" in f for f in failures), failures)
+        self.assertTrue(any("`ast`" in f for f in failures), failures)
+
     def test_one_file_is_reported_once(self) -> None:
         """Two registry entries share the budget guard's file."""
 
@@ -352,13 +474,13 @@ class TheImportShadowingClaim(unittest.TestCase):
 
 
 @contextlib.contextmanager
-def _shadow(name: str):
+def _shadow(name: str, body: str = "# planted shadow\n"):
     """Create scripts/<name>.py for the duration of the block."""
 
     path = harness.REPO_ROOT / "scripts" / f"{name}.py"
     if path.exists():
         raise AssertionError(f"{path} already exists; refusing to clobber it")
-    path.write_text("# planted shadow\n", encoding="utf-8")
+    path.write_text(body, encoding="utf-8")
     try:
         yield
     finally:

@@ -55,6 +55,25 @@ surface as a passing run.
 
 from __future__ import annotations
 
+import sys as _sys
+
+# Scrub `scripts/` from sys.path before importing anything else. Python puts
+# this file's own directory at the front of sys.path before a line of it runs,
+# so `scripts/ast.py` captures the `import ast` below -- and this file's whole
+# job is to detect exactly that class of capture. Scanning our own imports is
+# not enough: a blinder narrow enough to spare this file is caught by that
+# self-scan, so the attacker widens it. Measured on this tree with the scrub
+# removed: one `scripts/ast.py` returning empty parse trees, and this file
+# printed "10 claim(s) hold" and exited 0. `sys` is a builtin module -- it is
+# resolved before sys.path is consulted and cannot be shadowed -- so scrubbing
+# through it first is sound. `PYTHONSAFEPATH` / `-P` would do this at the
+# interpreter level, but they landed in 3.11 and this tree runs 3.9, so there is
+# no interpreter switch to lean on (confirmed independently by piglet).
+# Also drops "" (cwd), which shadows the same way when the harness is imported
+# rather than run as a script.
+_SCRIPTS_DIR = __file__.rsplit("/", 1)[0] if "/" in __file__ else "."
+_sys.path[:] = [p for p in _sys.path if p not in ("", _SCRIPTS_DIR)]
+
 import argparse
 import ast
 import dataclasses
@@ -69,7 +88,7 @@ import tempfile
 import types
 import textwrap
 import traceback
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from typing import Any, Callable
 
@@ -130,6 +149,29 @@ class Outcome:
     detail: str = ""
 
 
+@contextmanager
+def _guard_import_path() -> Any:
+    """Put `scripts/` back on sys.path for the duration of a guard's execution.
+
+    This module scrubs `scripts/` from sys.path at import so its own imports
+    cannot be captured by a file in the directory it is policing. Guards,
+    however, genuinely run as `python3 scripts/...` in CI, with that directory
+    first on the path -- `check_critical_path_budget.py` imports
+    `rust_production_filter` and would not otherwise resolve it. Running a
+    plant under the real path is the faithful reproduction; the detection above
+    stays in this module's own scope, where the path is clean.
+    """
+
+    _sys.path.insert(0, _SCRIPTS_DIR)
+    try:
+        yield
+    finally:
+        try:
+            _sys.path.remove(_SCRIPTS_DIR)
+        except ValueError:  # pragma: no cover - a guard mutated sys.path
+            pass
+
+
 def _exec_module(source: str, name: str) -> Any:
     """Build a module from source text, for running a hypothetical variant.
 
@@ -139,7 +181,8 @@ def _exec_module(source: str, name: str) -> Any:
 
     module = types.ModuleType(name)
     module.__file__ = str(REPO_ROOT / "scripts" / f"{name}.py")
-    exec(compile(source, module.__file__, "exec"), module.__dict__)  # noqa: S102
+    with _guard_import_path():
+        exec(compile(source, module.__file__, "exec"), module.__dict__)  # noqa: S102
     return module
 
 
@@ -151,7 +194,8 @@ def _load(script: str) -> Any:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot import {script}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with _guard_import_path():
+        spec.loader.exec_module(module)
     return module
 
 
@@ -620,7 +664,9 @@ def _check_registry_covers_every_guard() -> list[str]:
 # Local modules a gating guard is meant to import from `scripts/`. Any other
 # name a gating guard imports must resolve outside `scripts/`; see
 # _check_no_import_shadowing.
-INTENDED_LOCAL_IMPORTS = frozenset({"rust_production_filter"})
+INTENDED_LOCAL_IMPORTS = frozenset(
+    {"rust_production_filter", "check_guard_nonvacuity"}
+)
 
 
 def _imported_top_level_names(source: str) -> set[str]:
@@ -631,6 +677,49 @@ def _imported_top_level_names(source: str) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             names.add(node.module.split(".")[0])
     return names
+
+
+def _shadow_scan_closure(
+    seeds: "frozenset[str] | None" = None,
+) -> dict[str, set[str] | None]:
+    """Every file whose imports a shadow in `scripts/` could capture.
+
+    Starts from the gating guards, plus this file and its own test -- a shadow
+    is process-wide, so a control that scans the guards but not itself can be
+    switched off by one file it never looks at -- and follows local modules
+    transitively. The closure matters rather than one file's import lines:
+    before this walked it, `rust_production_filter`'s imports were covered only
+    because they happened to be a subset of its caller's, so the day it gained
+    an import the caller lacked, the shadow would have come back unseen. An
+    unstated precondition that happens to hold is the shape that became G10A.
+
+    Maps each file to its imported top-level names, or to None if it could not
+    be parsed.
+    """
+
+    if seeds is None:
+        seeds = frozenset(
+            {g.script.split("::")[0] for g in GUARDS if g.status == GATING}
+            | {"scripts/check_guard_nonvacuity.py", "tests/test_guard_nonvacuity.py"}
+        )
+    queue = sorted(seeds)
+    closure: dict[str, set[str] | None] = {}
+    while queue:
+        script = queue.pop()
+        if script in closure:
+            continue
+        path = REPO_ROOT / script
+        if path.suffix != ".py" or not path.exists():
+            continue
+        try:
+            imported = _imported_top_level_names(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            closure[script] = None
+            continue
+        closure[script] = imported
+        for name in sorted(imported & INTENDED_LOCAL_IMPORTS):
+            queue.append(f"scripts/{name}.py")
+    return closure
 
 
 def _check_no_import_shadowing() -> list[str]:
@@ -655,34 +744,24 @@ def _check_no_import_shadowing() -> list[str]:
     rather than as an unchanged green run.
     """
 
-    failures: list[str] = []
     present = {path.stem for path in (REPO_ROOT / "scripts").glob("*.py")}
-    # Several registry entries can name the same file (a guard with more than
-    # one claim), and the file's imports are a property of the file.
-    scripts = sorted(
-        {g.script.split("::")[0] for g in GUARDS if g.status == GATING}
-    )
-    for script in scripts:
-        path = REPO_ROOT / script
-        if path.suffix != ".py" or not path.exists():
+    failures: list[str] = []
+    for script, imported in sorted(_shadow_scan_closure().items()):
+        if imported is None:
+            failures.append(f"{script}: could not be parsed to check imports")
             continue
-        try:
-            imported = _imported_top_level_names(
-                path.read_text(encoding="utf-8")
-            )
-        except SyntaxError as exc:
-            failures.append(f"{script}: could not be parsed to check imports: {exc}")
-            continue
-        for name in sorted(imported & present - INTENDED_LOCAL_IMPORTS - {path.stem}):
+        for name in sorted(
+            imported & present - INTENDED_LOCAL_IMPORTS - {Path(script).stem}
+        ):
             failures.append(
                 f"{script}: imports `{name}`, and `scripts/{name}.py` exists, so "
-                f"the guard resolves it to that file rather than to the module it "
-                f"expects. A shadow of `hashlib` freezes the scope digest and lets "
-                f"every ceiling be raised behind a passing --expect-digest. If the "
-                f"local module is intended, add `{name}` to INTENDED_LOCAL_IMPORTS."
+                f"it resolves to that file rather than to the module it expects. "
+                f"A shadow of `hashlib` freezes the scope digest and lets every "
+                f"budget ceiling move without moving the pin; a shadow of `ast` "
+                f"blinds this check. Either add `{name}` to INTENDED_LOCAL_IMPORTS "
+                f"as a deliberate local module, or rename the file."
             )
     return failures
-
 
 def _run_plant(guard: Guard) -> list[str]:
     """Run one plant, converting a harness crash into a claim failure, never a pass."""
