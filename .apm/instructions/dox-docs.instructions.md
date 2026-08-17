@@ -1,33 +1,32 @@
 ---
-description: DOX contract for docs/ — independent hard-fork maintenance and integration notes.
+description: DOX contract for docs/ — polished, current repository documentation.
 applyTo: "docs/**"
 ---
 
-# docs/ — Fork and integration docs (DOX)
+# docs/ — Current repository documentation (DOX)
 
 ## Purpose
 
-Code-adjacent reference for maintaining the independent hard fork: branch topology, Nix packaging, GitHub workflow behavior, product-specific architecture, and 4nix integration contracts.
+Current Jcode documentation. Open issues live in `docs/issues/`; working records live in the operator's project notes repository.
 
 ## Ownership
 
-- `BRANCHING.md` — single-rail hard-fork policy, external-code reuse, and PR-based CI ownership.
-- `NIX.md` — flake packaging, Home Manager module, Cachix, and install/use notes.
-- `agent-workflows.md` — detailed agent build, test, selfdev, swarm, CI, and release procedures.
+- `BRANCHING.md`, `NIX.md`, and `agent-workflows.md` own branch policy, packaging, and agent procedures.
 - Other docs stay close to implementation and should describe current Jcode behavior without assuming another repository is authoritative.
 
 ## Local Contracts
 
-- Keep branch topology docs aligned with actual maintained branches, PR flow, and the expected-state manifest.
-- When documenting workflow gates or required checks, link to `scripts/required-checks.json` or generate the names from it. Do not copy a static list of required-check names into prose.
-- Do not create upstream-tracking machinery, patch-stack obligations, or patch-ledger requirements. Record current behavior and rationale next to the owning code, tests, architecture doc, or issue.
-- 4nix-facing packaging contracts belong in docs when they affect the `github:jerudnik/jcode/main` flake input.
+- Align branch docs with maintained branches and PR flow. Link workflow checks to `scripts/required-checks.json`; do not copy their names.
+- Do not create upstream-tracking, patch-stack, or patch-ledger obligations. Record current behavior and rationale by its code, tests, architecture doc, or issue.
+- Document 4nix-facing packaging contracts that affect the `github:jerudnik/jcode/main` flake input.
 - Use direct, operational prose. Do not leave historical diary notes in durable docs.
 - Keep operational command blocks in `agent-workflows.md`; prompt-loaded files should link to it instead of copying them.
+- Never create `docs/archive/`, `docs/fork/`, or `docs/proposals/`. Use the matching notes surface and delete solved issues.
 
 ## Work Guidance
 
 - Update docs in the same commit as branch, packaging, workflow, or fork-policy changes.
+- Use the `docs-ops` skill when creating, moving, or editing repository documentation.
 - Prefer function-oriented validation language: say what behavior is proved and then list the command.
 - Avoid generic remote names in durable procedures. Discover configured remotes, and mention `upstream` only as optional lineage/reference material rather than a tracked authority.
 

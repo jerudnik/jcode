@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # F03 runtime fixture matrix for lease classes and exit-mode verification.
 #
-# This recreates the accepted lease-class runtime matrix described in
-# docs/fork/ideal-base/evidence/F03/README.md using the live daemon and the
-# current debug socket commands. It keeps the runtime isolated under a private
+# This runs the lease-class runtime matrix using the live daemon and current
+# debug socket commands. It keeps the runtime isolated under a private
 # temp home/runtime root, exercises all ActivityClass variants, and verifies the
 # forced-exit and crash-recovery residue cases.
 

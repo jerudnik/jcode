@@ -1,7 +1,0 @@
-name=warning
-expected_exit=0
-command=bash scripts/check_warning_budget.sh
---- output ---
-Warning budget OK: current=0 baseline=0
-
-actual_exit=0

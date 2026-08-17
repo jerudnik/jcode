@@ -51,8 +51,6 @@ ACTIVE_DISTRIBUTION_DOCS = (
 # opening 31 of 39 active docs. These prefixes are historical records that
 # describe retired channels on purpose; everything else tracked is scanned.
 UNSCANNED_PREFIXES = (
-    "docs/fork/",
-    "docs/archive/",
     "changelog/",
     "CHANGELOG",
 )

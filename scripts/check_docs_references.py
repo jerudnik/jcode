@@ -11,6 +11,10 @@ hand only resets the clock. This checker is the part that does not.
 
 Rules (each independently fatal):
 
+  disallowed-path    tracked Markdown exists under a retired repository docs
+                     surface: docs/archive/, docs/fork/, or docs/proposals/
+  issue-frontmatter  docs/issues/*.md is missing its required YAML fields, or
+                     retains a solved status instead of being deleted
   broken-link       a Markdown link to a repository-relative path that does
                     not exist on disk
   machine-local     a reference to `~/notes/...` or a `/Users/...` home path,
@@ -40,9 +44,8 @@ tripping a checker whose whole purpose is enforcing that sentence, so a line is
 only flagged when it reads as a directive and does not read as a prohibition.
 Getting this backwards would make the rule fire on the contract it enforces.
 
-Scope: active documentation only. Historical archives, frozen evidence, and
-accepted reviews are excluded by path, because rewriting them to satisfy a
-current-policy rule would destroy the record they exist to preserve.
+Scope: tracked Markdown. Generated instruction files are ignored because they
+are not committed; dependency and build trees remain excluded.
 
 Usage:
   scripts/check_docs_references.py
@@ -62,33 +65,20 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# Frozen or historical material. Current-policy rules do not apply: these
-# records are supposed to still say what was true when they were accepted.
+# Non-repository content trees. Every tracked Markdown file under docs/ is now
+# current documentation or an open issue, so there are no historical-doc
+# exclusions left to hide findings.
 EXCLUDED_PREFIXES = (
-    "docs/archive/",
-    # Self-declared frozen forensic records. `docs/fork/recovery/README.md`
-    # says "frozen in place for forensic integrity" and
-    # `docs/fork/normalization/BASELINE.md` says "historical append-only
-    # snapshot"; both last changed 2026-07-18. Their absolute paths record
-    # where work actually happened and are evidence, not instructions.
-    "docs/fork/recovery/",
-    "docs/fork/normalization/",
-    "docs/fork/ideal-base/evidence/",
-    "docs/fork/ideal-base/reviews/",
-    "docs/fork/ideal-base/investigations/",
-    "docs/fork/ideal-base/human-noticed-issues/",
     "node_modules/",
     "target/",
     "vendor/",
     "web/jcode-mobile/node_modules/",
 )
 
-# The audit register itself documents the machine-local references as findings,
-# and tabulates the counting variants. It must be able to name them.
-MACHINE_LOCAL_EXEMPT = (
-    "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md",
-    "docs/fork/ideal-base/POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md",
-)
+DISALLOWED_DOC_PREFIXES = ("docs/archive/", "docs/fork/", "docs/proposals/")
+ISSUE_DIR = "docs/issues/"
+REQUIRED_ISSUE_FIELDS = ("status", "priority", "owner", "opened")
+SOLVED_ISSUE_STATUSES = {"closed", "fixed", "wontfix"}
 
 LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 # D01-F12. A backticked path into the source tree that no longer exists. The
@@ -249,8 +239,6 @@ def _is_untracked(root: Path, resolved: Path) -> bool:
 
 def check_machine_local(root: Path, path: Path, text: str) -> list[Finding]:
     rel = path.relative_to(root).as_posix()
-    if rel in MACHINE_LOCAL_EXEMPT:
-        return []
     findings = []
     for lineno, line in enumerate(text.splitlines(), 1):
         match = MACHINE_LOCAL.search(line)
@@ -263,6 +251,61 @@ def check_machine_local(root: Path, path: Path, text: str) -> list[Finding]:
                 )
             )
     return findings
+
+
+def check_disallowed_path(root: Path, path: Path) -> list[Finding]:
+    rel = path.relative_to(root).as_posix()
+    if not any(rel.startswith(prefix) for prefix in DISALLOWED_DOC_PREFIXES):
+        return []
+    return [
+        Finding(
+            "disallowed-path",
+            rel,
+            "tracked Markdown must be current docs or an open issue; move or delete this file",
+        )
+    ]
+
+
+def issue_frontmatter(text: str) -> dict[str, str] | None:
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return None
+    fields: dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        if ":" not in line or line[:1].isspace():
+            continue
+        key, value = line.split(":", 1)
+        fields[key.strip().lower()] = value.strip().strip("\"'")
+    return fields
+
+
+def check_issue_frontmatter(root: Path, path: Path, text: str) -> list[Finding]:
+    rel = path.relative_to(root).as_posix()
+    if not rel.startswith(ISSUE_DIR) or "/" in rel[len(ISSUE_DIR) :]:
+        return []
+    fields = issue_frontmatter(text)
+    if fields is None:
+        return [Finding("issue-frontmatter", rel, "missing YAML frontmatter")]
+    missing = [field for field in REQUIRED_ISSUE_FIELDS if not fields.get(field)]
+    if missing:
+        return [
+            Finding(
+                "issue-frontmatter",
+                rel,
+                f"missing required field(s): {', '.join(missing)}",
+            )
+        ]
+    if fields["status"].lower() in SOLVED_ISSUE_STATUSES:
+        return [
+            Finding(
+                "issue-frontmatter",
+                rel,
+                "delete solved issues instead of archiving them.",
+            )
+        ]
+    return []
 
 
 def check_code_paths(root: Path, path: Path, text: str, tracked: frozenset[str]) -> list[Finding]:
@@ -308,6 +351,8 @@ def run(root: Path) -> list[Finding]:
         except (OSError, UnicodeDecodeError) as exc:
             findings.append(Finding("unreadable", path.relative_to(root).as_posix(), str(exc)))
             continue
+        findings.extend(check_disallowed_path(root, path))
+        findings.extend(check_issue_frontmatter(root, path, text))
         findings.extend(check_links(root, path, text))
         findings.extend(check_machine_local(root, path, text))
         findings.extend(check_code_paths(root, path, text, tracked))

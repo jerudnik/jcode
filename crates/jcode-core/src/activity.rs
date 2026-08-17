@@ -6,9 +6,8 @@
 //! The concrete authority lives in `jcode-app-core` and is injected downward
 //! at composition roots as `Arc<dyn ActivityLeaseAuthority>`.
 //!
-//! Design contract: `docs/fork/ideal-base/evidence/F01/design.md` sections
-//! 3.0-3.1. The trait is object-safe, synchronous, and std-only because
-//! release must be callable from `Drop`.
+//! The trait is object-safe, synchronous, and std-only because release must be
+//! callable from `Drop`.
 
 use std::sync::Arc;
 

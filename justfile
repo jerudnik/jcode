@@ -47,4 +47,4 @@ release-check:
 
 # Live documentation linting against the repository Vale config.
 lint-docs:
-    git ls-files -z -- '*.md' ':!docs/proposals/**' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini
+    git ls-files -z -- '*.md' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini

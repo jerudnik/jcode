@@ -11,14 +11,15 @@
 # as a regression check and not only as an evidence generator.
 #
 # Usage:
-#   scripts/f20c_removal_report.sh              # write the evidence file
+#   scripts/f20c_removal_report.sh              # write the report under target/
 #   scripts/f20c_removal_report.sh --stdout     # print instead
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-OUT="docs/fork/ideal-base/evidence/F20c/removal-grep-clean.txt"
+OUT="target/f20c-removal-report.txt"
 [ "${1:-}" = "--stdout" ] && OUT=/dev/stdout
+[ "$OUT" = /dev/stdout ] || mkdir -p "$(dirname "$OUT")"
 
 # Symbols that made up the retired surface. Each must have zero references.
 SYMBOLS=(

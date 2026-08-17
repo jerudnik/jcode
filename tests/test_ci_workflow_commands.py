@@ -72,7 +72,7 @@ class JustfileRecipeTests(unittest.TestCase):
     def test_lint_docs_recipe_uses_vale_and_repository_config(self) -> None:
         script = cwc.recipe_script("lint-docs")
         self.assertIn(
-            "git ls-files -z -- '*.md' ':!docs/proposals/**' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini",
+            "git ls-files -z -- '*.md' ':!scripts/phone-server/**' | xargs -0 vale --config .vale.ini",
             script,
         )
 

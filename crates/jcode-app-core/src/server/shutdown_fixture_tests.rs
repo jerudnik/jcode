@@ -4,8 +4,8 @@
 //! test, leaked for `&'static`) through the races the pure model tests
 //! cannot reach: begin/upgrade concurrency, idle-claim vs acquisition,
 //! drain-until-release, reload refusal and mid-drain upgrade, and terminal
-//! publication. Runtime process-level fixtures (real daemon, real signals,
-//! residue) live in `docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh`.
+//! publication. Runtime process-level coverage (real daemon, real signals,
+//! residue) lives in `scripts/lease_class_fixtures.sh`.
 
 use super::shutdown::{
     AcceptLoopExitDisposition, BeginOutcome, ExitReason, RefusalReason, ReloadRefused,

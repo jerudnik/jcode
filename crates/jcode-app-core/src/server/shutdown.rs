@@ -1,7 +1,6 @@
 //! Single bounded shutdown coordinator and server activity-lease authority.
 //!
-//! F02 implementation of the accepted F01 design
-//! (`docs/fork/ideal-base/evidence/F01/design.md`, revision 4):
+//! Shutdown and lease design:
 //!
 //! - `ServerActivityLeaseAuthority`: the concrete `ActivityLeaseAuthority`
 //!   over a pure `LeaseTable` (design 3.1). All work classes that must keep

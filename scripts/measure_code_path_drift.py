@@ -23,14 +23,6 @@ CITATION = re.compile(
     r"`((?:crates|src|scripts|tests)/[A-Za-z0-9_./-]+\.(?:rs|py|sh|nix))(?::(\d+))?`"
 )
 
-# Frozen or append-only trees: their contents are evidence, not current claims.
-SKIP_PREFIXES = (
-    "docs/fork/recovery/",
-    "docs/fork/normalization/",
-    "docs/archive/",
-    "docs/fork/ideal-base/",
-)
-
 # Point-in-time audits. Counted, but reported apart from live drift.
 SNAPSHOTS = (
     "docs/CODE_QUALITY_AUDIT_2026-04-18.md",
@@ -57,8 +49,7 @@ def documents() -> list[Path]:
     live = []
     for path in found:
         rel = path.relative_to(ROOT).as_posix()
-        if not any(rel.startswith(prefix) for prefix in SKIP_PREFIXES):
-            live.append(path)
+        live.append(path)
     return sorted(live)
 
 

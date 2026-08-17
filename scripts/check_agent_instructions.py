@@ -23,6 +23,9 @@ ROOT_PRIMITIVES = (
 CHILD_GENERATED = {
     Path(".apm/AGENTS.md"): Path(".apm/instructions/dox-apm.instructions.md"),
     Path("docs/AGENTS.md"): Path(".apm/instructions/dox-docs.instructions.md"),
+    Path("docs/issues/AGENTS.md"): Path(
+        ".apm/instructions/dox-issues.instructions.md"
+    ),
     Path("crates/jcode-desktop/AGENTS.md"): Path(
         ".apm/instructions/dox-desktop.instructions.md"
     ),

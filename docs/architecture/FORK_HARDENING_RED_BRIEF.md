@@ -58,10 +58,10 @@ $ git diff --numstat github/vendor/upstream HEAD -- '*.rs' | awk '$2>5' | grep s
 Every one of these files is confirmed `EDIT-UPSTREAM` (not additive new file). And
 **none** appear anywhere in the governance surface:
 
-```
-$ for kw in swarm comm_ communicate compaction session_search conversation_state client_comm; \
-    do echo -n "ledger '$kw': "; grep -c "$kw" docs/fork/patch-ledger.md; done
-   swarm 0 / comm_ 0 / communicate 0 / compaction 0 / session_search 0 / conversation_state 0 / client_comm 0
+The ledger grep at the measured commit returned zero rows for every term:
+
+```text
+swarm 0 / comm_ 0 / communicate 0 / compaction 0 / session_search 0 / conversation_state 0 / client_comm 0
 ```
 
 `FORK_REWRITE_SEAM_AUDIT.md` still lists only the original seven files and never
