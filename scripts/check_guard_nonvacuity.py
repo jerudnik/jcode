@@ -55,6 +55,7 @@ import re
 import shutil
 import sys
 import tempfile
+import types
 import textwrap
 import traceback
 from contextlib import redirect_stdout
@@ -66,6 +67,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Guards that run inside a pull-request-blocking check. Keep this in step with
 # GUARDS below; `_check_registry_covers_every_guard` fails if a guard script
 # exists on disk and is absent here.
+BLOCKING_SITES = (
+    ("justfile", "the `check` recipe, which PR Gate runs"),
+    (".github/workflows/security.yml", "the security workflow"),
+    (".github/workflows/governance-root.yml", "the Governance Root workflow"),
+)
+
+
 GATING = "gating"
 DORMANT = "dormant"
 
@@ -109,6 +117,19 @@ class Outcome:
     accepted: bool
     evidence: str
     detail: str = ""
+
+
+def _exec_module(source: str, name: str) -> Any:
+    """Build a module from source text, for running a hypothetical variant.
+
+    Used by plants that need to compare the real code against a weakened copy
+    of it. Nothing is written to disk and the real module is untouched.
+    """
+
+    module = types.ModuleType(name)
+    module.__file__ = str(REPO_ROOT / "scripts" / f"{name}.py")
+    exec(compile(source, module.__file__, "exec"), module.__dict__)  # noqa: S102
+    return module
 
 
 def _load(script: str) -> Any:
@@ -192,6 +213,99 @@ def plant_scope_shrink() -> Outcome:
 _AUDIT_CLEAN = "[advisories]\nignore = []\n"
 _AUDIT_PLANTED = '[advisories]\nignore = ["RUSTSEC-2021-0000"]\n'
 _RECORD_EMPTY = "[policy]\nmax_expiry_days = 365\n"
+
+
+_RUST_SAMPLE = """\
+fn live_one() { panic!("a"); }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn t() { panic!("b"); }
+}
+
+fn live_two() { panic!("c"); }
+"""
+
+
+def plant_production_filter(source: str | None = None) -> Outcome:
+    """The guard's input set must keep excluding only the test item.
+
+    `check_critical_path_budget.py` imports `production_lines` from
+    `rust_production_filter.py` to decide which lines of a file are production
+    code. That module is upstream of every ceiling: it does not set the budget,
+    it decides what the budget is measured over. Nothing else guards it. It is
+    not in the protected set, `scope_digest()` does not hash it, its own test is
+    wired to no blocking job, and -- measured -- broadening its `#[cfg(test)]`
+    handling so that any file containing that attribute yields no production
+    lines drops lifecycle panics from 11 to 0 and lifecycle swallowed errors
+    from 440 to 91, with the in-scope file counts, the digest and the guard's
+    exit status all unchanged. The guard passes and reports a healthy budget.
+
+    So the guard cannot be asked to reject that defect; it genuinely does not.
+    What can be pinned is the classifier's behaviour. Against a fixed sample the
+    two top-level functions are production and the `#[cfg(test)] mod` is not.
+    The plant is the weakening itself, applied to the module source: if it
+    changes what the sample classifies as production, this fails. That is a
+    claim about meaning rather than bytes, so a comment or a rename does not
+    trip it, and a widened exclusion does.
+    """
+
+    if source is None:
+        source = (REPO_ROOT / "scripts/rust_production_filter.py").read_text(
+            encoding="utf-8"
+        )
+    clean_panics = sum(
+        1
+        for line in _exec_module(source, "_filter").production_lines_from_text(
+            _RUST_SAMPLE
+        )
+        if "panic!" in line
+    )
+
+    weakened_source = source.replace(
+        "def production_lines_from_text(source: str) -> list[str]:\n"
+        "    masked_code = _mask_rust_non_code(source)",
+        "def production_lines_from_text(source: str) -> list[str]:\n"
+        "    masked_code = _mask_rust_non_code(source)\n"
+        '    if "#[cfg(test)]" in masked_code:\n'
+        "        return []",
+        1,
+    )
+    if weakened_source == source:
+        return Outcome(
+            rejected=False,
+            accepted=False,
+            evidence="",
+            detail=(
+                "could not apply the weakening: production_lines_from_text no "
+                "longer starts with the masking call this plant edits. The "
+                "plant, not the filter, needs updating -- but until it is, this "
+                "claim is unproven and must not read as green."
+            ),
+        )
+
+    weakened = _exec_module(weakened_source, "_weakened_filter")
+    weak_panics = sum(
+        1
+        for line in weakened.production_lines_from_text(_RUST_SAMPLE)
+        if "panic!" in line
+    )
+
+    return Outcome(
+        rejected=weak_panics != clean_panics,
+        accepted=clean_panics == 2,
+        evidence=(
+            f"weakened classifier saw {weak_panics} production panic site(s) "
+            f"where the current one sees {clean_panics}"
+        ),
+        detail=(
+            f"sample has 2 production panics and 1 test panic; current filter "
+            f"reports {clean_panics}, weakened filter reports {weak_panics}. "
+            f"Equal counts would mean the exclusion boundary is no longer "
+            f"observable, so this claim could not detect a widened one."
+        ),
+    )
 
 
 def plant_advisory_policy() -> Outcome:
@@ -304,6 +418,15 @@ GUARDS: tuple[Guard, ...] = (
         status=GATING,
         wiring=(),  # same file as above; wiring asserted once
         plant=plant_scope_shrink,
+    ),
+    Guard(
+        script="scripts/rust_production_filter.py::production_lines",
+        status=GATING,
+        # No wiring of its own: it is a library, not a script. It runs whenever
+        # check_critical_path_budget.py runs, which is asserted above, and the
+        # claim here is about its classification rather than its invocation.
+        wiring=(),
+        plant=plant_production_filter,
     ),
     Guard(
         script="scripts/check_advisory_policy.py",
@@ -519,6 +642,66 @@ def _run_plant(guard: Guard) -> list[str]:
     return failures
 
 
+def _executes(source: str, script: str) -> bool:
+    """True if `source` appears to RUN `script`, not merely mention it.
+
+    The distinction matters. `.github/workflows/governance-root.yml` lists
+    script paths inside a `protected=(...)` array: those are data telling the
+    workflow which paths to watch, not commands. Substring matching cannot tell
+    the two apart, and treating a mention as an invocation is the same mistake
+    that made this file's first draft describe seven dormant scripts as having
+    "no invocation site" when they were referenced all along. A line that is
+    nothing but the path -- optionally a YAML or shell list item -- is data.
+    """
+
+    for line in source.splitlines():
+        if script not in line:
+            continue
+        stripped = line.strip().lstrip("-").strip().strip('"').strip("'")
+        if stripped == script:
+            continue  # a bare list entry: data, not a command
+        return True
+    return False
+
+
+def _check_dormancy_is_still_true(guard: "Guard") -> list[str]:
+    """Assert a guard labelled dormant is genuinely unreachable from a gate.
+
+    Dormancy is the registry's escape hatch: a dormant guard is skipped, so it
+    needs no plant. That makes the label the softest spot in this file. One
+    word -- GATING to DORMANT -- silently drops a live guard from coverage,
+    which is D034's own failure mode reproduced inside the control meant to
+    catch it. So the label is not taken on trust. If a dormant guard turns out
+    to be reachable from a PR-blocking site, this fails and asks for the label
+    to be corrected rather than quietly honouring it.
+    """
+
+    failures: list[str] = []
+    if guard.script == f"scripts/{Path(__file__).name}":
+        # This file is deliberately wired into `check`. Its entry is dormant
+        # because it carries no plant of its own, not because it never runs,
+        # and tests/test_guard_nonvacuity.py asserts that wiring.
+        return failures
+    for path, label in BLOCKING_SITES:
+        target = REPO_ROOT / path
+        if not target.exists():
+            failures.append(
+                f"{guard.script}: cannot verify dormancy, {path} is missing"
+            )
+            continue
+        source = target.read_text(encoding="utf-8")
+        if path == "justfile":
+            source = _justfile_recipe_body(source, "check") or ""
+        if _executes(source, guard.script):
+            failures.append(
+                f"{guard.script}: registered DORMANT, but {label} references it. "
+                f"Either it now gates a PR -- in which case mark it GATING and "
+                f"give it a plant -- or the reference is dead and should go. "
+                f"Recorded reason was: {guard.reason}"
+            )
+    return failures
+
+
 def run() -> tuple[list[str], list[str]]:
     """Return (failures, passes)."""
 
@@ -527,6 +710,7 @@ def run() -> tuple[list[str], list[str]]:
 
     for guard in GUARDS:
         if guard.status == DORMANT:
+            failures += _check_dormancy_is_still_true(guard)
             continue
         if guard.status != GATING:
             failures.append(f"{guard.script}: unknown status {guard.status!r}")

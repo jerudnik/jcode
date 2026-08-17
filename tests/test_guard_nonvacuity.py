@@ -254,6 +254,56 @@ class TheD034WeakeningIsCaught(unittest.TestCase):
         )
 
 
+class TheProductionFilterClaim(unittest.TestCase):
+    """The classifier that decides what the budget guard measures.
+
+    Registered because weakening it is invisible to the guard: measured, making
+    every file containing `#[cfg(test)]` yield no production lines drops
+    lifecycle panics 11 -> 0 and swallowed errors 440 -> 91 while the digest,
+    the in-scope file counts and the exit status all stay put.
+    """
+
+    def test_the_sample_separates_production_from_test_panics(self) -> None:
+        module = harness._load("scripts/rust_production_filter.py")
+        lines = module.production_lines_from_text(harness._RUST_SAMPLE)
+        self.assertEqual(sum(1 for line in lines if "panic!" in line), 2)
+
+    def test_the_claim_holds_against_the_current_filter(self) -> None:
+        outcome = harness.plant_production_filter()
+        self.assertTrue(outcome.accepted, outcome.detail)
+        self.assertTrue(outcome.rejected, outcome.detail)
+
+    def test_a_widened_exclusion_is_reported(self) -> None:
+        """The real weakening, applied to a copy, must break the claim."""
+
+        source = (
+            harness.REPO_ROOT / "scripts/rust_production_filter.py"
+        ).read_text(encoding="utf-8")
+        weakened = source.replace(
+            "def production_lines_from_text(source: str) -> list[str]:\n"
+            "    masked_code = _mask_rust_non_code(source)",
+            "def production_lines_from_text(source: str) -> list[str]:\n"
+            "    masked_code = _mask_rust_non_code(source)\n"
+            '    if "#[cfg(test)]" in masked_code:\n'
+            "        return []",
+            1,
+        )
+        self.assertNotEqual(weakened, source, "the weakening no longer applies")
+        module = harness._exec_module(weakened, "_weakened_under_test")
+        lines = module.production_lines_from_text(harness._RUST_SAMPLE)
+        self.assertEqual(sum(1 for line in lines if "panic!" in line), 0)
+
+    def test_an_inapplicable_weakening_fails_rather_than_passes(self) -> None:
+        """If the plant cannot bite, it must not read as a held claim."""
+
+        outcome = harness.plant_production_filter(
+            source="def production_lines_from_text(source):\n    return []\n"
+        )
+        self.assertFalse(outcome.rejected)
+        self.assertFalse(outcome.accepted)
+        self.assertIn("could not apply the weakening", outcome.detail)
+
+
 class TheHarnessGoesRed(unittest.TestCase):
     """Each failure mode the harness claims to detect, observed red."""
 
