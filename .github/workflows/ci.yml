@@ -7,6 +7,15 @@ on:
         description: Skip the broad route for docs-only pull requests.
         required: true
         type: boolean
+      product_impacting:
+        description: >-
+          Some changed path can alter the built artifact, so the legs that
+          exercise it must run: the full-test recipe, the Nix package build,
+          and the smoke check. False only for change sets the classifier
+          recognises as inert to a build, such as a governance workflow edit,
+          which the workflow linters and contract tests still judge in full.
+        required: true
+        type: boolean
 
 permissions:
   contents: read
@@ -36,7 +45,7 @@ jobs:
     uses: ./.github/workflows/fork-ci.yml
     secrets: inherit
     with:
-      broad: true
+      broad: ${{ inputs.product_impacting }}
 
   security:
     name: Security
@@ -54,9 +63,10 @@ jobs:
     secrets: inherit
     with:
       publish: false
+      build_package: ${{ inputs.product_impacting }}
 
   smoke:
     name: Smoke
-    if: ${{ !inputs.docs_only }}
+    if: ${{ !inputs.docs_only && inputs.product_impacting }}
     uses: ./.github/workflows/freebsd-smoke.yml
     secrets: inherit

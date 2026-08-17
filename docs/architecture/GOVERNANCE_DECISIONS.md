@@ -1429,3 +1429,45 @@ and 3.14.
 
 A harness earns its keep when it rejects its author's own work. This one did, on
 consecutive attempts, for reasons that were correct each time.
+
+## D039
+
+**Every pull request paid for the full product route, including the ones that
+could not change the product.**
+
+Date: 2026-08-17. Status: closed.
+
+A one-line edit to a governance workflow ran the same route as a change to the
+compiler-facing code: the `full-test` recipe rebuilt the release binary, the Nix
+package was built, and `just release-check` ran twice in parallel, once inside
+the Nix validate job and once as the Smoke job. Measured on the run for #162:
+`full-test` 13m58s, Nix package build 19m, `release-check` 728s in validate and
+637s in smoke. About forty runner-minutes per pull request, spent to say nothing
+about the edit that triggered it.
+
+The duplication is worth naming on its own. `Smoke check` and the
+`Run release-check recipe` step in `Validate Nix and workflow policy` are the
+same command on the same runner image, and each was the critical path of its own
+job. Nobody chose that; the two jobs were written at different times and neither
+knows about the other.
+
+The fix is a second route out of the existing classifier. A change set is
+product-impacting unless every path in it matches an allowlist, so anything
+unrecognised takes the expensive route by default. Only the legs that exercise
+the built artifact are gated on it. actionlint, the reusable-call and permission
+checkers, the workflow contract tests, `cargo check` and the test-graph compile
+still run on every pull request, and those are what actually judge a workflow
+edit. Replayed over the last twelve merges the classifier routes exactly one of
+them, #161, to the cheap path.
+
+Two details are the whole reason this is safe to have. The route is compared
+against `'false'` rather than `'true'`, so a classifier that fails to write its
+output runs the expensive legs instead of skipping them, and an empty change set
+classifies as impacting. The gated Nix steps spell out
+`github.event_name == 'push'`, because a tag push carries no inputs at all and an
+undefined input evaluates false -- which would have skipped the release build on
+exactly the event that most needs it.
+
+The generalisation, again, is the one this log keeps recording: a skipped job and
+a passing job are the same green tick. Gating work on a classifier is only
+acceptable when the failure mode of the classifier is to do more work, not less.
