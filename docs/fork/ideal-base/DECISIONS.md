@@ -951,3 +951,77 @@ gate; `fork-health.sh --live` reports RED or governance drift; a required check
 is removed or ceases to instantiate on every PR; the R07 literal-restore hash
 cannot be reproduced; or an F30 follow-up is incorrectly treated as already
 closed.
+
+## D034. G10A reversed F23's protected-path growth, and the log said otherwise
+
+**Status:** recorded, not adjudicated. This entry exists so the reversal is
+visible; choosing the replacement control is separate work.
+
+**What happened.** Commit `621f4d44d` ("Change local governance definition",
+Modernization-Node G10A, 2026-08-08) cut the Governance Root protected set from
+32 entries to 5:
+
+```
+.github/workflows            scripts/governance_compare.py
+scripts/required-checks.json scripts/generate_governance_fixture.py
+scripts/fork-health.sh
+```
+
+The 27 dropped entries were mostly guard scripts and their tests:
+`check_panic_budget.py`, `check_warning_budget.sh`, `check_code_size_budget.py`,
+`check_critical_path_budget.py`, `check_tui_render_lock.py`,
+`check_env_lease_drop_order.py`, `rust_production_filter.py`,
+`security_preflight.sh`, `.github/scripts`, and the matching
+`test_*` / `tests/test_*` files.
+
+This directly reverses the F23 decision recorded above in this same file, which
+states in the present tense that "the protected-path set intentionally grew from
+27 to 29 so the critical-path checker and its tests cannot attest to their own
+weakening." After G10A that sentence describes a property the repository no
+longer has. The stale claim is the more damaging half of this finding: it is the
+document a later reader would trust.
+
+**What is genuinely unchanged.** The rails held. Live ruleset
+`18509013 protect-fork-rails` still requires `Governance Root` and `PR Gate`,
+still sets `strict_required_status_checks_policy: true`, still carries
+`deletion` and `non_fast_forward`, still allows only `merge`, and
+`bypass_actors` is still empty — verified 2026-08-17 by authenticated read of
+`repos/jerudnik/jcode/rulesets/18509013`, where the key is present and `[]` and
+`current_user_can_bypass` is `never`. The *list* endpoint `/rulesets` omits the
+key entirely; per `scripts/governance_compare.py` an omitted key is an
+unauthorized read and must never be recorded as emptiness. G10A's acceptance criteria asked for exactly
+that, and it delivered it.
+
+**What is partly compensated.** The guard scripts still execute: `PR Gate` →
+`.github/workflows/fork-ci.yml:51` → `just check` → `justfile:7`, which invokes
+`check_critical_path_budget.py --expect-digest <sha256>`. Weakening a ceiling,
+shrinking scope, or relaxing a target changes `pinned_data()`, so the digest
+moves and the author must also edit the pin. That is a visible one-line diff.
+
+**What is genuinely weaker.** `scope_digest()` hashes `pinned_data()` only: the
+scope, ceiling and target block. It does not cover the checker's comparison
+logic. A PR may relax a comparison inside the checker, leave the digest
+untouched, edit the checker's own test in the same commit, and trip no
+governance trip-wire. That is precisely the F23 scenario, and before G10A both
+files were protected, so touching either forced the maintenance window.
+
+**Why this matters more on this repository than the coverage delta suggests.**
+`required_approving_review_count` is `0`. On a single-maintainer fork the
+governance window *was* the review forcing function: the only mechanism that
+stopped a change from attesting to its own correctness. Removing 27 paths from
+that window removed the forcing function without substituting another.
+
+**Not adjudicated here.** Reverting to the pre-G10A 32-path list is one option and probably
+the worst one: it restores coverage by making every routine guard edit demand a
+ruleset transaction, which is the ergonomics cost G10A was right to reject. The
+open question is a control that is cheap in the common case and still refuses
+self-attestation. Candidate directions, none yet evaluated: pinning guard-script
+and guard-test digests in a single protected manifest, so one protected path
+covers many files; or a machine-checkable non-vacuity proof in `PR Gate` on the
+F23 planted-defect pattern, so a weakened guard fails by demonstration rather
+than by review. The second needs no second human at all, which suits this
+repository.
+
+**Reopen trigger for this entry:** any change to the protected-path set, the
+`justfile` digest pin, or `required_approving_review_count`; or the adoption of
+a replacement control, which should supersede this entry rather than amend it.
