@@ -3,7 +3,7 @@
 load-bearing can still fail.
 
 Background. D034 recorded that commit 621f4d44d shrank the `Governance Root`
-protected-path set from 27 entries to 5, so a pull request could weaken a
+protected-path set from 32 entries to 5, so a pull request could weaken a
 guard's comparison logic and edit that guard's own test in the same change with
 no trip-wire. Reproducing that hole showed the defect is larger than D034
 stated: most guards are not wired into any pull-request-blocking check at all,
@@ -33,6 +33,16 @@ ruleset maintenance window on every guard edit, which is the ergonomic cost that
 This file protects the *claim* -- what gates, where it is wired, what must make
 it fail -- and leaves guard logic and guard tests unprotected. Routine guard
 work needs no window; changing the claim does.
+
+What this does not cover, stated so the gap is inherited rather than
+rediscovered. A claim binds one guard to one defect, so a defect no claim names
+passes. Guard dependencies are covered only where a claim names them: the budget
+guard's line classifier is named, because weakening it moves lifecycle panics
+11 -> 0 and swallowed errors 440 -> 91 with the digest, the file counts and the
+exit status unchanged. Nothing enumerates the rest. The registry pins behaviour,
+not bytes, so a rewrite preserving the planted behaviour and losing everything
+else is invisible here. Widening coverage means adding claims, and a claim that
+cannot be shown red is not worth adding.
 
 Plant data is defined here rather than in fixture files on purpose. A plant
 expressed as a file outside this module could be weakened in the same pull
