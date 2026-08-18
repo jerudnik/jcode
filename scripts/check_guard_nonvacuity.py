@@ -734,6 +734,24 @@ GUARDS: tuple[Guard, ...] = (
                 where=".github/workflows/pr.yml",
                 must_contain="python3 -I scripts/classify_pr_paths.py",
             ),
+            # The classifier does not get to route a change to itself. The
+            # workflow forces the full route when the change set touches a
+            # routing-critical path, and these two claims are why that override
+            # cannot be removed quietly: deleting it edits a protected path, so
+            # Governance Root fires, and the override itself guarantees this
+            # harness runs on that pull request rather than being skipped by the
+            # very classifier under edit. Assert the decision and the path
+            # separately -- an override that kept the grep but stopped forcing,
+            # or kept forcing but dropped the classifier from the set, is the
+            # failure this is watching for, and either alone still greps.
+            Wiring(
+                where=".github/workflows/pr.yml",
+                must_contain="-e scripts/classify_pr_paths.py",
+            ),
+            Wiring(
+                where=".github/workflows/pr.yml",
+                must_contain="printf 'docs_only=false\\nproduct_impacting=true\\n'",
+            ),
         ),
         plant=plant_pr_route_self_exemption,
     ),

@@ -27,12 +27,48 @@ jobs:
 
       - id: route
         shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          route="$RUNNER_TEMP/route.env"
+          changed="$RUNNER_TEMP/changed.txt"
+
           python3 -I scripts/classify_pr_paths.py \
-            --base '${{ github.event.pull_request.base.sha }}' \
-            --head '${{ github.event.pull_request.head.sha }}' \
-            >> "$GITHUB_OUTPUT"
+            --base "$BASE_SHA" --head "$HEAD_SHA" > "$route"
+
+          # A pull request that changes how pull requests are routed cannot be
+          # routed by the version of that logic it is proposing. For
+          # pull_request events the head version of both this workflow and the
+          # classifier is what runs, so a weakened classifier would otherwise
+          # decide whether the legs that judge it run at all -- and it can do
+          # that today without failing any check, because its own path is not
+          # protected. This file is. Deciding here does not make the weakening
+          # impossible; it makes it trip Governance Root, which is required.
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$changed"
+          set +e
+          routing_critical="$(grep -xF \
+            -e scripts/classify_pr_paths.py \
+            -e .github/workflows/pr.yml \
+            "$changed")"
+          grep_rc=$?
+          set -e
+          # 0 matched, 1 matched nothing, anything else is a failure to read the
+          # change set at all, which must not be mistaken for "nothing matched".
+          if [ "$grep_rc" -gt 1 ]; then
+            echo "::error::could not scan the change set for routing-critical paths"
+            exit 1
+          fi
+          if [ -n "$routing_critical" ]; then
+            echo "::notice::routing-critical path changed; forcing the full route"
+            echo "$routing_critical"
+            printf 'docs_only=false\nproduct_impacting=true\n' > "$route"
+          fi
+
+          echo "effective route:"
+          cat "$route"
+          cat "$route" >> "$GITHUB_OUTPUT"
 
   checks:
     name: Checks
