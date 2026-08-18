@@ -183,3 +183,83 @@ async fn queue_soft_interrupt_for_session_persists_when_live_queue_is_unavailabl
         crate::env::remove_var("JCODE_HOME");
     }
 }
+
+/// A backgrounded `swarm await` that resolves while the requesting session is
+/// busy is delivered as a NON-URGENT soft interrupt.
+///
+/// This is the mechanism behind the delivery lag recorded in
+/// `docs/issues/await-notification-dating.md`. Urgency is what gates the
+/// skip-remaining-tools path (injection point C in
+/// `agent/turn_streaming_mpsc.rs`); a non-urgent interrupt is held for
+/// injection point D, "all tools done, before next API call". So an await
+/// result cannot cut into a tool batch that is already running: it waits for
+/// the batch to drain, and the observed lag is bounded by that batch, not by
+/// the await itself.
+///
+/// The assertion is on urgency rather than on timing so it stays deterministic.
+#[tokio::test]
+async fn backgrounded_await_completion_is_queued_non_urgently_while_busy() {
+    const AWAIT_BODY: &str = "sentinel-await-completion-body";
+
+    let agent = test_agent().await;
+    let session_id = {
+        let guard = agent.lock().await;
+        guard.session_id().to_string()
+    };
+    let queue = {
+        let guard = agent.lock().await;
+        guard.soft_interrupt_queue()
+    };
+    let queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    register_session_interrupt_queue(&queues, &session_id, queue.clone()).await;
+    let sessions = Arc::new(RwLock::new(HashMap::from([(
+        session_id.clone(),
+        agent.clone(),
+    )])));
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::new()));
+    let event_history = Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (swarm_event_tx, _swarm_event_rx) = tokio::sync::broadcast::channel(16);
+
+    let event = crate::bus::SwarmAwaitCompleted {
+        session_id: session_id.clone(),
+        completed: true,
+        summary: "All 1 members are done: sentinel".to_string(),
+        notification: AWAIT_BODY.to_string(),
+        notify: false,
+        wake: true,
+    };
+
+    // Busy: hold the agent lock so no live turn can run and the completion has
+    // to take the queued path.
+    let _busy_guard = agent.lock().await;
+
+    super::background_tasks::dispatch_swarm_await_completion(
+        &event,
+        &sessions,
+        &queues,
+        &swarm_members,
+        &swarms_by_id,
+        &event_history,
+        &event_counter,
+        &swarm_event_tx,
+    )
+    .await;
+
+    let pending = queue.lock().expect("queue lock");
+    assert_eq!(
+        pending.len(),
+        1,
+        "a waking await completion should queue exactly one soft interrupt"
+    );
+    assert_eq!(pending[0].content, AWAIT_BODY);
+    assert_eq!(pending[0].source, SoftInterruptSource::BackgroundTask);
+    assert!(
+        !pending[0].urgent,
+        "await completions are queued non-urgently, so they cannot skip \
+         remaining tools at injection point C and instead wait for injection \
+         point D"
+    );
+}
