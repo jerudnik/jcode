@@ -2734,3 +2734,76 @@ async fn urgent_interrupt_lands_at_injection_point_c_with_the_skip_count() {
         "the queued content must reach the client, got: {content}"
     );
 }
+
+/// The ordered event stream for a turn, reduced to the two kinds this test
+/// cares about: `done:<tool_use_id>` and `injected:<point>`.
+fn ordered_event_tags(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ServerEvent>,
+) -> Vec<String> {
+    let mut tags = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        match event {
+            ServerEvent::ToolDone { id, .. } => tags.push(format!("done:{id}")),
+            ServerEvent::SoftInterruptInjected { point, .. } => {
+                tags.push(format!("injected:{point}"))
+            }
+            _ => {}
+        }
+    }
+    tags
+}
+
+/// What actually sets the delivery lag. A non-urgent interrupt -- the form a
+/// backgrounded `swarm await` completion is queued in -- is not announced
+/// until *every* tool in the batch has reported. So the lag is bounded below
+/// by however long the rest of the batch takes to run, whatever that happens
+/// to be on a given turn.
+///
+/// This is the structural half of the "nearly three minutes" observation. It
+/// says nothing about the size of the lag on any particular run; it pins the
+/// shape that makes a large one possible.
+#[tokio::test]
+async fn a_non_urgent_interrupt_is_not_announced_until_the_batch_drains() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let provider = two_tool_batch_provider();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+
+    agent.queue_soft_interrupt(
+        "lag-order-sentinel".to_string(),
+        false,
+        SoftInterruptSource::User,
+    );
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    agent
+        .run_once_streaming_mpsc("call two tools", Vec::new(), None, event_tx)
+        .await
+        .expect("a non-urgent interrupt must not abort the turn");
+
+    let tags = ordered_event_tags(&mut event_rx);
+    let announced = tags
+        .iter()
+        .position(|tag| tag.starts_with("injected:"))
+        .unwrap_or_else(|| panic!("the interrupt must be announced, stream was: {tags:?}"));
+    let last_tool = tags
+        .iter()
+        .rposition(|tag| tag.starts_with("done:"))
+        .unwrap_or_else(|| panic!("both tools must report, stream was: {tags:?}"));
+
+    assert!(
+        announced > last_tool,
+        "a non-urgent interrupt must wait for the whole batch: {tags:?}"
+    );
+    assert_eq!(
+        tags.iter().filter(|tag| tag.starts_with("done:")).count(),
+        2,
+        "both tools in the batch must run to completion: {tags:?}"
+    );
+}
