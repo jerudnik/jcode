@@ -5,7 +5,7 @@ use crate::protocol::{CommDeliveryMode, NotificationType, ServerEvent};
 use crate::provider::{EventStream, Provider};
 use crate::server::{
     ClientConnectionInfo, SessionInterruptQueues, SwarmEvent, SwarmEventState, SwarmMember,
-    SwarmState, VersionedPlan,
+    SwarmState, VersionedPlan, register_session_interrupt_queue,
 };
 use crate::tool::Registry;
 use anyhow::Result;
@@ -973,4 +973,177 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
     // Drain ancillary channels so they do not look like leaks.
     let _ = client_event_rx.try_recv();
     let _ = target_event_rx.try_recv();
+}
+
+/// W3d (orchestration-hardening): `delivery: notify` performs NO delivery
+/// action toward the recipient agent. It emits a `ServerEvent::Notification`
+/// on the session's client channel and returns success; nothing is queued for
+/// the recipient's model and no turn is started.
+///
+/// For a HEADLESS swarm member that channel is drained by a discard loop
+/// (`headless.rs`: "Drain events to keep channel alive"), so the send succeeds,
+/// `fanout_session_event` counts a delivery, the sender's tool reports success,
+/// and the message is destroyed. Headless/inline is the default spawn mode, so
+/// this is the default worker shape.
+///
+/// The `Interrupt` arm is the control: same fixture, same message, only the
+/// delivery mode differs, and it DOES land in the recipient's queue. An empty
+/// queue in the notify arm is therefore a real absence, not an unobservable one.
+#[tokio::test]
+async fn comm_message_notify_to_headless_member_reaches_no_agent_surface() {
+    let sender = test_agent().await;
+    let target = test_agent().await;
+
+    let sender_id = sender.lock().await.session_id().to_string();
+    let target_id = target.lock().await.session_id().to_string();
+    let target_queue = target.lock().await.soft_interrupt_queue();
+    let swarm_id = "swarm-notify".to_string();
+
+    let sessions = Arc::new(RwLock::new(HashMap::from([
+        (sender_id.clone(), sender.clone()),
+        (target_id.clone(), target.clone()),
+    ])));
+
+    let (sender_event_tx, _sender_event_rx) = mpsc::unbounded_channel();
+    // A headless member's event_tx is drained by a discard loop. Model that
+    // faithfully: the send succeeds, and nothing observes the event.
+    let (target_event_tx, mut target_event_rx) = mpsc::unbounded_channel();
+
+    let member = |session_id: &str,
+                  event_tx: mpsc::UnboundedSender<ServerEvent>,
+                  name: &str,
+                  role: &str,
+                  is_headless: bool| SwarmMember {
+        session_id: session_id.to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some(swarm_id.clone()),
+        swarm_enabled: true,
+        status: "ready".to_string(),
+        detail: None,
+        friendly_name: Some(name.to_string()),
+        report_back_to_session_id: None,
+        initial_prompt_delivered: None,
+        latest_completion_report: None,
+        role: role.to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: None,
+        subagent_type: None,
+    };
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        (
+            sender_id.clone(),
+            member(&sender_id, sender_event_tx, "falcon", "coordinator", false),
+        ),
+        (
+            target_id.clone(),
+            member(&target_id, target_event_tx, "bear", "agent", true),
+        ),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.clone(),
+        HashSet::from([sender_id.clone(), target_id.clone()]),
+    )])));
+    let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
+        Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(AtomicU64::new(0));
+    let (swarm_event_tx, _) = broadcast::channel(16);
+    let client_connections = Arc::new(RwLock::new(HashMap::new()));
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    let queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    register_session_interrupt_queue(&queues, &target_id, target_queue.clone()).await;
+
+    // Control arm: Interrupt delivery. Same fixture, same body.
+    handle_comm_message(
+        1,
+        sender_id.clone(),
+        "control body".to_string(),
+        Some("bear".to_string()),
+        Some(CommDeliveryMode::Interrupt),
+        None,
+        None,
+        &client_event_tx,
+        &sessions,
+        &queues,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
+        &client_connections,
+    )
+    .await;
+    assert!(matches!(
+        client_event_rx.recv().await,
+        Some(ServerEvent::Done { id: 1 })
+    ));
+
+    {
+        let pending = target_queue.lock().expect("queue lock");
+        assert_eq!(
+            pending.len(),
+            1,
+            "control arm: interrupt delivery must reach the recipient's queue"
+        );
+        assert!(
+            pending[0].content.contains("control body"),
+            "control arm: queued body was {:?}",
+            pending[0].content
+        );
+    }
+    target_queue.lock().expect("queue lock").clear();
+    // Drain the control arm's UI event so the notify arm reads its own.
+    assert!(matches!(
+        target_event_rx.try_recv(),
+        Ok(ServerEvent::Notification { .. })
+    ));
+
+    // Treatment arm: Notify delivery, identical in every other respect.
+    handle_comm_message(
+        2,
+        sender_id.clone(),
+        "notify body".to_string(),
+        Some("bear".to_string()),
+        Some(CommDeliveryMode::Notify),
+        None,
+        None,
+        &client_event_tx,
+        &sessions,
+        &queues,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
+        &client_connections,
+    )
+    .await;
+
+    // The send reports success ...
+    assert!(matches!(
+        client_event_rx.recv().await,
+        Some(ServerEvent::Done { id: 2 })
+    ));
+    // ... and a notification really was emitted on the session channel, which
+    // for a headless member is the discard loop.
+    match target_event_rx.try_recv() {
+        Ok(ServerEvent::Notification { message, .. }) => {
+            assert!(
+                message.contains("notify body"),
+                "unexpected notification body: {message:?}"
+            );
+        }
+        other => panic!("expected a UI notification, got {other:?}"),
+    }
+
+    // ... but nothing reached any surface the recipient's model reads.
+    let pending = target_queue.lock().expect("queue lock");
+    assert!(
+        pending.is_empty(),
+        "notify delivery must reach an agent-visible surface, but the queue held {:?}",
+        pending.iter().map(|m| m.content.clone()).collect::<Vec<_>>()
+    );
 }
