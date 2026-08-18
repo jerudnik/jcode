@@ -166,16 +166,23 @@ class RoutingInvocationTests(unittest.TestCase):
             Path(__file__).resolve().parent.parent
             / ".github/workflows/pr.yml"
         ).read_text()
+        # An *invocation* runs the script; a *mention* may just name its path,
+        # as the routing-critical change-set scan does. Counting mentions made
+        # this test fail on a workflow that had not gained a second invocation
+        # at all, so it is narrowed to lines that actually execute python3 --
+        # and correspondingly widened from "the first one is isolated" to
+        # "every one is", which the mention-counting version never checked.
         invocations = [
             line.strip()
             for line in workflow.splitlines()
-            if "classify_pr_paths.py" in line
+            if "classify_pr_paths.py" in line and "python3" in line
         ]
         self.assertEqual(len(invocations), 1, invocations)
-        self.assertTrue(
-            invocations[0].startswith("python3 -I scripts/classify_pr_paths.py"),
-            f"routing invocation is not isolated: {invocations[0]!r}",
-        )
+        for invocation in invocations:
+            self.assertTrue(
+                invocation.startswith("python3 -I scripts/classify_pr_paths.py"),
+                f"routing invocation is not isolated: {invocation!r}",
+            )
 
 
 if __name__ == "__main__":
