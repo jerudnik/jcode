@@ -1,3 +1,4 @@
+use crate::server::client_comm_message::resolve_comm_delivery_mode;
 use super::{handle_comm_list, handle_comm_message};
 use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
@@ -1144,6 +1145,239 @@ async fn comm_message_notify_to_headless_member_reaches_no_agent_surface() {
     assert!(
         pending.is_empty(),
         "notify delivery must reach an agent-visible surface, but the queue held {:?}",
+        pending.iter().map(|m| m.content.clone()).collect::<Vec<_>>()
+    );
+}
+
+/// `resolve_comm_delivery_mode` decides what a caller who named neither
+/// `delivery` nor `wake` actually gets. Every `swarm` tool action passes both
+/// straight through as `Option`, so these defaults are what ships whenever a
+/// caller does not opt in.
+///
+/// Pinned as a unit because the two scopes resolve to opposite halves: a DM
+/// defaults to a mode that reaches the agent, a broadcast defaults to one that
+/// does not.
+#[test]
+fn resolve_comm_delivery_mode_defaults_split_by_scope() {
+    assert_eq!(
+        resolve_comm_delivery_mode("dm", None, None),
+        CommDeliveryMode::Wake,
+        "a DM with no delivery and no wake must default to a mode the recipient's model reads"
+    );
+    assert_eq!(
+        resolve_comm_delivery_mode("broadcast", None, None),
+        CommDeliveryMode::Notify,
+        "a broadcast with no delivery and no wake defaults to Notify, whose arm is empty"
+    );
+    // An explicit mode always wins, and `wake: true` upgrades a broadcast.
+    assert_eq!(
+        resolve_comm_delivery_mode("dm", Some(CommDeliveryMode::Notify), None),
+        CommDeliveryMode::Notify,
+        "an explicit delivery mode must win over the scope default"
+    );
+    assert_eq!(
+        resolve_comm_delivery_mode("broadcast", None, Some(true)),
+        CommDeliveryMode::Wake,
+        "wake: true must upgrade a broadcast off the Notify default"
+    );
+}
+
+/// A default `swarm broadcast` names no delivery mode and no wake flag, so the
+/// mode is whatever `resolve_comm_delivery_mode` picks. It picks `Notify`, and
+/// the `Notify` arm is empty, so the broadcast lands on the recipient's UI
+/// channel and on no surface its model reads -- while the sender is told
+/// "Broadcast sent to your spawned subtree" and `delivered_targets` counts the
+/// recipient as delivered.
+///
+/// The recipient here is ATTACHED (`is_headless: false`), unlike the headless
+/// fixture above. `client_comm_message.rs` never reads `is_headless` on the
+/// delivery path, so attachment cannot change the outcome; pinning the attached
+/// shape keeps that claim executable rather than asserted.
+///
+/// The `Interrupt` arm is the control: same fixture, same body, and it is
+/// OBSERVED landing in the queue before the broadcast arm runs, so the empty
+/// queue afterwards is a real absence rather than an unobservable one.
+///
+/// Mutation-checked, including a negative result worth recording: filling the
+/// empty `Notify` arm reddens this test, so it would catch a fix. But flipping
+/// the broadcast default from `Notify` to `Wake` does NOT redden it -- an idle
+/// recipient's wake turn does not surface on the swarm member's event stream in
+/// this fixture, so both modes look alike from here. This test therefore pins
+/// the emptiness of the `Notify` arm; the default that routes a plain broadcast
+/// into that arm is pinned separately by
+/// `resolve_comm_delivery_mode_defaults_split_by_scope`. Neither test covers the
+/// claim alone.
+#[tokio::test]
+async fn comm_message_default_broadcast_to_attached_member_reaches_no_agent_surface() {
+    let sender = test_agent().await;
+    let target = test_agent().await;
+
+    let sender_id = sender.lock().await.session_id().to_string();
+    let target_id = target.lock().await.session_id().to_string();
+    let target_queue = target.lock().await.soft_interrupt_queue();
+    let swarm_id = "swarm-default-broadcast".to_string();
+
+    let sessions = Arc::new(RwLock::new(HashMap::from([
+        (sender_id.clone(), sender.clone()),
+        (target_id.clone(), target.clone()),
+    ])));
+
+    let (sender_event_tx, _sender_event_rx) = mpsc::unbounded_channel();
+    // An attached member's event_tx is the live client stream, so unlike the
+    // headless discard loop this receiver stands in for a TUI that really reads.
+    let (target_event_tx, mut target_event_rx) = mpsc::unbounded_channel();
+
+    let member = |session_id: &str,
+                  event_tx: mpsc::UnboundedSender<ServerEvent>,
+                  name: &str,
+                  role: &str,
+                  is_headless: bool| SwarmMember {
+        session_id: session_id.to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some(swarm_id.clone()),
+        swarm_enabled: true,
+        status: "ready".to_string(),
+        detail: None,
+        friendly_name: Some(name.to_string()),
+        report_back_to_session_id: None,
+        initial_prompt_delivered: None,
+        latest_completion_report: None,
+        role: role.to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: None,
+        subagent_type: None,
+    };
+
+    // The sender is the coordinator, so its broadcast reaches the whole swarm
+    // rather than a spawned subtree it does not have.
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        (
+            sender_id.clone(),
+            member(&sender_id, sender_event_tx, "falcon", "coordinator", false),
+        ),
+        (
+            target_id.clone(),
+            member(&target_id, target_event_tx, "bear", "agent", false),
+        ),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.clone(),
+        HashSet::from([sender_id.clone(), target_id.clone()]),
+    )])));
+    let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
+        Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(AtomicU64::new(0));
+    let (swarm_event_tx, _) = broadcast::channel(16);
+    let client_connections = Arc::new(RwLock::new(HashMap::new()));
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    let queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    register_session_interrupt_queue(&queues, &target_id, target_queue.clone()).await;
+
+    // Control arm: an explicit Interrupt broadcast. Same fixture, same body,
+    // no target -- only the delivery mode differs from the treatment.
+    handle_comm_message(
+        1,
+        sender_id.clone(),
+        "control body".to_string(),
+        None,
+        Some(CommDeliveryMode::Interrupt),
+        None,
+        None,
+        &client_event_tx,
+        &sessions,
+        &queues,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
+        &client_connections,
+    )
+    .await;
+    assert!(matches!(
+        client_event_rx.recv().await,
+        Some(ServerEvent::Done { id: 1 })
+    ));
+
+    {
+        let pending = target_queue.lock().expect("queue lock");
+        assert_eq!(
+            pending.len(),
+            1,
+            "control arm: an Interrupt broadcast must reach the recipient's queue"
+        );
+        assert!(
+            pending[0].content.contains("control body"),
+            "control arm: queued body was {:?}",
+            pending[0].content
+        );
+    }
+    target_queue.lock().expect("queue lock").clear();
+    // Drain the control arm's UI event so the treatment arm reads its own.
+    assert!(matches!(
+        target_event_rx.try_recv(),
+        Ok(ServerEvent::Notification { .. })
+    ));
+
+    // Treatment arm: the default a `swarm broadcast` actually sends -- no
+    // delivery mode, no wake flag.
+    handle_comm_message(
+        2,
+        sender_id.clone(),
+        "default broadcast body".to_string(),
+        None,
+        None,
+        None,
+        None,
+        &client_event_tx,
+        &sessions,
+        &queues,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
+        &client_connections,
+    )
+    .await;
+
+    // The send reports success ...
+    assert!(matches!(
+        client_event_rx.recv().await,
+        Some(ServerEvent::Done { id: 2 })
+    ));
+    // ... and the attached recipient's client stream really does carry it, so a
+    // human watching the TUI sees the broadcast ...
+    match target_event_rx.try_recv() {
+        Ok(ServerEvent::Notification { message, .. }) => {
+            assert!(
+                message.contains("default broadcast body"),
+                "unexpected notification body: {message:?}"
+            );
+        }
+        other => panic!("expected a UI notification, got {other:?}"),
+    }
+
+    // ... but nothing reached any surface the recipient's model reads. Being
+    // attached rather than headless changed who could SEE the broadcast, not
+    // whether the agent received it.
+    //
+    // An empty queue alone would NOT establish that: the `Wake` arm awaits
+    // `run_live_turn_if_idle`, and an idle recipient wakes immediately, which
+    // also leaves the queue empty. So assert the stronger fact -- the recipient
+    // saw the notification and then nothing at all. A mode that reaches the
+    // agent runs a turn here, and that turn's events would land on this stream.
+    match target_event_rx.try_recv() {
+        Err(mpsc::error::TryRecvError::Empty) => {}
+        other => panic!("expected no agent activity after the notification, got {other:?}"),
+    }
+    let pending = target_queue.lock().expect("queue lock");
+    assert!(
+        pending.is_empty(),
+        "a default broadcast reached an agent-visible surface, but the queue held {:?}",
         pending.iter().map(|m| m.content.clone()).collect::<Vec<_>>()
     );
 }
