@@ -120,6 +120,10 @@ entry stays open:
 
 The general fix, unapplied: a control that decides whether checks run should be
 verified before it is trusted, rather than by a job it can switch off.
+(Left standing because it states the target correctly. Partially applied on
+2026-08-18 -- see the closing addendum: what moved was the decision, not the
+detector, and the detector is still downstream. -- concurrency-patterns
+investigation.)
 
 ## Reopen trigger
 
@@ -179,3 +183,61 @@ It does not close this entry. The harness runs from `just check` inside
 detector downstream of the decision it checks cannot fire on the case that
 matters, and registering a claim in it does not move it upstream. The general
 fix recorded above is still unapplied.
+
+## Addendum, 2026-08-18: what stops arm 2 now, and what still does not
+
+The routing step in `.github/workflows/pr.yml` now scans the change set with
+`git diff` before consulting the classifier, and forces `docs_only=false` /
+`product_impacting=true` when that change set touches
+`scripts/classify_pr_paths.py` or the workflow itself. The scan fails closed: a
+`grep` exit above 1 means the change set could not be read, which is not a
+report that nothing matched, and it fails the job.
+
+Six arms were run against the step body extracted from the workflow with `yq`
+and executed verbatim, rather than against a transcription of it. The pair that
+carries the result is arm 2 with the block (classifier weakened to call its own
+change set prose, step forces the full route anyway) against the same input with
+the block stripped (the forged `docs_only=true` returns). The override is
+load-bearing, and it is targeted: a weakened classifier already in the tree, not
+in the diff, still routes a docs-only change as docs-only.
+
+On this repository's own pull request #185 the override fired in real CI --
+`##[notice]routing-critical path changed; forcing the full route` -- and the
+four legs the forged verdict would have skipped ran to completion instead. That
+much is measured. The weakened-classifier arm was not driven through a real
+pull request and deliberately will not be.
+
+What this does not do, stated plainly because the entry has been over-read once
+already:
+
+- It does not put the detector upstream of the decision. The non-vacuity
+  harness still runs from `just check` inside `fork-ci.yml`, still downstream.
+  What changed is that the routing step can no longer route around it for the
+  two paths that decide routing.
+- It does not make the weakening impossible. The override lives in a file a
+  pull request can also edit, and that file also runs from head. It makes the
+  weakening land on a protected path, so `Governance Root` fires and a merge
+  requires an explicit window. The defence is path protection plus a required
+  check, not the guard that exists for this class.
+- It covers the two listed paths only. A route forged without touching either
+  the classifier or the workflow is not addressed; no such path is known, which
+  is not the same as none existing.
+
+The registry now asserts the override's path list and its decision separately,
+so an override that keeps the scan but stops forcing, or keeps forcing but drops
+the classifier from the scanned set, reddens the harness. Three mutations were
+run, each reddening a different one of the three wiring assertions.
+
+One test was narrowed in the same change and it is recorded here because the
+narrowing looks like a weakening.
+`tests/test_classify_pr_paths.py` counted *mentions* of the classifier's path in
+the workflow, so the routing-critical scan -- which names the path without
+running it -- failed a test that existed to catch a second *invocation*. It now
+counts lines that execute `python3`, and asserts every invocation is isolated
+rather than only the first, which it never checked. The `-I` claim it carries
+also lives in the protected registry, so the narrowing did not put that claim on
+an unprotected file alone. That is what registering it there was for.
+
+This entry stays open. The reopen trigger above still stands, and gains one
+case: the routing-critical scan losing either of its two listed paths, or
+ceasing to force both outputs.
