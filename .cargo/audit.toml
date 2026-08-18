@@ -38,4 +38,5 @@ ignore = [
   "RUSTSEC-2026-0186", # memmap2 via UI/rendering/embedding stacks; awaiting transitive upgrades
   "RUSTSEC-2026-0195", # quick-xml via wayland-scanner/winit desktop build stack (build-time, Linux desktop only)
   "RUSTSEC-2026-0194", # quick-xml via wayland-scanner/winit desktop build stack (build-time, Linux desktop only)
+  "RUSTSEC-2026-0258", # h2 0.3 via aws-smithy-http-client's hyper-0.14 connector; 0.3 line has no patched release
 ]
