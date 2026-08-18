@@ -107,15 +107,30 @@ the interrupt and what it reported: D carries no skip count, C carries
 the second green; changing C's skip count to `None` turns the second red and
 leaves the first green, so neither test stands in for the other. What is
 covered is the announcement -- the point label, the skip count and the queued
-content reaching the client. The ordering of that announcement against the
-next API call is still read from the source.
+content reaching the client.
+
+The ordering that produces the lag is covered too.
+`a_non_urgent_interrupt_is_not_announced_until_the_batch_drains` records the
+event stream in order and asserts the announcement lands after the last tool
+reports, with both tools in the batch running to completion. That is the
+structural half of the observation below: delivery is bounded below by however
+long the rest of the batch takes, whatever that is on a given turn.
+
+Its mutation is worth stating precisely, because it is not a clean split.
+Hoisting the injection-point-D block above the tool loop -- same point label,
+same content, same single event, only earlier -- turns this test red and also
+reds the point-C test, which is starved because the queue is drained before
+its guard runs. The point-label test for D stays green throughout. So the
+label test is blind to *where* the announcement happens and this one is not;
+that is the coverage it adds. Ordering against the next API call is still read
+from the source.
 
 ## Still open
 
 - **The lag itself.** Dating makes staleness visible; it does not make delivery
   prompt. A consumer that ignores the stamp is affected exactly as before.
 - The nearly-three-minute figure still comes from a single live run and was not
-  re-measured. The mechanism above explains what such a number is made of; it
+  re-measured. Its shape is now pinned by a test; its size is not. The mechanism above explains what such a number is made of; it
   does not turn one observation into a bound.
 - Whether an await completion *should* be urgent is undecided. It is now a
   decision about one argument with a known effect, rather than an open question
