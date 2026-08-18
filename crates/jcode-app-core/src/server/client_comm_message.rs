@@ -52,7 +52,7 @@ async fn resolve_dm_target_session(
     }
 }
 
-fn resolve_comm_delivery_mode(
+pub(super) fn resolve_comm_delivery_mode(
     scope: &str,
     delivery: Option<CommDeliveryMode>,
     wake: Option<bool>,
