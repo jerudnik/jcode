@@ -279,6 +279,7 @@ fn test_comm_await_members_response_roundtrip() -> Result<()> {
                 status: "completed".to_string(),
                 done: true,
                 completion_report: None,
+                last_activity_age_secs: None,
             },
             AwaitedMemberStatus {
                 session_id: "sess_b".to_string(),
@@ -286,6 +287,7 @@ fn test_comm_await_members_response_roundtrip() -> Result<()> {
                 status: "stopped".to_string(),
                 done: true,
                 completion_report: None,
+                last_activity_age_secs: None,
             },
         ],
         summary: "All 2 members are done: fox, wolf".to_string(),

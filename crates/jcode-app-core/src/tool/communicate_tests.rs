@@ -1120,6 +1120,7 @@ fn format_awaited_members_includes_completion_reports() {
         status: "ready".to_string(),
         done: true,
         completion_report: Some("Structured report wins.".to_string()),
+        last_activity_age_secs: None,
     }];
     let reports = HashMap::from([(
         "session_worker".to_string(),

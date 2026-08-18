@@ -382,6 +382,7 @@ fn format_awaited_members_disambiguates_duplicate_friendly_names() {
                 status: "ready".to_string(),
                 done: true,
                 completion_report: None,
+                last_activity_age_secs: None,
             },
             AwaitedMemberStatus {
                 session_id: "session_shark_1234567890_bbbbbbbbbbbb0002".to_string(),
@@ -389,6 +390,7 @@ fn format_awaited_members_disambiguates_duplicate_friendly_names() {
                 status: "ready".to_string(),
                 done: true,
                 completion_report: None,
+                last_activity_age_secs: None,
             },
         ],
     );
