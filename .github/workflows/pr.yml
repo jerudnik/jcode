@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/classify_pr_paths.py \
+          python3 -I scripts/classify_pr_paths.py \
             --base '${{ github.event.pull_request.base.sha }}' \
             --head '${{ github.event.pull_request.head.sha }}' \
             >> "$GITHUB_OUTPUT"

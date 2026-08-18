@@ -145,5 +145,38 @@ class OutputTests(unittest.TestCase):
         self.addCleanup(setattr, sys, "stdin", self._stdin)
 
 
+class RoutingInvocationTests(unittest.TestCase):
+    """The routing invocation must be isolated, because it decides whether the
+    check that would detect a shadow runs at all.
+
+    Python puts a script's own directory first on sys.path, so a single added
+    file scripts/<name>.py rebinds one of this module's imports. A rebound
+    classifier can print docs_only=true, which skips Fork CI -- and Fork CI is
+    where check_guard_nonvacuity.py, the guard that rejects exactly this class
+    of shadow, runs. The guard is correct; it is simply sequenced after the
+    step it protects, so the routing step cannot rely on it and has to be
+    isolated at the point of invocation.
+
+    -I drops the script directory from sys.path on 3.4+. PYTHONSAFEPATH and -P
+    need 3.11 and silently no-op on older runners, so they are not equivalent.
+    """
+
+    def test_the_pr_workflow_invokes_the_classifier_isolated(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parent.parent
+            / ".github/workflows/pr.yml"
+        ).read_text()
+        invocations = [
+            line.strip()
+            for line in workflow.splitlines()
+            if "classify_pr_paths.py" in line
+        ]
+        self.assertEqual(len(invocations), 1, invocations)
+        self.assertTrue(
+            invocations[0].startswith("python3 -I scripts/classify_pr_paths.py"),
+            f"routing invocation is not isolated: {invocations[0]!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

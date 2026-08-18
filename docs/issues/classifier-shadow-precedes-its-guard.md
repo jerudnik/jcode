@@ -94,16 +94,32 @@ The blast radius is also unmeasured. `Governance Root` and `Docs lint` still
 run, so a change to a protected path would still be caught; what is not
 established is which unprotected changes could reach `main` unchecked.
 
-## Candidate mitigations, none applied
+## Mitigated, not fixed
 
-Adding `-I` to the classifier invocation in `.github/workflows/pr.yml` closes
-arm 2 directly, and arm 3 is already evidence that it does. `.github/workflows`
-is a protected path, so it needs the recorded ruleset maintenance procedure.
+The narrow mitigation has since been applied: the routing invocation in
+`.github/workflows/pr.yml` now runs the classifier isolated, and
+`tests/test_classify_pr_paths.py` asserts that it does and that it is the only
+invocation. Re-running the three arms inside a real repository confirms it --
+with the shadow file still on disk, the isolated interpreter prints the honest
+verdict while the bare one prints the forged `docs_only=true`.
 
-Ordering is the more general fix: any control that decides whether checks run
-should be verified before it is trusted, rather than by a job it can switch off.
+That closes this instance. It does not close the finding, which is why this
+entry stays open:
 
-Neither is applied here. This entry records the finding.
+- The detector is still sequenced after the step it protects. The non-vacuity
+  harness runs from `just check` inside `fork-ci.yml`, a leg the routing step
+  can still switch off. Only the routing step's own isolation stops it now, and
+  that isolation is enforced by path protection and one test, not by the guard
+  that exists for this class.
+- The regression test lives downstream of the same routing decision, so it
+  cannot catch a forged verdict at the moment it is made. It catches an edit to
+  the workflow, which is separately protected anyway.
+- Isolation was applied only to the routing invocation. Other workflows still
+  invoke helper scripts bare. Those run inside gated jobs, so hardening them
+  would not change routing; the reopen trigger below still covers them.
+
+The general fix, unapplied: a control that decides whether checks run should be
+verified before it is trusted, rather than by a job it can switch off.
 
 ## Reopen trigger
 
@@ -112,3 +128,10 @@ A new bare `python3 scripts/...` invocation in any workflow; a change to the
 non-vacuity harness gaining a second call site or losing the one in
 `fork-ci.yml`; or a classifier import whose name no registered gating guard
 imports.
+
+## Correction
+
+The mitigation section originally read "Candidate mitigations, none applied".
+That was accurate when the entry landed and stopped being accurate when the
+isolation flag was applied. It is replaced above rather than deleted, since the
+distinction it draws -- instance closed, ordering unchanged -- is the finding.
