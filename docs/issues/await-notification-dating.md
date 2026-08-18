@@ -60,11 +60,48 @@ pass when it is restored, so neither is vacuous. The test file was proved to be
 compiled by planting a `compile_error!` and observing the build fail with that
 marker before any test result was read from it.
 
+## What sets the lag, since established
+
+The queued fallback was already named above. What was not named is the lever
+that decides how long that queue holds, and it is a single boolean.
+
+`dispatch_swarm_await_completion` queues the payload with `urgent: false`.
+Urgency is not a display hint — it is the gate on the skip-remaining-tools
+path:
+
+- `crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs`, **injection point
+  C**, runs before each tool after the first and aborts the rest of the batch
+  only `if tool_index > 0 && self.has_urgent_interrupt()`.
+- **Injection point D**, "all tools done, before next API call", is where a
+  non-urgent interrupt lands. The comment there calls it "the safest point for
+  non-urgent injection since all tool_results have been added".
+
+So an await result cannot cut into a tool batch that is already running. It
+waits for the batch to drain. **The lag is bounded by the length of the
+in-flight tool batch, not by anything in the await machinery** — which is why a
+single live observation of nearly three minutes is unremarkable rather than
+alarming: it measures the requester's turn, not the await.
+
+`backgrounded_await_completion_is_queued_non_urgently_while_busy` in
+`crates/jcode-app-core/src/server/queue_tests.rs` pins the queued half by
+calling `dispatch_swarm_await_completion` with the agent lock held, then
+asserting the queued interrupt is non-urgent and sourced from
+`BackgroundTask`. Flipping that `false` to `true` in production turns the test
+red, so it covers the line it names. The two injection points are read from the
+source and are labelled as such: no test exercises them.
+
 ## Still open
 
 - **The lag itself.** Dating makes staleness visible; it does not make delivery
   prompt. A consumer that ignores the stamp is affected exactly as before.
-- No claim is made about the maximum lag. The nearly-three-minute figure comes
-  from a single live run and was not re-measured.
-- Whether a backgrounded await *should* be able to interrupt an in-flight turn,
-  or whether the requester should poll, is undecided.
+- The nearly-three-minute figure still comes from a single live run and was not
+  re-measured. The mechanism above explains what such a number is made of; it
+  does not turn one observation into a bound.
+- Whether an await completion *should* be urgent is undecided. It is now a
+  decision about one argument with a known effect, rather than an open question
+  about the delivery design.
+- **The skip path itself is untested.** Urgency is covered where it is stored,
+  parsed, and restored across a session reload, but nothing exercises the
+  behaviour it gates: the string `[Skipped: user interrupted]` appears in the
+  repository only at the line that produces it. A change that inverted the
+  condition at injection point C would pass the suite.
