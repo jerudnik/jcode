@@ -145,3 +145,13 @@ expires = "2027-01-29"
 affected_surface = "build-time Wayland protocol code generation in the Linux desktop stack (same wayland-scanner path as RUSTSEC-2026-0194)"
 rationale = "Second quick-xml denial-of-service advisory with identical exposure to RUSTSEC-2026-0194: build-time only, trusted vendored protocol XML, never runtime input."
 retire_when = "the winit/smithay Wayland stack allows quick-xml >=0.41 and Cargo.lock resolves to it."
+
+[[advisory]]
+id = "RUSTSEC-2026-0258"
+crate_name = "h2"
+owner = "jerudnik"
+accepted = "2026-08-18"
+expires = "2027-02-18"
+affected_surface = "outbound HTTP/2 to the AWS Bedrock control-plane and runtime APIs (jcode-provider-bedrock -> aws-sdk-bedrock/bedrockruntime -> aws-smithy-http-client 1.1.13 -> hyper 0.14 -> h2 0.3.27)"
+rationale = "Unbounded queueing of empty HTTP/2 DATA frames (low severity, denial of service). The 0.4 line is patched in this same change (h2 0.4.16), which covers every hyper 1.x consumer including reqwest and the provider runtimes. The remaining 0.3.27 copy has no patched release at all - the 0.3 line ends at 0.3.27 and upstream fixed only >=0.4.16 - so it cannot be resolved by a version bump. It is reached solely as an HTTP/2 *client* against AWS's own TLS endpoints, not by any listening server accepting arbitrary peers, so exploiting it requires AWS itself to emit a malicious frame stream. Dropping hyper 0.14 needs aws-smithy-http-client >=1.3.0, which the pinned aws-sdk-bedrock/sts/sso crates do not yet allow; that is a separate tracked upgrade with a far larger blast radius than this advisory warrants."
+retire_when = "the aws-sdk stack resolves aws-smithy-http-client to a release that no longer pulls hyper 0.14 (removing h2 0.3.27 from Cargo.lock), or the h2 0.3 line ships a patched release."
