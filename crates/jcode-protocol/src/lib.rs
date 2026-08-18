@@ -630,6 +630,17 @@ pub struct AwaitedMemberStatus {
     /// Latest structured completion report submitted by this member, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_report: Option<String>,
+    /// Seconds since this member last showed activity (tokens, tool start/end,
+    /// or swarm task heartbeats). Lifecycle status alone renders a worker
+    /// blocked in a foreground process identically to one making progress:
+    /// both read "running". This is the signal that separates them.
+    ///
+    /// Caveat: an assigned plan task folds its timer heartbeat into the same
+    /// clock, so a member holding an active task stays fresh whether or not it
+    /// is progressing. Freshness is therefore weak evidence of progress;
+    /// staleness is strong evidence of its absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_age_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

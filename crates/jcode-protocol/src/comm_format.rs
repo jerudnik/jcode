@@ -281,8 +281,26 @@ pub fn format_comm_members(current_session_id: &str, members: &[AgentInfo]) -> S
     }
 }
 
+/// How long a pending member may show no activity before a wait says so in
+/// words rather than only in the raw age.
+pub const NO_ACTIVITY_NOTICE_SECS: u64 = 120;
+
+/// The one fact that separates a worker doing work from a worker wedged in a
+/// foreground process: both report lifecycle status "running", so a wait that
+/// prints only the status renders them identically. Rendered for pending
+/// members only; a member that is done needs no liveness evidence.
+pub fn awaited_member_activity_suffix(member: &AwaitedMemberStatus) -> String {
+    match (member.done, member.last_activity_age_secs) {
+        (false, Some(age)) if age >= NO_ACTIVITY_NOTICE_SECS => {
+            format!(", no activity for {}", format_secs(age))
+        }
+        (false, Some(age)) => format!(", active {} ago", format_secs(age)),
+        _ => String::new(),
+    }
+}
+
 /// Format a duration in seconds into a compact human label (e.g. `45s`, `3m`, `2h`).
-fn format_secs(secs: u64) -> String {
+pub fn format_secs(secs: u64) -> String {
     if secs < 60 {
         format!("{}s", secs)
     } else if secs < 3600 {
@@ -576,7 +594,13 @@ pub fn format_comm_awaited_members_with_reports(
                 &duplicate_names,
             );
             let icon = if member.done { "✓" } else { "✗" };
-            output.push_str(&format!("  {} {} ({})\n", icon, name, member.status));
+            output.push_str(&format!(
+                "  {} {} ({}{})\n",
+                icon,
+                name,
+                member.status,
+                awaited_member_activity_suffix(member)
+            ));
         }
     }
 
