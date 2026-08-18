@@ -96,9 +96,19 @@ Injection point C is now covered too.
 against a provider that emits a two-tool batch and assert, respectively, that
 an urgent interrupt replaces the second tool result with the skip marker and
 that a non-urgent one does not. Disabling the guard turns the first red;
-dropping the urgency discrimination from it turns the second red. Injection
-point D remains read from the source and is labelled as such: no test
-exercises it.
+dropping the urgency discrimination from it turns the second red.
+
+Injection point D is now covered as well, on the surface a client actually
+sees. `non_urgent_interrupt_lands_at_injection_point_d_with_no_skip_count` and
+`urgent_interrupt_lands_at_injection_point_c_with_the_skip_count`, in the same
+file, drain the event channel after the turn and assert which point announced
+the interrupt and what it reported: D carries no skip count, C carries
+`Some(1)`. Removing the injection-point-D block turns the first red and leaves
+the second green; changing C's skip count to `None` turns the second red and
+leaves the first green, so neither test stands in for the other. What is
+covered is the announcement -- the point label, the skip count and the queued
+content reaching the client. The ordering of that announcement against the
+next API call is still read from the source.
 
 ## Still open
 
@@ -110,8 +120,6 @@ exercises it.
 - Whether an await completion *should* be urgent is undecided. It is now a
   decision about one argument with a known effect, rather than an open question
   about the delivery design.
-- **Injection point D is still untested.** The non-urgent landing point is
-  described from the source only.
 
 ## Correction
 
@@ -121,6 +129,12 @@ accurate when written and is no longer: injection point C now has the pair of
 tests described above. The claim is corrected in place rather than removed, and
 the correction is recorded here, because it was published in that form.
 
-The correction narrows the open set; it does not close it. Injection point D is
-still uncovered, and covering C says nothing about the lag itself, which remains
-the open item below.
+A later revision then listed "injection point D is still untested" as an open
+item. That is also no longer true, for the announcement at least: D now has the
+event-surface test described above. Both corrections are recorded rather than
+quietly dropped, because both were published as open items in merged pull
+request bodies.
+
+Neither correction touches the lag itself, which remains the open item above.
+Covering an injection point pins what it does when it is reached; it says
+nothing about when it is reached.
