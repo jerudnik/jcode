@@ -6,6 +6,7 @@ use super::control_log_sync::{
     current_control_log_offset, scan_swarm_control_log, subscribe_control_log,
 };
 use super::{AwaitMembersRuntime, SwarmEvent, SwarmMember, VersionedPlan};
+use chrono::{DateTime, SecondsFormat, Utc};
 use crate::bus::{Bus, BusEvent, SwarmAwaitCompleted, UiActivity};
 use crate::protocol::{AwaitedMemberStatus, ServerEvent, format_comm_awaited_members_with_reports};
 use jcode_swarm_core::control_log::{ScanOutcome, SwarmControlEnvelope, SwarmControlEvent};
@@ -261,14 +262,27 @@ pub(super) async fn respond_to_waiters(
 /// member-status + completion-report rendering as the blocking tool result so
 /// the agent sees consistent output whether it waited inline or in the
 /// background.
+///
+/// The body is stamped with `resolved_at`, the instant the await actually
+/// reached its terminal condition. Delivery is not prompt: a notification is
+/// queued as a soft interrupt and surfaces only when the requesting agent's
+/// current turn ends, which can be minutes later. Without the stamp a reading
+/// taken at 02:03 and shown at 02:06 is indistinguishable from one taken at
+/// 02:06, and an agent will read a stale result as current. The stamp lets the
+/// reader date it against the current time and see the lag for itself.
 fn background_completion_notification(
     completed: bool,
     summary: &str,
     members: &[AwaitedMemberStatus],
+    resolved_at: DateTime<Utc>,
 ) -> String {
     let reports = HashMap::new();
     let body = format_comm_awaited_members_with_reports(completed, summary, members, &reports);
-    format!("🐝 **Swarm await finished**\n\n{}", body)
+    format!(
+        "🐝 **Swarm await finished** (resolved {})\n\n{}",
+        resolved_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+        body
+    )
 }
 
 /// Reload the latest persisted pending state for `state.key`, if any. Delivery
@@ -296,7 +310,8 @@ async fn finalize_await(
     let _ = persist_final_response(&state, completed, members.clone(), summary.clone());
 
     if state.background && (state.notify || state.wake) {
-        let notification = background_completion_notification(completed, &summary, &members);
+        let notification =
+            background_completion_notification(completed, &summary, &members, Utc::now());
         Bus::global().publish(BusEvent::SwarmAwaitCompleted(SwarmAwaitCompleted {
             session_id: state.session_id.clone(),
             completed,
