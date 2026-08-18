@@ -2616,3 +2616,121 @@ async fn non_urgent_interrupt_lets_the_in_flight_tool_batch_finish() {
         "second tool must carry a real result, got: {second}"
     );
 }
+
+/// Collect every `SoftInterruptInjected` event the turn emitted, as
+/// `(point, tools_skipped, content)`. The channel is unbounded, so nothing is
+/// dropped while the turn runs and draining afterwards is lossless.
+fn injected_interrupt_events(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ServerEvent>,
+) -> Vec<(String, Option<usize>, String)> {
+    let mut seen = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        if let ServerEvent::SoftInterruptInjected {
+            point,
+            tools_skipped,
+            content,
+            ..
+        } = event
+        {
+            seen.push((point, tools_skipped, content));
+        }
+    }
+    seen
+}
+
+/// INJECTION POINT D: the landing point for a *non-urgent* interrupt, reached
+/// once every tool in the batch has produced a result. The two batch tests
+/// above execute this code but assert nothing about it; what a client actually
+/// receives -- the point label and the absent skip count -- was unobserved.
+#[tokio::test]
+async fn non_urgent_interrupt_lands_at_injection_point_d_with_no_skip_count() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let provider = two_tool_batch_provider();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+
+    agent.queue_soft_interrupt(
+        "point-d-sentinel".to_string(),
+        false,
+        SoftInterruptSource::User,
+    );
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    agent
+        .run_once_streaming_mpsc("call two tools", Vec::new(), None, event_tx)
+        .await
+        .expect("a non-urgent interrupt must not abort the turn");
+
+    let injected = injected_interrupt_events(&mut event_rx);
+    assert_eq!(
+        injected.len(),
+        1,
+        "one queued interrupt must be announced exactly once, got: {injected:?}"
+    );
+    let (point, tools_skipped, content) = &injected[0];
+    assert_eq!(
+        point, "D",
+        "a non-urgent interrupt lands after the batch drains, not mid-batch"
+    );
+    assert_eq!(
+        *tools_skipped, None,
+        "nothing was skipped, so the client must not be told a count"
+    );
+    assert!(
+        content.contains("point-d-sentinel"),
+        "the queued content must reach the client, got: {content}"
+    );
+}
+
+/// Companion for injection point C: the same event surface, but reached from
+/// the skip path. The distinguishing evidence a client sees is the `Some(n)`
+/// skip count, which the D path never carries.
+#[tokio::test]
+async fn urgent_interrupt_lands_at_injection_point_c_with_the_skip_count() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let provider = two_tool_batch_provider();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+
+    agent.queue_soft_interrupt(
+        "point-c-sentinel".to_string(),
+        true,
+        SoftInterruptSource::User,
+    );
+
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    agent
+        .run_once_streaming_mpsc("call two tools", Vec::new(), None, event_tx)
+        .await
+        .expect("an urgent interrupt must not abort the turn");
+
+    let injected = injected_interrupt_events(&mut event_rx);
+    assert_eq!(
+        injected.len(),
+        1,
+        "one queued interrupt must be announced exactly once, got: {injected:?}"
+    );
+    let (point, tools_skipped, content) = &injected[0];
+    assert_eq!(point, "C", "an urgent interrupt announces from the skip path");
+    assert_eq!(
+        *tools_skipped,
+        Some(1),
+        "the client must be told how many tools were abandoned"
+    );
+    assert!(
+        content.contains("point-c-sentinel"),
+        "the queued content must reach the client, got: {content}"
+    );
+}
