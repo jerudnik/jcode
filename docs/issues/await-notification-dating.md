@@ -87,8 +87,18 @@ alarming: it measures the requester's turn, not the await.
 calling `dispatch_swarm_await_completion` with the agent lock held, then
 asserting the queued interrupt is non-urgent and sourced from
 `BackgroundTask`. Flipping that `false` to `true` in production turns the test
-red, so it covers the line it names. The two injection points are read from the
-source and are labelled as such: no test exercises them.
+red, so it covers the line it names.
+
+Injection point C is now covered too.
+`urgent_interrupt_skips_the_rest_of_an_in_flight_tool_batch` and
+`non_urgent_interrupt_lets_the_in_flight_tool_batch_finish` in
+`crates/jcode-app-core/src/agent_tests.rs` drive `run_once_streaming_mpsc`
+against a provider that emits a two-tool batch and assert, respectively, that
+an urgent interrupt replaces the second tool result with the skip marker and
+that a non-urgent one does not. Disabling the guard turns the first red;
+dropping the urgency discrimination from it turns the second red. Injection
+point D remains read from the source and is labelled as such: no test
+exercises it.
 
 ## Still open
 
@@ -100,8 +110,17 @@ source and are labelled as such: no test exercises them.
 - Whether an await completion *should* be urgent is undecided. It is now a
   decision about one argument with a known effect, rather than an open question
   about the delivery design.
-- **The skip path itself is untested.** Urgency is covered where it is stored,
-  parsed, and restored across a session reload, but nothing exercises the
-  behaviour it gates: the string `[Skipped: user interrupted]` appears in the
-  repository only at the line that produces it. A change that inverted the
-  condition at injection point C would pass the suite.
+- **Injection point D is still untested.** The non-urgent landing point is
+  described from the source only.
+
+## Correction
+
+An earlier revision of this entry listed "the skip path itself is untested" as
+an open item and said both injection points were read from the source. That was
+accurate when written and is no longer: injection point C now has the pair of
+tests described above. The claim is corrected in place rather than removed, and
+the correction is recorded here, because it was published in that form.
+
+The correction narrows the open set; it does not close it. Injection point D is
+still uncovered, and covering C says nothing about the lag itself, which remains
+the open item below.
