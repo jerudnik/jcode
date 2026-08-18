@@ -1486,3 +1486,81 @@ product route, and that case is answered: a change to `governance-root.yml` or
 product legs -- `ci.yml`, `pr.yml`, `fork-ci.yml`, `nix.yml`, `freebsd-smoke.yml`
 -- deliberately keep the full route, because they are the files that decide what
 runs, and a route that could exempt its own definition would be no route at all.
+
+## D040. D001 and D002 are released; `597598fb9` is the frozen pre-reorg state
+
+**Decision:** release D001 and D002. Both are superseded by the owner-authorized
+documentation reorganization that merged as #155 (`8299dd932`), which deleted
+1020 tracked paths including the whole of `docs/fork/`. Their preservation
+guarantees are honored in history, not in the working tree, and this entry
+records where.
+
+Cite `597598fb9` (= `8299dd932^1`) as the frozen final mainline state of the
+pre-reorg tree. Each fact below was re-derived rather than carried forward:
+
+- `597598fb9` is an ancestor of `github/main` (`git merge-base
+  --is-ancestor`), so every deleted path stays permanently reachable from
+  `main`.
+- The predecessor register is `597598fb9:docs/fork/ideal-base/DECISIONS.md`,
+  blob `db0b1ee0bd455585a696044dc22e5aff1b2f9d7b` -- 1027 lines, 37 entries,
+  ending at D034. It is the last state of the old file, and the only place
+  D034 appears there.
+- `docs/fork/recovery/ORCHESTRATOR_PROMPT.md` is identical at `794114a82` and
+  `597598fb9`: blob `a0c92c0b5f02e958ad2f734c116b36fe65fe4fae`, content
+  sha256 `ca3f19980b1e4fab0a734397d7c6f41ccd5c203a4fa209cfe9eef2f16beed5b6`.
+  D002's byte-for-byte guarantee is intact in history.
+- Ruleset 18509013 carries `deletion` and `non_fast_forward` with
+  `enforcement: active` and `bypass_actors` **key present** and empty, so
+  reachability cannot be quietly severed. Key presence was asserted before the
+  value was read; an omitted key cannot be misread as an empty list.
+
+**Reason:** the reopen triggers of both entries have fired. D001's was "an
+explicitly authorized archive migration"; D002's was "explicit user
+authorization to break the tracked-baseline preservation guarantee". The
+reorganization was exactly that. Left unreleased, both entries keep asserting
+in the present tense things that are false on `main` today: D001 says
+`docs/fork/recovery/` and `docs/fork/normalization/` "remain at their existing
+paths" when `git ls-tree github/main docs/fork` returns nothing, and D002
+forbids editing a file that no longer exists. That is the stale-claim class
+D034 already names as the more damaging half -- an entry that is wrong outlasts
+an entry that is absent, because a reader still treats it as binding.
+
+The second defect this closes is discoverability, not reachability. Nothing in
+the merged tree cited either revision: the log named the old path once, in
+D035's editorial note, and never named the commit. Reachability was never in
+question; findability was.
+
+**On D027:** it stays. The argument for re-homing it assumed a pruned contract
+register accumulating roadmap items, and no pruned register exists -- the whole
+953-line journal was relocated verbatim, so D027 sits inside preserved history
+rather than on a curated contract surface. Moving it would require deleting log
+lines, which the append-only control in `governance-root.yml` correctly
+refuses. Its own closing line, "filed as a post-epic direction so it survives",
+already describes its status accurately: filed, not binding.
+
+**Method note, on a figure that aged.** D036 and the comment at
+`governance-root.yml:49` both cite the log's churn as "34 commits, 33
+first-parent merges" in the three months to 2026-08-17. Re-measured today the
+same query returns 41 and 37. The pair is not wrong; two things happened to it.
+The labels are transposed -- as of `c04dc0932`, the commit that introduced the
+sentence, the measurement was 33 all-commits and 34 first-parent, not the other
+way round. And the quantity is monotonically growing, so a number correct when
+taken drifts every time the log is appended to, which is the routine act the
+sentence exists to describe. Neither is load-bearing: the argument only needs
+"appending is frequent", and every value in the range clears that bar by an
+order of magnitude. It is recorded because a growing count written as a
+constant is the same defect the log keeps cataloguing, and the next reader
+should meet it labelled rather than discover it.
+
+The transposition is also a reminder that `--first-parent` can exceed the
+unfiltered count, because a merge commit carries its whole side branch and so
+survives a path filter that the individual side commits do not. A reader who
+assumes the filtered number must be smaller will read the swap as an error in
+the tooling rather than in the label.
+
+**Reopen trigger:** an authorized history rewrite, an organization migration or
+repository re-creation, or the adoption of shallow mirroring on any backup or
+distribution path. Any of those makes reachability-by-history insufficient, at
+which point the belt is one command --
+`git push github 597598fb9:refs/tags/pre-docs-reorg-2026-08` -- anchoring
+`597598fb9`, not `794114a82`, which predates #154 and misses D034.
