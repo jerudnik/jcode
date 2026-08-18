@@ -10,8 +10,8 @@ opened: 2026-08-18
 
 ## Symptom
 
-In a self-dev session whose working tree is `$WORKTREE_PRIMARY`, with the
-session process' own cwd set to that tree:
+In a self-dev session started from `$WORKTREE_PRIMARY` but whose *session*
+working directory is `$HOME` (see the correction below):
 
     $ selfdev find-config
     **Repository:** not found (run `selfdev setup`)
@@ -70,10 +70,11 @@ directory `setup` clones into. Its only callers are inside `setup.rs`
 `find-config` and `reload` do not search — and then `find-config` tells the
 operator to run `setup`.
 
-`reload` is worse off than `find-config`: it calls `get_repo_dir()` directly
-(`crates/jcode-app-core/src/tool/selfdev/reload.rs:348`), so it does not even
-get the `working_dir` ancestor walk. `session_rebuild.rs:11` has the same
-shape.
+Not every caller resolves alike. `status`
+(`crates/jcode-app-core/src/tool/selfdev/status.rs:14`) and `session_rebuild`
+(`crates/jcode-app-core/src/session_rebuild.rs:11`, `:96`) call
+`build::get_repo_dir()` directly, so they never get the `working_dir` ancestor
+walk. `reload` does not have this problem — see the correction below.
 
 ## Why it matters
 
@@ -94,16 +95,88 @@ to be a *new* problem rather than the same one.
 
 Not prescriptive; the shape that would close it:
 
-- Make `setup`'s clone directory a discovery candidate, so the remedy the
-  error message names actually changes the outcome.
+- Say where it looked. `not found (run selfdev setup)` names a remedy that
+  does not apply to the common case and hides the one fact that identifies it:
+  the directory whose ancestors were searched. `not found (searched ancestors
+  of $HOME)` would have ended this in one command instead of several.
 - Have `setup --context <path>` bind that path when it is already a jcode
   repository, rather than cloning.
 - Have `setup` report *which* tree it bound and at what commit, so a stale
   clone cannot render as success.
-- Give `reload` and `session_rebuild` the same resolver `find-config` uses.
+- Give `status` and `session_rebuild` the same resolver `reload` and
+  `find-config` already use.
 
 ## Workaround
 
-Set `JCODE_REPO_DIR` in the environment of the process that serves the tool
-call. This is step 1 of `get_repo_dir` and takes precedence over everything
-else. It has not been confirmed end-to-end for `reload` in this session.
+Work from a session whose working directory *is* the repository. Over the
+debug socket:
+
+    create_session:selfdev:$WORKTREE_PRIMARY
+
+`selfdev build` issued in that session resolves the repository and queues
+normally. `JCODE_REPO_DIR` in the serving process' environment is step 1 of
+`get_repo_dir` and would also work, but it requires restarting that process,
+whereas a new session does not.
+
+## Correction (2026-08-18)
+
+Two claims above were wrong when first written. Both are corrected in place;
+this section records what changed and how the replacement was checked, so the
+entry cannot be read as if it had always said this.
+
+**The premise was wrong.** The original text asserted the session process' cwd
+was the working tree. It was not. `pwd` in the reporting session returned
+`$HOME`. Every resolver walks ancestors of that directory, and `$HOME` has no
+jcode repository above it, so the failure is fully explained without any
+resolver disagreement.
+
+How the session came to be rooted at `$HOME` is a separate, still-open
+question: being launched from there is the obvious explanation, but a resume
+can also rewrite a session's recorded working directory, and that has not been
+ruled out here. Only the *observation* — cwd was `$HOME` — is established
+below; the cause is not.
+
+Verified by A/B against a control, same host, same binary, seconds apart:
+
+| session working dir | `selfdev find-config` → `Repository:` |
+| --- | --- |
+| `$HOME` (control) | `not found (run selfdev setup)` |
+| `$WORKTREE_PRIMARY` (treatment) | `$WORKTREE_PRIMARY` |
+
+The treatment session was made with `create_session:selfdev:$WORKTREE_PRIMARY`
+over the debug socket. `selfdev build` in it queued a build and returned a task
+id; the same call in the control session returned `Could not find the jcode
+repository directory for selfdev build`.
+
+**The `reload` claim was wrong.** The entry said `reload` calls
+`get_repo_dir()` directly and cited `reload.rs:348`. It does not.
+`resolve_selfdev_reload_repo_dir` (`reload.rs:232`, called from `:335`) treats
+an explicit `working_dir` as authoritative — resolving through that directory's
+ancestors *or not at all*, so a caller pointed at a non-repository never
+silently reloads the ambient one. That is stricter than `find-config`, not
+looser. The entry also cited `session_rebuild.rs:11` as living under
+`tool/selfdev/`; the file is at `crates/jcode-app-core/src/session_rebuild.rs`.
+`status.rs:14` and that file are the two call sites that really do bypass the
+`working_dir` walk.
+
+The claim was written from a reading of neighbouring code rather than from the
+file it cited. It went into a merged document without anyone re-opening
+`reload.rs`.
+
+## Absence read as success, again
+
+The error text is `not found (run selfdev setup)`. It is not wrong about
+the absence — no repository was found. It is wrong about *why*, and it names a
+remedy that cannot help, because `setup` clones into a directory discovery
+never searches. Following that advice produced a second stale artifact and left
+the original cause untouched. A message that had printed the directory it
+searched would have shown `$HOME` immediately.
+
+The residual gap is therefore narrower than first filed, and still real:
+
+- the failure message points away from the cause;
+- `setup`'s clone directory is not a discovery candidate, so its own advice is
+  inert;
+- `status` and `session_rebuild` resolve differently from `reload` and
+  `find-config`, so the same session can be simultaneously able to build and
+  unable to report where it would build.
