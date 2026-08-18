@@ -2447,3 +2447,172 @@ async fn run_turn_fails_turn_when_stream_never_opens() {
         "unexpected error: {err:#}"
     );
 }
+
+/// Provider whose first attempt calls two tools in one assistant message, then
+/// finishes on the second attempt. Paired with an empty allow-list so neither
+/// tool executes for real: both are refused by policy, which is enough to
+/// observe *whether the second one was reached at all*.
+fn two_tool_batch_provider() -> Arc<dyn Provider> {
+    Arc::new(RetryEvidenceProvider {
+        attempts: Arc::new(Mutex::new(VecDeque::from(vec![
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseStart {
+                    id: "tc-batch-first".to_string(),
+                    name: "bash".to_string(),
+                }),
+                ScriptedProviderEvent::Event(StreamEvent::ToolInputDelta(
+                    "{\"command\":\"echo first\"}".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseEnd),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseStart {
+                    id: "tc-batch-second".to_string(),
+                    name: "bash".to_string(),
+                }),
+                ScriptedProviderEvent::Event(StreamEvent::ToolInputDelta(
+                    "{\"command\":\"echo second\"}".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseEnd),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("tool_use".to_string()),
+                }),
+            ]),
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::TextDelta(
+                    "batch finished".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }),
+            ]),
+        ]))),
+    })
+}
+
+/// Result content recorded for `tool_use_id`, if the turn produced one at all.
+fn tool_result_for(agent: &Agent, tool_use_id: &str) -> Option<String> {
+    agent.session.messages.iter().find_map(|message| {
+        message.content.iter().find_map(|block| match block {
+            ContentBlock::ToolResult {
+                tool_use_id: id,
+                content,
+                ..
+            } if id == tool_use_id => Some(content.clone()),
+            _ => None,
+        })
+    })
+}
+
+const SKIPPED_MARKER: &str = "[Skipped: user interrupted]";
+
+/// INJECTION POINT C: an *urgent* soft interrupt abandons the rest of a tool
+/// batch that is already in flight. Before this test the skip path had no
+/// coverage at all -- the marker string it writes appeared in the repository
+/// only at the line that produces it, so inverting the condition would have
+/// left the suite green.
+#[tokio::test]
+async fn urgent_interrupt_skips_the_rest_of_an_in_flight_tool_batch() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let provider = two_tool_batch_provider();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+
+    agent.queue_soft_interrupt(
+        "urgent-skip-sentinel".to_string(),
+        true,
+        SoftInterruptSource::User,
+    );
+
+    // Drive the streaming turn loop, the only path that contains injection
+    // point C. run_once_capture takes the non-streaming loop and would not
+    // reach the guard at all.
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    agent
+        .run_once_streaming_mpsc("call two tools", Vec::new(), None, event_tx)
+        .await
+        .expect("an urgent interrupt must not abort the turn");
+
+    // The first tool is past the guard (it only fires for tool_index > 0), so
+    // it still gets a real answer -- here, the policy refusal.
+    let first = tool_result_for(&agent, "tc-batch-first")
+        .expect("the first tool in the batch must still produce a result");
+    assert!(
+        !first.contains(SKIPPED_MARKER),
+        "the first tool must not be skipped, got: {first}"
+    );
+
+    // The second is abandoned, and says so in the transcript the model sees.
+    assert_eq!(
+        tool_result_for(&agent, "tc-batch-second").as_deref(),
+        Some(SKIPPED_MARKER),
+        "an urgent interrupt must skip the remaining tools in the batch"
+    );
+    let noted_skip = agent.session.messages.iter().any(|message| {
+        message.content.iter().any(|block| {
+            matches!(block, ContentBlock::Text { text, .. }
+                if text.contains("1 remaining tool(s) skipped"))
+        })
+    });
+    assert!(
+        noted_skip,
+        "the skipped-tool count must be narrated to the model"
+    );
+}
+
+/// Direction test for the same guard: a *non-urgent* interrupt -- the form a
+/// backgrounded `swarm await` completion is queued in -- must let the running
+/// batch finish and wait for injection point D. This is what bounds await
+/// delivery lag by the length of the requester's tool batch.
+#[tokio::test]
+async fn non_urgent_interrupt_lets_the_in_flight_tool_batch_finish() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let provider = two_tool_batch_provider();
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+
+    agent.queue_soft_interrupt(
+        "non-urgent-await-sentinel".to_string(),
+        false,
+        SoftInterruptSource::BackgroundTask,
+    );
+
+    // Drive the streaming turn loop, the only path that contains injection
+    // point C. run_once_capture takes the non-streaming loop and would not
+    // reach the guard at all.
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    agent
+        .run_once_streaming_mpsc("call two tools", Vec::new(), None, event_tx)
+        .await
+        .expect("a non-urgent interrupt must not abort the turn");
+
+    // Nothing anywhere in the transcript is marked skipped...
+    let skipped_any = agent.session.messages.iter().any(|message| {
+        message.content.iter().any(|block| {
+            matches!(block, ContentBlock::ToolResult { content, .. }
+                if content.contains(SKIPPED_MARKER))
+        })
+    });
+    assert!(
+        !skipped_any,
+        "a non-urgent interrupt must not cut into a running tool batch"
+    );
+
+    // ...and specifically the second tool was reached and answered.
+    let second = tool_result_for(&agent, "tc-batch-second")
+        .expect("the second tool must still run when the interrupt is not urgent");
+    assert!(
+        !second.contains(SKIPPED_MARKER),
+        "second tool must carry a real result, got: {second}"
+    );
+}
