@@ -100,6 +100,7 @@ pub(super) async fn awaited_member_statuses(
                 status,
                 done,
                 completion_report,
+                last_activity_age_secs: crate::session_metrics::last_activity_age_secs(session_id),
             }
         })
         .collect()
@@ -112,11 +113,22 @@ fn short_member_name(member: &AwaitedMemberStatus) -> String {
         .unwrap_or_else(|| member.session_id[..8.min(member.session_id.len())].to_string())
 }
 
+/// A pending member rendered with the one fact that separates a worker doing
+/// work from a worker wedged in a foreground process. Both are "running".
+pub(super) fn pending_member_label(member: &AwaitedMemberStatus) -> String {
+    format!(
+        "{} ({}{})",
+        short_member_name(member),
+        member.status,
+        crate::protocol::awaited_member_activity_suffix(member)
+    )
+}
+
 pub(super) fn timeout_summary(member_statuses: &[AwaitedMemberStatus]) -> String {
     let pending: Vec<String> = member_statuses
         .iter()
         .filter(|member| !member.done)
-        .map(|member| format!("{} ({})", short_member_name(member), member.status))
+        .map(pending_member_label)
         .collect();
     format!("Timed out. Still waiting on: {}", pending.join(", "))
 }
@@ -790,7 +802,7 @@ fn background_started_summary(
     let pending: Vec<String> = member_statuses
         .iter()
         .filter(|member| !member.done)
-        .map(short_member_name)
+        .map(pending_member_label)
         .collect();
     let scope = match completion_mode(mode) {
         "any" => "any of",
