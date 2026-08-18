@@ -399,7 +399,14 @@ async fn test_batch_rejects_function_namespaced_batch_recursion() {
         .await
         .expect_err("namespaced batch recursion should be rejected");
 
-    assert!(error.to_string().contains("Cannot batch the 'batch' tool"));
+    // Print the error we actually got. This assertion has failed in CI on a
+    // rerun-green flake, and a bare `assert!` reports only "assertion failed":
+    // it proves the error was not the expected one without saying what it was,
+    // which is unactionable from a CI log alone.
+    assert!(
+        error.to_string().contains("Cannot batch the 'batch' tool"),
+        "expected batch recursion to be rejected, got: {error}"
+    );
 }
 
 #[tokio::test]
