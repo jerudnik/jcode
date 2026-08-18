@@ -135,3 +135,47 @@ The mitigation section originally read "Candidate mitigations, none applied".
 That was accurate when the entry landed and stopped being accurate when the
 isolation flag was applied. It is replaced above rather than deleted, since the
 distinction it draws -- instance closed, ordering unchanged -- is the finding.
+
+## Addendum, 2026-08-18: isolation does not stop it
+
+The sentence above -- "Only the routing step's own isolation stops it now" --
+is measured false. Isolation closed the shadow instance and nothing else. The
+ordering is reachable by an ordinary edit, with `-I` in force and no shadow file
+anywhere.
+
+Two arms, the classifier copied to a scratch directory and the repository not
+modified. The change set in both arms is one path, `scripts/classify_pr_paths.py`
+itself.
+
+| Arm | Classifier | Output |
+| --- | --- | --- |
+| 1 | unmodified | `docs_only=false`, `product_impacting=true` |
+| 2 | `is_docs` relaxed to `return True`, one line | `docs_only=true`, `product_impacting=false` |
+
+Arm 1 is the control and behaves as required. The routing workflow checks out
+`head.sha`, so arm 2 is the copy that would run: a pull request weakening the
+classifier is routed by the weakened classifier, onto the cheap path, away from
+every leg that would judge it.
+
+Nothing exotic is needed. The edit is honest Python, touches no protected path,
+and so leaves `Governance Root` green -- that job fires on eight protected paths
+and the decision log, and the classifier is on neither list.
+
+## What the registration does, and does not, do
+
+`scripts/classify_pr_paths.py` is now registered in the non-vacuity harness with
+two gating claims: that it refuses to exempt its own change set, and that it
+fails closed on an unreadable or unrecognised one. The wiring assertion names
+the whole invocation, so dropping `-I` from the workflow now reddens the harness
+rather than only the classifier's own test.
+
+That is worth having for one reason: the property moves out of
+`tests/test_classify_pr_paths.py`, which this repository does not protect and
+which can be weakened in the same pull request as the thing it tests. D034 is
+that failure mode.
+
+It does not close this entry. The harness runs from `just check` inside
+`fork-ci.yml`, which is still gated on `docs_only` -- the value arm 2 forges. A
+detector downstream of the decision it checks cannot fire on the case that
+matters, and registering a claim in it does not move it upstream. The general
+fix recorded above is still unapplied.

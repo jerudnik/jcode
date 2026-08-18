@@ -596,6 +596,97 @@ def plant_lint_docs() -> Outcome:
     )
 
 
+# The change set a pull request weakening the route classifier necessarily
+# carries: the classifier's own table, and the workflow that invokes it.
+_ROUTE_SELF = ("scripts/classify_pr_paths.py", ".github/workflows/pr.yml")
+# Prose, the route the classifier exists to grant.
+_ROUTE_PROSE = ("docs/guide.md", "README.md")
+# A governance workflow edit: judged in full by the linters and contract tests,
+# but nothing about it needs the release binary rebuilt.
+_ROUTE_INERT = (".github/workflows/governance-root.yml", "scripts/required-checks.json")
+
+
+def plant_pr_route_self_exemption() -> Outcome:
+    """The classifier may not route its own weakening onto the cheap path.
+
+    `pr.yml` checks out `head.sha` and runs the classifier from that checkout,
+    so a pull request editing this table is routed by the edited copy. Measured
+    on this tree: `is_docs` relaxed to `return True` classifies a change set of
+    nothing but `scripts/classify_pr_paths.py` as `docs_only=true`, and
+    `docs_only` is what `ci.yml` gates Fork CI on -- the leg that runs this
+    harness. The weakening skips its own detector, and no shadow is needed for
+    it: the edit is honest and touches no protected path.
+
+    Registering the claim does not by itself close that ordering; it makes the
+    property checkable wherever the harness does run, and moves it out of
+    tests/test_classify_pr_paths.py, which is unprotected and can be weakened
+    in the same pull request as the classifier -- D034's failure mode, which is
+    the one this file exists to refuse.
+
+    The clean control is prose. A classifier answering "impacting" to
+    everything would satisfy the rejection while destroying the route the
+    classifier exists for, so acceptance is asserted as well.
+    """
+
+    guard = _load("scripts/classify_pr_paths.py")
+    planted = guard.classify(list(_ROUTE_SELF))
+    clean = guard.classify(list(_ROUTE_PROSE))
+
+    return Outcome(
+        rejected=planted["product_impacting"] and not planted["docs_only"],
+        accepted=clean["docs_only"] and not clean["product_impacting"],
+        evidence=(
+            f"{', '.join(_ROUTE_SELF)} -> "
+            f"docs_only={str(planted['docs_only']).lower()}, "
+            f"product_impacting={str(planted['product_impacting']).lower()}"
+        ),
+        detail=(
+            f"planted the classifier's own change set, want docs_only=false and "
+            f"product_impacting=true, got {planted}; prose control wants "
+            f"docs_only=true and product_impacting=false, got {clean}"
+        ),
+    )
+
+
+def plant_pr_route_fails_closed() -> Outcome:
+    """An unreadable or unrecognised change set must run everything.
+
+    Same file, second comparison, because the two weaken independently: a table
+    that still refuses to exempt itself can be relaxed at the fallback so that a
+    diff nobody could read, or a path nobody anticipated, routes cheap. Both
+    defects are silent -- the skipped leg reports success.
+
+    The clean control is a governance workflow edit, which is the narrow case
+    the classifier was built to make cheap. It differs from the prose control
+    above on purpose: a guard that accepted only prose would pass that claim
+    while having lost this route entirely.
+    """
+
+    guard = _load("scripts/classify_pr_paths.py")
+    unreadable = guard.classify([])
+    unrecognised = guard.classify(["tools/newthing/main.go"])
+    clean = guard.classify(list(_ROUTE_INERT))
+
+    return Outcome(
+        rejected=(
+            unreadable["product_impacting"]
+            and not unreadable["docs_only"]
+            and unrecognised["product_impacting"]
+        ),
+        accepted=not clean["product_impacting"],
+        evidence=(
+            f"empty change set -> product_impacting="
+            f"{str(unreadable['product_impacting']).lower()}; unrecognised path -> "
+            f"product_impacting={str(unrecognised['product_impacting']).lower()}"
+        ),
+        detail=(
+            f"planted an empty change set ({unreadable}) and an unrecognised path "
+            f"({unrecognised}), both want product_impacting=true; the governance "
+            f"workflow control wants product_impacting=false, got {clean}"
+        ),
+    )
+
+
 # --------------------------------------------------------------------------
 # The registry.
 # --------------------------------------------------------------------------
@@ -628,6 +719,29 @@ GUARDS: tuple[Guard, ...] = (
         # claim here is about its classification rather than its invocation.
         wiring=(),
         plant=plant_production_filter,
+    ),
+    Guard(
+        script="scripts/classify_pr_paths.py",
+        status=GATING,
+        wiring=(
+            # The whole invocation, not just the path. `-I` is what stops a
+            # `scripts/<name>.py` shadow rebinding one of the classifier's
+            # imports and forging a route, and until now that requirement lived
+            # only in tests/test_classify_pr_paths.py, which this repository does
+            # not protect. A guard's own test agreeing with a weakened guard is
+            # D034.
+            Wiring(
+                where=".github/workflows/pr.yml",
+                must_contain="python3 -I scripts/classify_pr_paths.py",
+            ),
+        ),
+        plant=plant_pr_route_self_exemption,
+    ),
+    Guard(
+        script="scripts/classify_pr_paths.py::fails_closed",
+        status=GATING,
+        wiring=(),  # same file as above; wiring asserted once
+        plant=plant_pr_route_fails_closed,
     ),
     Guard(
         script="scripts/check_advisory_policy.py",
@@ -817,7 +931,8 @@ def _check_registry_covers_every_guard() -> list[str]:
     on_disk = {
         str(path.relative_to(REPO_ROOT))
         for pattern in ("check_*.py", "check_*.sh", "*_compare.py", "*_preflight.sh",
-                        "*_filter.py", "lint_*.py", "generate_governance_fixture.py")
+                        "*_filter.py", "lint_*.py", "classify_*.py",
+                        "generate_governance_fixture.py")
         for path in (REPO_ROOT / "scripts").glob(pattern)
     }
     missing = sorted(on_disk - registered)
