@@ -35,7 +35,7 @@ script was copied to a scratch directory; the repository was not modified.
 | Arm | Tree | Interpreter | Output |
 | --- | --- | --- | --- |
 | 1 | clean | `python3` | `docs_only=false`, `product_impacting=true` |
-| 2 | one added `scripts/subprocess.py` | `python3` | `docs_only=true`, `product_impacting=false` |
+| 2 | one added `subprocess.py` in the scripts directory | `python3` | `docs_only=true`, `product_impacting=false` |
 | 3 | same file still present | `python3 -I` | `docs_only=false`, `product_impacting=true` |
 
 Arm 3 is the control. The shadow file is still on disk and only the interpreter
