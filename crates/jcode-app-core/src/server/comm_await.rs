@@ -503,8 +503,37 @@ pub(super) async fn spawn_or_resume_await_members(
 
             tokio::select! {
                 _ = tokio::time::sleep_until(deadline) => {
-                    let summary = timeout_summary(&member_statuses);
-                    finalize_await(&await_members_runtime, &state, false, member_statuses, summary).await;
+                    // Re-read rather than reporting `member_statuses`, which is
+                    // as old as the last wake: this loop only wakes on a log
+                    // append or a swarm event, so in a quiet swarm the snapshot
+                    // above dates from when the await was created. A member that
+                    // finished during the wait would otherwise be reported with
+                    // its start-of-wait status and activity age, and a condition
+                    // that came true without a nudge would time out as a
+                    // failure. Deciding on a fresh read costs one scan per
+                    // await, only on the deadline path.
+                    let member_statuses = awaited_member_statuses(
+                        &req_session_id,
+                        &swarm_id,
+                        &requested_ids,
+                        &target_status,
+                        &swarm_members,
+                        &swarms_by_id,
+                        &swarm_plans,
+                    )
+                    .await;
+                    let satisfied = !member_statuses.is_empty()
+                        && mode_satisfied(&member_statuses, mode.as_deref());
+                    let summary = if satisfied {
+                        annotate_low_confidence_evidence(
+                            mode_summary(&member_statuses, mode.as_deref()),
+                            &swarm_id,
+                            &member_statuses,
+                        )
+                    } else {
+                        timeout_summary(&member_statuses)
+                    };
+                    finalize_await(&await_members_runtime, &state, satisfied, member_statuses, summary).await;
                     return;
                 }
                 changed = log_rx.changed() => {
