@@ -76,13 +76,52 @@ and the build was confirmed to fail on it: an earlier run of this same test had
 reported `0 passed` purely because the name filter did not match, and a green
 `0 passed` is indistinguishable from a green pass at a glance.
 
-## What is not verified
+## Propagation, since verified
 
-That this is how the three sessions above came to be rooted at `$HOME`. The
-mechanism is confirmed; this instance of it is not. A plausible propagation —
-one session rooted at `$HOME` re-roots every session resumed from it, which
-would explain why two sessions share `$HOME` while a third kept its tree — is
-consistent with the evidence but was not demonstrated.
+The propagation this entry originally listed as undemonstrated — one session
+rooted at `$HOME` re-rooting every session resumed from it — has now been
+reproduced.
+
+`Request::ResumeSession` carries no working directory, so the server has to
+source one. `crates/jcode-app-core/src/server/client_lifecycle.rs` has two
+resume call sites and they source it differently. The subscribe-time site
+passes the directory the client declared. The in-session site reads it off the
+agent the client is *currently attached to*:
+
+```rust
+let resume_working_dir = {
+    let agent_guard = agent.lock().await;
+    agent_guard.working_dir().map(str::to_string)
+};
+```
+
+After a resume that agent *is* the session just resumed, so the rewrite chains
+down the whole chain of resumes.
+
+`client_session_tests/resume/workdir_propagation.rs` drives the real server
+loop — `handle_client` over a socket pair, the seam
+`client_lifecycle_tests.rs` already uses — with three non-coinciding
+sentinels. A client that declares one directory subscribes, then resumes two
+dormant sessions rooted somewhere else entirely; both end up recorded at the
+client's directory.
+
+The test earns that claim by mutation: replacing the sourcing block above with
+`None` makes it fail on the first link, with the resumed session keeping its
+own directory. An earlier version of this test replicated the sourcing line in
+test code instead of driving the call site, and the same mutation left it
+passing — it proved only that the override is honoured once passed, which
+`dormant_working_dir.rs` already covered.
+
+The practical shape: a directory the client named for neither session is
+recorded on both, purely because the client was attached to something rooted
+there when it resumed.
+
+## What is still not verified
+
+That this is how the three sessions above came to be rooted at `$HOME`. Both
+the mechanism and its propagation are confirmed; this particular instance is
+still inferred rather than observed, and no record of the originating resume
+chain survives.
 
 An earlier attempt to demonstrate it live, by driving a spawned tester through
 `/resume` with injected keys, produced no change in the target. That result is

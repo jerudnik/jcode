@@ -32,3 +32,4 @@ include!("resume/live_events_before_history.rs");
 include!("resume/same_client_takeover.rs");
 include!("resume/dual_attach_warning.rs");
 include!("resume/dormant_working_dir.rs");
+include!("resume/workdir_propagation.rs");
