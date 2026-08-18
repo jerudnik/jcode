@@ -12,7 +12,9 @@ Two kinds of test here, deliberately:
 
 Every fixture injects its own current date through `--today`, so expiry
 behavior does not depend on when the suite runs. `test_expiry_is_deterministic`
-pins that property directly.
+pins that property directly. The real-tree test is the deliberate exception: it
+asks whether the tree passes its policy *now*, so it runs on the wall clock,
+exactly as the Security workflow does.
 """
 
 from __future__ import annotations
@@ -28,9 +30,11 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts/check_advisory_policy.py"
 
-# Fixed reference dates. Nothing in this file reads the wall clock except
-# test_expiry_is_deterministic, which asserts the wall clock does not matter.
+# Fixed reference dates for the fixture trees. The wall clock is read only by
+# test_expiry_is_deterministic, which asserts it does not matter, and by the
+# real-tree test, for which it is the whole question.
 TODAY = "2026-07-29"
+REAL_TODAY = dt.date.today().isoformat()
 BEFORE_EXPIRY = "2026-12-31"
 AFTER_EXPIRY = "2027-03-01"
 
@@ -88,7 +92,11 @@ class RealTreePolicy(unittest.TestCase):
     """The tree as committed must satisfy its own policy."""
 
     def test_real_tree_passes(self) -> None:
-        result = run_checker(ROOT, TODAY)
+        # Deliberately today's date, not the frozen fixture date. A frozen date
+        # drifts into the past: it rejects any acceptance made after the freeze,
+        # and it stops noticing acceptances that have really expired. Both
+        # failure modes point the wrong way for a guard over the live tree.
+        result = run_checker(ROOT, REAL_TODAY)
         self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
 
     def test_record_file_is_machine_readable_and_complete(self) -> None:
