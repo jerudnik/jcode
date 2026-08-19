@@ -80,6 +80,7 @@ mod model;
 mod persistence;
 mod render;
 mod storage_paths;
+mod working_dir;
 pub use crash::{
     CrashedSessionsInfo, detect_crashed_sessions, find_recent_crashed_sessions,
     find_session_by_name_or_id, recover_crashed_sessions, recover_crashed_sessions_by_ids,
@@ -101,6 +102,7 @@ use memory_profile::{
 };
 use model::SESSION_CONTEXT_PREFIX;
 pub use model::{StoredReplayEvent, StoredReplayEventKind};
+use persistence::RemoteStartupSessionSnapshot;
 pub use render::{
     RenderedCompactedHistoryInfo, RenderedImage, RenderedImageAnchor, RenderedImageSource,
     RenderedMessage, has_rendered_images, is_attached_image_label_text, render_images,
@@ -114,6 +116,7 @@ pub use storage_paths::{
     session_evidence_path, session_exists, session_journal_path, session_path,
 };
 pub use storage_paths::{session_evidence_path_from_snapshot, session_journal_path_from_snapshot};
+pub use working_dir::WorkingDirSetBy;
 
 fn stored_messages_to_messages(messages: &[StoredMessage]) -> Vec<Message> {
     messages.iter().map(StoredMessage::to_message).collect()
@@ -186,6 +189,12 @@ pub struct Session {
     /// Working directory (for self-dev detection)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Which lifecycle action last set the recorded working directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir_set_by: Option<WorkingDirSetBy>,
+    /// When the recorded working directory was last set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir_set_at: Option<DateTime<Utc>>,
     /// Memorable short name (e.g., "fox", "oak")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub short_name: Option<String>,
@@ -272,6 +281,10 @@ struct SessionStartupStub {
     testing_build: Option<String>,
     #[serde(default)]
     working_dir: Option<String>,
+    #[serde(default)]
+    working_dir_set_by: Option<WorkingDirSetBy>,
+    #[serde(default)]
+    working_dir_set_at: Option<DateTime<Utc>>,
     #[serde(default)]
     short_name: Option<String>,
     #[serde(default)]
@@ -370,6 +383,8 @@ impl Session {
         session.is_canary = stub.is_canary;
         session.testing_build = stub.testing_build;
         session.working_dir = stub.working_dir;
+        session.working_dir_set_by = stub.working_dir_set_by;
+        session.working_dir_set_at = stub.working_dir_set_at;
         session.short_name = stub.short_name;
         session.status = stub.status;
         session.last_pid = stub.last_pid;
@@ -406,6 +421,8 @@ impl Session {
         session.is_canary = snapshot.is_canary;
         session.testing_build = snapshot.testing_build;
         session.working_dir = snapshot.working_dir;
+        session.working_dir_set_by = snapshot.working_dir_set_by;
+        session.working_dir_set_at = snapshot.working_dir_set_at;
         session.short_name = snapshot.short_name;
         session.status = snapshot.status;
         session.last_pid = snapshot.last_pid;
@@ -544,6 +561,8 @@ impl Session {
             is_canary: self.is_canary,
             testing_build: self.testing_build.clone(),
             working_dir: self.working_dir.clone(),
+            working_dir_set_by: self.working_dir_set_by,
+            working_dir_set_at: self.working_dir_set_at,
             short_name: self.short_name.clone(),
             status: self.status.clone(),
             last_pid: self.last_pid,
@@ -729,6 +748,8 @@ impl Session {
         self.is_canary = meta.is_canary;
         self.testing_build = meta.testing_build;
         self.working_dir = meta.working_dir;
+        self.working_dir_set_by = meta.working_dir_set_by;
+        self.working_dir_set_at = meta.working_dir_set_at;
         self.short_name = meta.short_name;
         self.status = meta.status;
         self.last_pid = meta.last_pid;
@@ -770,6 +791,8 @@ impl Session {
             is_canary: false,
             testing_build: None,
             working_dir: current_working_dir_string(),
+            working_dir_set_by: Some(WorkingDirSetBy::Created),
+            working_dir_set_at: Some(now),
             short_name,
             status: SessionStatus::Active,
             last_pid: Some(std::process::id()),
@@ -1602,63 +1625,6 @@ fn redact_json_value(value: &mut serde_json::Value) {
         }
         _ => {}
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct RemoteStartupSessionSnapshot {
-    id: String,
-    #[serde(default)]
-    parent_id: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    custom_title: Option<String>,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-    #[serde(default)]
-    messages: Vec<StoredMessage>,
-    #[serde(default)]
-    compaction: Option<StoredCompactionState>,
-    #[serde(default)]
-    provider_session_id: Option<String>,
-    #[serde(default)]
-    provider_key: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    route_api_method: Option<String>,
-    #[serde(default)]
-    reasoning_effort: Option<String>,
-    #[serde(default)]
-    subagent_model: Option<String>,
-    #[serde(default)]
-    improve_mode: Option<SessionImproveMode>,
-    #[serde(default)]
-    autoreview_enabled: Option<bool>,
-    #[serde(default)]
-    autojudge_enabled: Option<bool>,
-    #[serde(default)]
-    is_canary: bool,
-    #[serde(default)]
-    testing_build: Option<String>,
-    #[serde(default)]
-    working_dir: Option<String>,
-    #[serde(default)]
-    short_name: Option<String>,
-    #[serde(default)]
-    status: SessionStatus,
-    #[serde(default)]
-    last_pid: Option<u32>,
-    #[serde(default)]
-    last_active_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    is_debug: bool,
-    #[serde(default)]
-    saved: bool,
-    #[serde(default)]
-    save_label: Option<String>,
-    #[serde(default)]
-    assistant: Option<AssistantSessionMeta>,
 }
 
 #[cfg(test)]

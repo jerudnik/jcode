@@ -1,5 +1,6 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
+use super::client_session_contention::{ResumeWorkingDirChange, claim_live_target_agent};
 use super::client_state::{handle_get_history, spawn_model_prefetch_update};
 use super::{
     ClientConnectionInfo, ClientDebugState, FileTouchService, SessionInterruptQueues, SwarmEvent,
@@ -930,33 +931,6 @@ async fn remove_detached_source_if_unclaimed(
     owns_source
 }
 
-/// Atomically reserves an existing live target for this connection.
-///
-/// Reserving under the connection write lock prevents another connection's
-/// detached-source cleanup from observing no users after we have selected the
-/// target but before our connection record is updated.
-async fn claim_live_target_agent(
-    session_id: &str,
-    client_connection_id: &str,
-    client_instance_id: Option<&str>,
-    source_agent: &Arc<Mutex<Agent>>,
-    sessions: &SessionAgents,
-    client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
-) -> Option<Arc<Mutex<Agent>>> {
-    let mut connections = client_connections.write().await;
-    let sessions_guard = sessions.read().await;
-    let target = sessions_guard
-        .get(session_id)
-        .filter(|existing| !Arc::ptr_eq(existing, source_agent))
-        .cloned()?;
-
-    let info = connections.get_mut(client_connection_id)?;
-    info.session_id = session_id.to_string();
-    info.client_instance_id = client_instance_id.map(str::to_string);
-    info.last_seen = Instant::now();
-    Some(target)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_resume_session(
     id: u64,
@@ -1304,6 +1278,8 @@ pub(super) async fn handle_resume_session(
         }
     }
 
+    let working_dir_change =
+        ResumeWorkingDirChange::capture(&session_id, client_connection_id, working_dir_override);
     let (result, is_canary) = {
         let mut agent_guard = agent.lock().await;
         let result =
@@ -1330,6 +1306,7 @@ pub(super) async fn handle_resume_session(
 
     match result {
         Ok(_prev_status) => {
+            working_dir_change.announce(client_event_tx);
             let old_session_id = client_session_id.clone();
             *client_session_id = session_id.clone();
 

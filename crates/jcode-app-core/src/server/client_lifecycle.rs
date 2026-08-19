@@ -1781,10 +1781,6 @@ pub(super) async fn handle_client(
             } => {
                 let pre_resume_session_id = client_session_id.clone();
                 let target_session_id = session_id.clone();
-                let resume_working_dir = {
-                    let agent_guard = agent.lock().await;
-                    agent_guard.working_dir().map(str::to_string)
-                };
                 current_client_instance_id = client_instance_id.clone();
                 {
                     let mut connections = client_connections.write().await;
@@ -1795,7 +1791,7 @@ pub(super) async fn handle_client(
                 agent = handle_resume_session(
                     id,
                     session_id,
-                    resume_working_dir.as_deref(),
+                    None,
                     client_instance_id.as_deref(),
                     client_has_local_history,
                     allow_session_takeover,
