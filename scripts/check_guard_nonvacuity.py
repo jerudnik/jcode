@@ -97,10 +97,29 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Guards that run inside a pull-request-blocking check. Keep this in step with
 # GUARDS below; `_check_registry_covers_every_guard` fails if a guard script
 # exists on disk and is absent here.
+#
+# This list is what `_check_dormancy_is_still_true` searches, so a site missing
+# from it is a place a guard can run while still being labelled dormant. It
+# held three entries and missed five workflows that gate a merge, which is how
+# `check_docs_references.py`, `check_reusable_workflow_calls.py` and
+# `check_workflow_permissions.py` sat at DORMANT while running on every
+# pull request. The justfile entry also searched only the `check` recipe body,
+# so `lint-docs` -- which the Docs lint job runs on every pull request -- was
+# invisible; it is now the whole file.
+#
+# The rule for adding one: if a job in the file can turn `PR Gate` red, it
+# belongs here. `fork-health.yml`, `main.yml`, `scheduled.yml`, `release.yml`
+# and `nix-update.yml` do not run on `pull_request` and so are deliberately
+# absent.
 BLOCKING_SITES = (
-    ("justfile", "the `check` recipe, which PR Gate runs"),
+    ("justfile", "a recipe PR Gate runs"),
     (".github/workflows/security.yml", "the security workflow"),
     (".github/workflows/governance-root.yml", "the Governance Root workflow"),
+    (".github/workflows/ci.yml", "the PR Gate reusable workflow"),
+    (".github/workflows/pr.yml", "the PR workflow"),
+    (".github/workflows/fork-ci.yml", "the Fork CI workflow"),
+    (".github/workflows/nix.yml", "the Nix workflow"),
+    (".github/workflows/freebsd-smoke.yml", "the smoke workflow"),
 )
 
 
@@ -187,15 +206,33 @@ def _exec_module(source: str, name: str) -> Any:
 
 
 def _load(script: str) -> Any:
-    """Import a guard as a module without requiring it to be importable by name."""
+    """Import a guard as a module without requiring it to be importable by name.
+
+    The module is registered in `sys.modules` under its synthetic name for the
+    duration of the load and removed afterwards. That is not tidiness: a module
+    defining a dataclass at import time makes `dataclasses` look itself up in
+    `sys.modules[cls.__module__]`, which raises `AttributeError: 'NoneType'
+    object has no attribute '__dict__'` when the name was never registered. Any
+    guard carrying a `@dataclasses.dataclass` was therefore unplantable, which
+    quietly limited which guards could be given a plant at all.
+    """
 
     path = REPO_ROOT / script
-    spec = importlib.util.spec_from_file_location(f"_guard_{path.stem}", path)
+    name = f"_guard_{path.stem}"
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot import {script}")
     module = importlib.util.module_from_spec(spec)
-    with _guard_import_path():
-        spec.loader.exec_module(module)
+    previous = _sys.modules.get(name)
+    _sys.modules[name] = module
+    try:
+        with _guard_import_path():
+            spec.loader.exec_module(module)
+    finally:
+        if previous is None:
+            _sys.modules.pop(name, None)
+        else:
+            _sys.modules[name] = previous
     return module
 
 
@@ -403,6 +440,280 @@ def plant_advisory_policy() -> Outcome:
     )
 
 
+def plant_docs_references() -> Outcome:
+    """A documentation link pointing at nothing must be reported.
+
+    This guard was registered DORMANT, on the recorded reason that it was
+    "invoked only from scripts/d01_scoreboard.sh, which no workflow runs". That
+    file does not exist. The guard is invoked from the justfile's `lint-docs`
+    recipe, which the Docs lint job runs on every pull request -- so the entry
+    claimed no coverage for a guard that had been gating all along, and the
+    dormancy check could not see it because its search was narrowed to the
+    `check` recipe body.
+
+    Nothing was broken by that; a guard running while labelled dormant still
+    runs. It is the accounting that was wrong, and accounting is the whole
+    point of this registry.
+    """
+
+    guard = _load("scripts/check_docs_references.py")
+
+    def findings(text: str) -> list[Any]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs").mkdir()
+            page = root / "docs" / "page.md"
+            page.write_text(text, encoding="utf-8")
+            (root / "docs" / "real.md").write_text("# real\n", encoding="utf-8")
+            return guard.check_links(root, page, text)
+
+    planted = findings("# page\n\nSee [the missing one](./nowhere.md).\n")
+    clean = findings("# page\n\nSee [the real one](./real.md).\n")
+
+    return Outcome(
+        rejected=bool(planted),
+        accepted=not clean,
+        evidence="; ".join(str(getattr(f, "message", f)) for f in planted),
+        detail="; ".join(str(getattr(f, "message", f)) for f in clean),
+    )
+
+
+def plant_reusable_workflow_calls() -> Outcome:
+    """A local `uses:` pointing at a workflow that is not there must be reported.
+
+    Registered DORMANT on the reason "flake check `workflow-syntax`; never built
+    in a PR-blocking job". It is executed at `.github/workflows/nix.yml:75`, in
+    the Validate job, which runs on every pull request that is not docs-only.
+    The dormancy check missed it because `nix.yml` was not among the sites it
+    searched.
+    """
+
+    guard = _load("scripts/check_reusable_workflow_calls.py")
+
+    def check(caller: str, *, with_target: bool) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "caller.yml").write_text(caller, encoding="utf-8")
+            if with_target:
+                (workflows / "target.yml").write_text(
+                    "name: Target\non:\n  workflow_call:\njobs:\n"
+                    "  work:\n    runs-on: ubuntu-latest\n"
+                    "    steps:\n      - run: echo ok\n",
+                    encoding="utf-8",
+                )
+            checker = guard.ReusableWorkflowCallChecker(root)
+            try:
+                checker.check()
+            except guard.ReusableWorkflowCallError as error:
+                return str(error)
+            return ""
+
+    caller = (
+        "name: Caller\non:\n  pull_request:\njobs:\n"
+        "  call:\n    uses: ./.github/workflows/target.yml\n"
+    )
+    planted = check(caller, with_target=False)
+    clean = check(caller, with_target=True)
+
+    return Outcome(
+        rejected=bool(planted),
+        accepted=not clean,
+        evidence=planted,
+        detail=clean,
+    )
+
+
+def plant_workflow_permissions() -> Outcome:
+    """A called workflow needing more token than its caller granted must be reported.
+
+    Registered DORMANT with the same inaccurate reason as its sibling above,
+    and executed one line later, at `.github/workflows/nix.yml:77`.
+
+    The property is monotonicity: GitHub validates every job in a called
+    workflow against the budget the caller passed, so a callee asking for
+    `contents: write` under a caller granting `contents: read` fails at run
+    time, not at review time. Planting an escalation rather than an absent
+    `permissions:` block is deliberate -- an absent block is refused by a
+    different branch of the same guard, and planting it would leave the
+    monotonicity comparison itself unproven.
+    """
+
+    guard = _load("scripts/check_workflow_permissions.py")
+
+    def findings(granted: str, needed: str) -> list[Any]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "caller.yml").write_text(
+                "name: Caller\non:\n  pull_request:\njobs:\n"
+                "  call:\n"
+                f"    permissions:\n      contents: {granted}\n"
+                "    uses: ./.github/workflows/target.yml\n",
+                encoding="utf-8",
+            )
+            (workflows / "target.yml").write_text(
+                "name: Target\non:\n  workflow_call:\njobs:\n"
+                "  work:\n    runs-on: ubuntu-latest\n"
+                f"    permissions:\n      contents: {needed}\n"
+                "    steps:\n      - run: echo ok\n",
+                encoding="utf-8",
+            )
+            checker = guard.WorkflowPermissionChecker(root)
+            return list(checker.check())
+
+    planted = findings(granted="read", needed="write")
+    clean = findings(granted="write", needed="read")
+
+    return Outcome(
+        rejected=bool(planted),
+        accepted=not clean,
+        evidence="; ".join(str(getattr(f, "message", f)) for f in planted),
+        detail="; ".join(str(getattr(f, "message", f)) for f in clean),
+    )
+
+
+def plant_governance_job_contract() -> Outcome:
+    """A required context made to skip must be reported.
+
+    This is the direction `plant_governance_compare` does not cover. That plant
+    exercises `check_repository`, which compares rulesets and merge settings;
+    the workflow contract -- `Governance Root` carries no `if:`, `PR Gate` is
+    `always()` -- lives in `_check_job_contract` and was reached at pull-request
+    time only from `tests/test_governance_compare.py`, which this repository
+    does not protect.
+
+    That mattered because GitHub reports a job skipped by a conditional as
+    *Success*, so a pull request adding `if: false` to a required job turns the
+    gate green rather than red, and the pull request that does it can delete its
+    own detector in the same change set. Both halves were reproduced before this
+    plant was written.
+
+    The plant plants exactly that: the real workflow with a job-level `if:`
+    spliced onto the required job. The clean control is the real workflow
+    unmodified, so a comparator that stopped reading the contract at all fails
+    the accepted side rather than passing quietly.
+    """
+
+    guard = _load("scripts/governance_compare.py")
+    manifest = {
+        "workflow_contracts": [
+            {
+                "context": "Governance Root",
+                "file": ".github/workflows/governance-root.yml",
+                "job_id": "governance-root",
+                "if": None,
+                "needs": [],
+                "routing": {},
+            }
+        ]
+    }
+    path = REPO_ROOT / ".github/workflows/governance-root.yml"
+    clean_source = path.read_text(encoding="utf-8")
+
+    anchor = "  governance-root:\n    name: Governance Root\n"
+    if clean_source.count(anchor) != 1:
+        # The plant addresses a specific two lines. If they move, say so rather
+        # than planting nothing and reporting a pass.
+        return Outcome(
+            rejected=False,
+            accepted=False,
+            evidence="",
+            detail=f"anchor {anchor!r} appears {clean_source.count(anchor)} times",
+        )
+    planted_source = clean_source.replace(
+        anchor, anchor + "    if: ${{ false }}\n"
+    )
+
+    planted_report = guard.Report()
+    guard.check_workflow_contracts(
+        manifest,
+        {".github/workflows/governance-root.yml": planted_source},
+        [],
+        planted_report,
+    )
+
+    clean_report = guard.Report()
+    guard.check_workflow_contracts(
+        manifest,
+        {".github/workflows/governance-root.yml": clean_source},
+        [],
+        clean_report,
+    )
+
+    return Outcome(
+        rejected=bool(planted_report.failures),
+        accepted=not clean_report.failures,
+        evidence="; ".join(planted_report.failures),
+        detail="; ".join(clean_report.failures),
+    )
+
+
+def plant_pr_gate_job_contract() -> Outcome:
+    """`PR Gate` losing `always()` must be reported.
+
+    The sibling of the check above, and not redundant with it: `Governance Root`
+    is contracted to carry *no* `if:` and `PR Gate` to carry `always()`
+    specifically, which are opposite branches of `_check_job_contract`. A
+    comparator that only ever checked "absent" would satisfy the other plant
+    while letting the summary job drop to a condition that never fires.
+
+    `always()` is what makes the gate observe a failed leg at all. Without it a
+    failing dependency skips the gate, and a skipped gate reports Success.
+    """
+
+    guard = _load("scripts/governance_compare.py")
+    manifest = {
+        "workflow_contracts": [
+            {
+                "context": "PR Gate",
+                "file": ".github/workflows/pr.yml",
+                "job_id": "pr-gate",
+                "if": "always()",
+                "needs": ["checks", "classify"],
+                "routing": {},
+            }
+        ]
+    }
+    path = REPO_ROOT / ".github/workflows/pr.yml"
+    clean_source = path.read_text(encoding="utf-8")
+
+    anchor = "    if: always()\n"
+    if clean_source.count(anchor) != 1:
+        return Outcome(
+            rejected=False,
+            accepted=False,
+            evidence="",
+            detail=f"anchor {anchor!r} appears {clean_source.count(anchor)} times",
+        )
+    planted_source = clean_source.replace(anchor, "    if: ${{ false }}\n")
+
+    planted_report = guard.Report()
+    guard.check_workflow_contracts(
+        manifest,
+        {".github/workflows/pr.yml": planted_source},
+        [],
+        planted_report,
+    )
+
+    clean_report = guard.Report()
+    guard.check_workflow_contracts(
+        manifest,
+        {".github/workflows/pr.yml": clean_source},
+        [],
+        clean_report,
+    )
+
+    return Outcome(
+        rejected=bool(planted_report.failures),
+        accepted=not clean_report.failures,
+        evidence="; ".join(planted_report.failures),
+        detail="; ".join(clean_report.failures),
+    )
+
+
 def plant_governance_compare() -> Outcome:
     """A ruleset that drifted from its manifest must be reported.
 
@@ -604,6 +915,66 @@ _ROUTE_PROSE = ("docs/guide.md", "README.md")
 # A governance workflow edit: judged in full by the linters and contract tests,
 # but nothing about it needs the release binary rebuilt.
 _ROUTE_INERT = (".github/workflows/governance-root.yml", "scripts/required-checks.json")
+# Paths whose contents reach the built artifact. The classification table is
+# an allowlist of what is *inert*, so widening that allowlist by one line
+# reroutes everything the new entry covers. `crates/` is the whole product.
+_ROUTE_BUILD = (
+    "crates/jcode/src/main.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "flake.nix",
+)
+
+
+def plant_pr_route_build_inputs() -> Outcome:
+    """A path that reaches the built artifact must keep running the product legs.
+
+    The two plants above cover the classifier exempting *itself* and failing
+    closed on input it does not recognise. Neither covers the table, and the
+    table is the easiest thing in the file to weaken: `INERT_PREFIXES` gaining
+    one entry, `crates/`, reroutes every Rust change to
+    `product_impacting=false`, which skips the Nix package build, the smoke
+    check, the full-test recipe and the release-check step. Every one of those
+    reports success by not running.
+
+    That edit was reproduced against this registry before this plant existed,
+    and the registry reported all claims holding. The only thing that caught it
+    was `tests/test_classify_pr_paths.py`, which this repository does not
+    protect and which the same pull request could have rewritten.
+
+    So the assertion is made here, from a file the protected set covers: the
+    real classifier, on real build inputs, must still route them expensive.
+    """
+
+    guard = _load("scripts/classify_pr_paths.py")
+
+    impacting = {
+        path: guard.classify([path])["product_impacting"] for path in _ROUTE_BUILD
+    }
+    missed = sorted(path for path, hit in impacting.items() if not hit)
+    clean = guard.classify(list(_ROUTE_INERT))
+
+    return Outcome(
+        rejected=not missed,
+        accepted=not clean["product_impacting"],
+        evidence=(
+            "every build input still routes product_impacting=true: "
+            + ", ".join(_ROUTE_BUILD)
+        ),
+        # `detail` is what the runner prints when a plant is accepted, so the
+        # diagnosis has to live here rather than in `evidence`.
+        detail=(
+            f"the classification table now treats these build inputs as inert: "
+            f"{', '.join(missed)}. Widening INERT_PREFIXES or INERT_FILES "
+            f"reroutes them to product_impacting=false, which skips the Nix "
+            f"package build, Smoke, full-test and release-check."
+            if missed
+            else (
+                f"{', '.join(_ROUTE_INERT)} -> product_impacting="
+                f"{str(clean['product_impacting']).lower()} (want false)"
+            )
+        ),
+    )
 
 
 def plant_pr_route_self_exemption() -> Outcome:
@@ -762,6 +1133,12 @@ GUARDS: tuple[Guard, ...] = (
         plant=plant_pr_route_fails_closed,
     ),
     Guard(
+        script="scripts/classify_pr_paths.py::build_inputs",
+        status=GATING,
+        wiring=(),  # same file as above; wiring asserted once
+        plant=plant_pr_route_build_inputs,
+    ),
+    Guard(
         script="scripts/check_advisory_policy.py",
         status=GATING,
         wiring=(
@@ -802,12 +1179,34 @@ GUARDS: tuple[Guard, ...] = (
         script="scripts/governance_compare.py",
         status=GATING,
         wiring=(
+            # The comparator is reached at pull-request time through its test
+            # module, which the `test-python` glob runs and `check` depends on.
+            # It used to be claimed against governance-root.yml, where the
+            # string appears only inside the `protected=(...)` array: the
+            # workflow names the comparator as a protected path and never
+            # executes it. That claim passed because wiring was a substring
+            # test while `_executes` -- three functions away, and mention-aware
+            # -- would have rejected it. Wiring now uses `_executes`, so the
+            # claim has to name a site that runs something.
             Wiring(
-                where=".github/workflows/governance-root.yml",
-                must_contain="scripts/governance_compare.py",
+                where="justfile",
+                recipe="test-python",
+                must_contain="tests/test_*.py",
             ),
         ),
         plant=plant_governance_compare,
+    ),
+    Guard(
+        script="scripts/governance_compare.py::job_contract",
+        status=GATING,
+        wiring=(),  # same file as above; wiring asserted once
+        plant=plant_governance_job_contract,
+    ),
+    Guard(
+        script="scripts/governance_compare.py::pr_gate_contract",
+        status=GATING,
+        wiring=(),  # same file as above; wiring asserted once
+        plant=plant_pr_gate_job_contract,
     ),
     Guard(
         script="scripts/security_preflight.sh",
@@ -835,10 +1234,28 @@ GUARDS: tuple[Guard, ...] = (
     # ------------------------------------------------------------------
     Guard("scripts/check_agent_instructions.py", DORMANT,
           reason="flake check `agent-instructions`; nix.yml builds only nix-distribution-policy"),
-    Guard("scripts/check_reusable_workflow_calls.py", DORMANT,
-          reason="flake check `workflow-syntax`; never built in a PR-blocking job"),
-    Guard("scripts/check_workflow_permissions.py", DORMANT,
-          reason="flake check `workflow-syntax`; never built in a PR-blocking job"),
+    Guard(
+        script="scripts/check_reusable_workflow_calls.py",
+        status=GATING,
+        wiring=(
+            Wiring(
+                where=".github/workflows/nix.yml",
+                must_contain="scripts/check_reusable_workflow_calls.py",
+            ),
+        ),
+        plant=plant_reusable_workflow_calls,
+    ),
+    Guard(
+        script="scripts/check_workflow_permissions.py",
+        status=GATING,
+        wiring=(
+            Wiring(
+                where=".github/workflows/nix.yml",
+                must_contain="scripts/check_workflow_permissions.py",
+            ),
+        ),
+        plant=plant_workflow_permissions,
+    ),
     Guard("scripts/check_ambient_roots.sh", DORMANT,
           reason="referenced only by its own allowlist data file; nothing executes it"),
     Guard("scripts/check_branch_handoff.py", DORMANT,
@@ -849,8 +1266,19 @@ GUARDS: tuple[Guard, ...] = (
           reason="invoked only from scripts/preflight.sh, a developer entry point that no workflow and no justfile recipe runs"),
     Guard("scripts/check_dependency_boundaries.py", DORMANT,
           reason="invoked only from scripts/preflight.sh, a developer entry point that no workflow and no justfile recipe runs"),
-    Guard("scripts/check_docs_references.py", DORMANT,
-          reason="invoked only from scripts/d01_scoreboard.sh, which no workflow runs"),
+    Guard(
+        script="scripts/check_docs_references.py",
+        status=GATING,
+        wiring=(
+            Wiring(
+                where="justfile",
+                recipe="lint-docs",
+                must_contain="scripts/check_docs_references.py",
+            ),
+            Wiring(where=".github/workflows/ci.yml", must_contain="just lint-docs"),
+        ),
+        plant=plant_docs_references,
+    ),
     Guard("scripts/check_env_lease_drop_order.py", DORMANT,
           reason="nothing in the repository references it"),
     Guard("scripts/check_panic_budget.py", DORMANT,
@@ -912,6 +1340,22 @@ def _justfile_recipe_body(source: str, recipe: str) -> str | None:
 
 
 def _check_wiring(guard: Guard) -> list[str]:
+    """Assert every wiring claim names a site that actually runs the guard.
+
+    This used to be `must_contain in source`, a plain substring test, and that
+    is how a GATING claim came to be satisfied by a path sitting in a bash
+    array. `.github/workflows/governance-root.yml` lists
+    `scripts/governance_compare.py` among the paths it *protects*; it has never
+    executed it. The registry read that mention as wiring and reported the
+    comparator gating for as long as the claim existed.
+
+    The asymmetry is the interesting part: `_check_dormancy_is_still_true` was
+    already careful here, using `_executes`, which skips a bare list entry as
+    data. So the registry was rigorous about "dormant but actually running" and
+    credulous about "gating but not actually running" -- the direction where a
+    false claim reads as coverage. Both directions now use the same test.
+    """
+
     failures: list[str] = []
     for wiring in guard.wiring:
         path = REPO_ROOT / wiring.where
@@ -927,15 +1371,21 @@ def _check_wiring(guard: Guard) -> list[str]:
                 )
                 continue
             source = body
+        location = (
+            f"{wiring.where} recipe `{wiring.recipe}`"
+            if wiring.recipe
+            else wiring.where
+        )
         if wiring.must_contain not in source:
-            location = (
-                f"{wiring.where} recipe `{wiring.recipe}`"
-                if wiring.recipe
-                else wiring.where
-            )
             failures.append(
                 f"{guard.script}: {location} no longer invokes "
                 f"{wiring.must_contain!r}; the guard has been unplugged from CI"
+            )
+        elif not _executes(source, wiring.must_contain):
+            failures.append(
+                f"{guard.script}: {location} mentions {wiring.must_contain!r} but "
+                "never executes it -- a name in a list is data, not wiring. Point "
+                "the claim at the line that runs it, or drop the claim."
             )
     return failures
 
@@ -969,8 +1419,14 @@ def _check_registry_covers_every_guard() -> list[str]:
 # Local modules a gating guard is meant to import from `scripts/`. Any other
 # name a gating guard imports must resolve outside `scripts/`; see
 # _check_no_import_shadowing.
+#
+# `governance_compare` is here because the two workflow checkers import its
+# YAML parser as a sibling -- `from governance_compare import
+# WorkflowParseError, parse_workflow`. That is deliberate reuse of one parser
+# rather than a second implementation of it, and it is why those two guards
+# cannot be run under `python3 -I`.
 INTENDED_LOCAL_IMPORTS = frozenset(
-    {"rust_production_filter", "check_guard_nonvacuity"}
+    {"rust_production_filter", "check_guard_nonvacuity", "governance_compare"}
 )
 
 
@@ -1152,8 +1608,6 @@ def _check_dormancy_is_still_true(guard: "Guard") -> list[str]:
             )
             continue
         source = target.read_text(encoding="utf-8")
-        if path == "justfile":
-            source = _justfile_recipe_body(source, "check") or ""
         if _executes(source, guard.script):
             failures.append(
                 f"{guard.script}: registered DORMANT, but {label} references it. "
