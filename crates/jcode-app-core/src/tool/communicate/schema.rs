@@ -149,7 +149,7 @@ pub(super) fn parameters_schema() -> Value {
             "delivery": {
                 "type": "string",
                 "enum": ["notify", "interrupt", "wake"],
-                "description": "Optional delivery mode for dm messaging."
+                "description": "Optional delivery mode for dm/message/broadcast. notify queues the message for the recipient's next turn boundary. interrupt uses the same queued delivery and is semantically urgent, although the queued urgent flag remains false today. wake starts a turn when the recipient is idle, otherwise it queues the message."
             },
             "plan_items": {
                 "type": "array",

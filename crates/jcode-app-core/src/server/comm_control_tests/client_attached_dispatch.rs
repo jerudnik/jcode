@@ -150,6 +150,8 @@ async fn assign_task_to_client_attached_session_skips_server_side_run() {
         Some("finished my turn".to_string()),
         &swarm_members,
         &swarms_by_id,
+        None,
+        None,
         Some(&event_history),
         Some(&event_counter),
         Some(&swarm_event_tx),

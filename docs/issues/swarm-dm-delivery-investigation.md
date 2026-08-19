@@ -51,6 +51,10 @@ honest answer is "`notify` cannot be reliable for a mid-turn recipient and
 fine finding, but then the tool description is misleading and the fix may be
 documentation plus a warning rather than mechanism.
 
+Update 2026-08-19: the notify mechanism is fixed in
+`notify-delivery-reaches-no-agent.md`; the truncation investigation below
+remains open.
+
 ### Defect B: the recipient's copy was truncated
 
 The recipient reported: *"my copy is truncated after the #152 paragraph."* The

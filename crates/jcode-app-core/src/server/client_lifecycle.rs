@@ -785,6 +785,8 @@ pub(super) async fn handle_client(
                                     completion_report,
                                     &swarm_members,
                                     &swarms_by_id,
+                                    Some(&sessions),
+                                    Some(&soft_interrupt_queues),
                                     Some(&event_history),
                                     Some(&event_counter),
                                     Some(&swarm_event_tx),
@@ -1779,10 +1781,6 @@ pub(super) async fn handle_client(
             } => {
                 let pre_resume_session_id = client_session_id.clone();
                 let target_session_id = session_id.clone();
-                let resume_working_dir = {
-                    let agent_guard = agent.lock().await;
-                    agent_guard.working_dir().map(str::to_string)
-                };
                 current_client_instance_id = client_instance_id.clone();
                 {
                     let mut connections = client_connections.write().await;
@@ -1793,7 +1791,7 @@ pub(super) async fn handle_client(
                 agent = handle_resume_session(
                     id,
                     session_id,
-                    resume_working_dir.as_deref(),
+                    None,
                     client_instance_id.as_deref(),
                     client_has_local_history,
                     allow_session_takeover,
@@ -1847,6 +1845,7 @@ pub(super) async fn handle_client(
                 super::client_actions::handle_resume_all_sessions(
                     id,
                     &sessions,
+                    &soft_interrupt_queues,
                     &swarm_members,
                     &swarms_by_id,
                     &event_history,
@@ -2550,6 +2549,8 @@ pub(super) async fn handle_client(
                     tldr,
                     &swarm_members,
                     &swarms_by_id,
+                    Some(&sessions),
+                    Some(&soft_interrupt_queues),
                     Some(&event_history),
                     Some(&event_counter),
                     Some(&swarm_event_tx),

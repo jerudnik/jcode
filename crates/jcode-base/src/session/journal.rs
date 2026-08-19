@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AssistantSessionMeta, EnvSnapshot, SessionImproveMode, SessionStatus, StoredCompactionState,
-    StoredMemoryInjection, StoredMessage, StoredReplayEvent,
+    StoredMemoryInjection, StoredMessage, StoredReplayEvent, WorkingDirSetBy,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,6 +26,10 @@ pub(super) struct SessionJournalMeta {
     pub(super) is_canary: bool,
     pub(super) testing_build: Option<String>,
     pub(super) working_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) working_dir_set_by: Option<WorkingDirSetBy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) working_dir_set_at: Option<DateTime<Utc>>,
     pub(super) short_name: Option<String>,
     pub(super) status: SessionStatus,
     pub(super) last_pid: Option<u32>,
@@ -88,6 +92,8 @@ pub(super) fn metadata_requires_snapshot(
         || prev.is_canary != current.is_canary
         || prev.testing_build != current.testing_build
         || prev.working_dir != current.working_dir
+        || prev.working_dir_set_by != current.working_dir_set_by
+        || prev.working_dir_set_at != current.working_dir_set_at
         || prev.short_name != current.short_name
         || prev.status != current.status
         || prev.is_debug != current.is_debug

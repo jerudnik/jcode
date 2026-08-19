@@ -86,7 +86,10 @@ async fn subscribe_warns_when_reconnect_changes_established_working_dir() -> Res
     let established_dir = established.path().to_string_lossy().to_string();
     {
         let mut guard = agent.lock().await;
-        guard.set_working_dir(&established_dir);
+        guard.set_working_dir_with_source(
+            &established_dir,
+            crate::session::WorkingDirSetBy::Subscribe,
+        );
     }
 
     let reconnect_dir_tmp = tempfile::TempDir::new()?;
@@ -111,11 +114,17 @@ async fn subscribe_warns_when_reconnect_changes_established_working_dir() -> Res
 
     // The rescope is still applied: refusing it would strand the client against
     // a stale directory.
-    let applied = {
+    let (applied, set_by, set_at) = {
         let guard = agent.lock().await;
-        guard.working_dir().map(str::to_string)
+        (
+            guard.working_dir().map(str::to_string),
+            guard.working_dir_set_by(),
+            guard.working_dir_set_at().cloned(),
+        )
     };
     assert_eq!(applied.as_deref(), Some(reconnect_dir.as_str()));
+    assert_eq!(set_by, Some(crate::session::WorkingDirSetBy::Subscribe));
+    assert!(set_at.is_some());
 
     Ok(())
 }
@@ -140,7 +149,10 @@ async fn subscribe_is_quiet_when_working_dir_is_unchanged() -> Result<()> {
     let established_dir = established.path().to_string_lossy().to_string();
     {
         let mut guard = agent.lock().await;
-        guard.set_working_dir(&established_dir);
+        guard.set_working_dir_with_source(
+            &established_dir,
+            crate::session::WorkingDirSetBy::Subscribe,
+        );
     }
 
     let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
@@ -192,7 +204,10 @@ async fn subscribe_records_when_the_working_dir_notice_cannot_be_delivered() -> 
     let established_dir = established.path().to_string_lossy().to_string();
     {
         let mut guard = agent.lock().await;
-        guard.set_working_dir(&established_dir);
+        guard.set_working_dir_with_source(
+            &established_dir,
+            crate::session::WorkingDirSetBy::Subscribe,
+        );
     }
 
     let reconnect_dir_tmp = tempfile::TempDir::new()?;

@@ -449,7 +449,10 @@ impl SelfDevTool {
                         "description": "Action. `build-reload` queues a build and, once it finishes successfully, reloads onto the new binary in one step."
                     },
                     "prompt": { "type": "string" },
-                    "context": { "type": "string" },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional repository path for setup, or task context for reload/build-reload."
+                    },
                     "reason": { "type": "string" },
                     "target": {
                         "type": "string",
@@ -484,6 +487,10 @@ impl SelfDevTool {
                     "prompt": {
                         "type": "string",
                         "description": "Optional task to seed the spawned self-dev session when action=enter."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional repository path for setup, or task context for reload."
                     }
                 },
                 "required": ["action"]
@@ -522,8 +529,8 @@ impl Tool for SelfDevTool {
         let result = match action.as_str() {
             // Available in every session.
             "enter" => self.do_enter(params.prompt, &ctx).await,
-            "setup" => self.do_setup(&ctx).await,
-            "status" => self.do_status().await,
+            "setup" => self.do_setup(&ctx, params.context.as_deref()).await,
+            "status" => self.do_status(&ctx).await,
             "find-config" => self.do_find_config(&ctx).await,
             "reload" => {
                 if is_selfdev {
@@ -648,15 +655,10 @@ impl SelfDevTool {
     }
 
     fn resolve_repo_dir(working_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
-        if let Some(dir) = working_dir {
-            for ancestor in dir.ancestors() {
-                if build::is_jcode_repo(ancestor) {
-                    return Some(ancestor.to_path_buf());
-                }
-            }
+        match working_dir {
+            Some(dir) => build::find_repo_in_ancestors(dir),
+            None => build::get_repo_dir(),
         }
-
-        build::get_repo_dir()
     }
 
     fn launch_binary() -> Result<std::path::PathBuf> {
