@@ -946,6 +946,71 @@ class ForkHealthModeTests(unittest.TestCase):
             cwd=REPO_ROOT,
         )
 
+    def test_live_without_credential_is_exit_two_end_to_end(self) -> None:
+        # The hosted fork-health leg ran for weeks with the guard's exit 2
+        # masked by `tee` (docs/issues/fork-health-false-green.md). The
+        # workflow half of that fix is the pipefail wiring test below; this
+        # half pins the script contract it depends on: with no usable
+        # ruleset-read credential, the whole script must exit 2 and say both
+        # what input was unavailable and that the comparison did not run.
+        env = dict(os.environ)
+        env["FORK_HEALTH_GH"] = "definitely-not-gh"
+        env.pop("GH_TOKEN", None)
+        env.pop("GITHUB_TOKEN", None)
+        result = subprocess.run(
+            [
+                str(FORK_HEALTH),
+                "--live",
+                "--fork-remote",
+                self.fork_remote(),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=REPO_ROOT,
+            env=env,
+        )
+        self.assertEqual(result.returncode, EXIT_ACQUISITION, result.stdout + result.stderr)
+        # Names the unavailable input...
+        self.assertIn("not on PATH", result.stderr)
+        # ...and states that the comparison was not performed.
+        self.assertIn("governance comparison could not be completed", result.stderr)
+        self.assertNotIn("all invariants hold", result.stdout)
+
+    def test_fork_health_workflow_step_fails_when_the_guard_fails(self) -> None:
+        # The historical defect: `scripts/fork-health.sh ... | tee health.txt`
+        # without pipefail reports tee's exit status, so a guard exit 2 read
+        # as job success for 19 consecutive scheduled runs. The fix is one
+        # line (`set -o pipefail` ahead of the pipe, 074f50998); this pins it
+        # where the non-vacuity registry cannot (registry entries name
+        # scripts, and this guard is workflow wiring). Mutation-checked at
+        # authoring time: deleting the pipefail line turns this red.
+        workflow = (REPO_ROOT / ".github" / "workflows" / "fork-health.yml").read_text(
+            encoding="utf-8"
+        )
+        health_steps = [
+            step
+            for step in workflow.split("- name:")
+            if "fork-health.sh" in step and "| tee" in step
+        ]
+        self.assertEqual(
+            len(health_steps),
+            1,
+            "expected exactly one fork-health step that pipes through tee; "
+            "if the pipe is gone this test can be simplified away",
+        )
+        step = health_steps[0]
+        pipefail_at = step.find("set -o pipefail")
+        pipe_at = step.find("| tee")
+        self.assertNotEqual(
+            pipefail_at, -1, "the fork-health step no longer sets pipefail; tee will mask a guard failure"
+        )
+        self.assertLess(
+            pipefail_at,
+            pipe_at,
+            "pipefail must be set before the guard pipeline runs, or tee masks its exit",
+        )
+
     def test_no_source_is_usage_error(self) -> None:
         result = self.run_fork_health("--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_ACQUISITION, result.stdout + result.stderr)
