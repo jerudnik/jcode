@@ -38,6 +38,8 @@ jobs:
             justfile
             scripts/check_guard_nonvacuity.py
             tests/test_guard_nonvacuity.py
+            tests/test_governance_compare.py
+            tests/test_classify_pr_paths.py
           )
           if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
             echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (docs/architecture/GOVERNANCE_DECISIONS.md, 'Ruleset maintenance window')"
