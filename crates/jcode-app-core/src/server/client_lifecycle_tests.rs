@@ -103,12 +103,9 @@ async fn refreshed_session_control_handle_does_not_wait_for_busy_agent_lock() {
 
 #[tokio::test]
 async fn busy_session_background_tool_signal_fires_via_registry_fallback() {
-    // Regression: pressing Alt+B/Ctrl+B while a turn owns the agent mutex (e.g.
-    // running `await_members`) used to silently no-op because the lock-free
-    // `cancel_only` control handle dropped the background-tool signal
-    // (BACKGROUND_TOOL_SIGNAL_FIRE result=no_signal_handle). Building a full
-    // SessionControlHandle now registers the signal in a process-global registry
-    // so the cancel-only fallback can still fire it without the agent lock.
+    // Regression: Alt+B/Ctrl+B used to no-op while a turn owned the agent mutex.
+    // The full handle registers the background signal globally so a cancel-only
+    // fallback can fire it without taking the agent lock.
     let provider: Arc<dyn Provider> = Arc::new(PanicOnForkProvider {
         forked: Arc::new(AtomicBool::new(false)),
     });
@@ -125,8 +122,7 @@ async fn busy_session_background_tool_signal_fires_via_registry_fallback() {
         agent_guard.background_tool_signal()
     };
 
-    // Build a full control handle once (registers the background signal), then
-    // simulate the busy-turn reconnect path which yields a cancel-only handle.
+    // Register a full handle, then simulate the cancel-only reconnect path.
     let stop_signal = InterruptSignal::new();
     let soft_interrupt_queue = Arc::new(std::sync::Mutex::new(Vec::new()));
     let _full = SessionControlHandle::new(
@@ -139,8 +135,7 @@ async fn busy_session_background_tool_signal_fires_via_registry_fallback() {
     let cancel_only =
         SessionControlHandle::cancel_only(session_id, soft_interrupt_queue, stop_signal);
 
-    // The cancel-only handle has no directly-held background signal, yet it must
-    // still fire the registered one.
+    // The cancel-only handle must fire the registered background signal.
     assert!(cancel_only.request_background_current_tool());
     assert!(background_signal.is_set());
 
@@ -247,11 +242,8 @@ async fn cancel_without_local_task_still_signals_session_control() {
     ));
 }
 
-/// Regression for issue #428: the detached-turn cancel path schedules a
-/// deferred reset of the shared stop signal. That reset must be epoch-guarded:
-/// if a newer cancel fires during the reset window (rapid repeated Esc), the
-/// stale timer must not clear it, otherwise the running turn never observes
-/// the interrupt and keeps generating.
+/// Regression for issue #428: an epoch guard prevents a deferred reset from
+/// clearing a newer repeated-Esc cancel before the running turn observes it.
 #[tokio::test]
 async fn deferred_cancel_reset_does_not_erase_newer_cancel() {
     let soft_interrupt_queue = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -394,17 +386,9 @@ impl Drop for IsolatedRuntimeDir {
     }
 }
 
-/// Regression for issue #428: a turn actively streaming in this session but
-/// NOT owned by the cancelling connection (no local task handle: post-reload
-/// reattach, server-initiated wake turns, headless recovery) must abort
-/// promptly even when the control handle's stop signal is a *different
-/// instance* from the streaming agent's own `graceful_shutdown` signal.
-///
-/// Before the fix, `cancel_processing_message` hit the NO_LOCAL_TASK branch,
-/// fired the stale handle-local signal (which nothing was listening to),
-/// emitted `Interrupted` immediately, and the provider stream kept generating
-/// for minutes ("Interrupting..." disappears, model keeps going, eventually
-/// "Interrupted [x66]").
+/// Regression for issue #428: a detached stream must abort even when the
+/// cancelling connection has no local task and holds a stale stop signal.
+/// Previously it emitted `Interrupted` while the provider kept running ("[x66]").
 #[test]
 fn cancel_aborts_detached_streaming_turn_with_stale_stop_signal() -> anyhow::Result<()> {
     let _lock = crate::storage::lock_test_env();
@@ -442,9 +426,7 @@ fn cancel_aborts_detached_streaming_turn_with_stale_stop_signal() -> anyhow::Res
             }
         }
 
-        // Esc arrives on a connection that does not own the task. Its control
-        // handle holds a stop signal instance that is NOT the streaming
-        // agent's graceful_shutdown signal (stale/lost registration).
+        // Esc arrives through a non-owner connection with a stale stop signal.
         let stale_stop_signal = InterruptSignal::new();
         let control = SessionControlHandle::cancel_only(
             session_id,
@@ -521,8 +503,7 @@ struct PanicOnForkProvider {
     forked: Arc<AtomicBool>,
 }
 
-/// Streams text deltas forever (one every 20ms) until dropped. Stands in for
-/// a live provider stream that only stops when the turn observes a cancel.
+/// Streams text forever until dropped, standing in for a provider stopped by cancel.
 struct NeverEndingStreamProvider;
 
 #[async_trait]
@@ -1427,3 +1408,6 @@ async fn incompatible_initial_subscribe_preflights_before_full_session_initializ
 fn decode_request_or_event(line: &str) -> ServerEvent {
     serde_json::from_str(line.trim()).expect("decode server event")
 }
+
+#[path = "client_lifecycle_tests/empty_turn.rs"]
+mod empty_turn;

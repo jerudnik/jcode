@@ -1,3 +1,5 @@
+mod message_intake;
+
 use super::client_actions::{
     AgentTaskContext, NotifySessionContext, handle_agent_task, handle_compact, handle_input_shell,
     handle_notify_session, handle_rename_session, handle_run_subagent, handle_set_feature,
@@ -58,6 +60,7 @@ use crate::transport::Stream;
 use anyhow::Result;
 use futures::FutureExt;
 use jcode_agent_runtime::{InterruptSignal, SoftInterruptSource, StreamError};
+use message_intake::ProcessingMessage;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{
@@ -144,14 +147,6 @@ async fn preflight_initial_incompatible_advertised_subscribe(
     .await?;
     Ok(true)
 }
-
-struct ProcessingMessage {
-    id: u64,
-    content: String,
-    images: Vec<(String, String)>,
-    system_reminder: Option<String>,
-}
-
 struct ProcessingState<'a> {
     client_is_processing: &'a mut bool,
     message_id: &'a mut Option<u64>,
@@ -1136,6 +1131,10 @@ pub(super) async fn handle_client(
                 images,
                 system_reminder,
             } => {
+                if message_intake::is_empty_turn(&content, system_reminder.as_deref(), &images) {
+                    client_event_tx.send(message_intake::empty_turn_error(id))?;
+                    continue;
+                }
                 if !client_is_processing {
                     let mut connections = client_connections.write().await;
                     if let Some(info) = connections.get_mut(&client_connection_id) {
