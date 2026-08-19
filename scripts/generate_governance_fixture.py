@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate a valid governance fixture from the manifest and workflow text.
 
-The retired ideal-base archive used to retain a checked-in fixture under
-`docs/fork/ideal-base/evidence/R07/fixtures/`. That fixture is historical and is
-not restored. This command now writes a current fixture outside the archive for
-offline `scripts/fork-health.sh --fixture` runs.
+Writes a current fixture (default `target/fork-health/governance-valid.json`)
+for offline `scripts/fork-health.sh --fixture` runs. No fixture is checked in;
+the generated file is derived state, rebuilt on demand.
 
 Regenerate after changing the manifest or the required-context workflows:
 
