@@ -20,7 +20,8 @@ mod tests;
 
 pub use ops::{
     ExpandOutcome, GATE_COVERAGE_ENUMERATION_CAP, MAX_EXPANSION_CHILDREN, MAX_EXPANSION_DEPTH,
-    complete_node, expand_node, fail_node, inject_from_gate, requeue_failed, seed, take_over_node,
+    MAX_GATE_INJECTIONS, complete_node, expand_node, fail_node, inject_from_gate, requeue_failed,
+    seed, take_over_node,
 };
 pub use schedule::{
     LIGHT_MODE_SUGGESTED_WORKERS, assemble_input, dispatch, is_terminal, ready_nodes,
@@ -535,9 +536,17 @@ impl std::error::Error for DagError {}
 
 /// The task DAG: a mode plus a set of nodes. Insertion order is preserved for
 /// deterministic iteration; lookups are by id.
+pub const DEFAULT_MAX_GRAPH_NODES: usize = 64;
+
+fn default_graph_node_budget() -> Option<usize> {
+    Some(DEFAULT_MAX_GRAPH_NODES)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGraph {
     pub mode: Mode,
+    #[serde(default = "default_graph_node_budget")]
+    pub max_nodes: Option<usize>,
     nodes: Vec<TaskNode>,
 }
 
@@ -545,6 +554,7 @@ impl TaskGraph {
     pub fn new(mode: Mode) -> Self {
         Self {
             mode,
+            max_nodes: default_graph_node_budget(),
             nodes: Vec::new(),
         }
     }

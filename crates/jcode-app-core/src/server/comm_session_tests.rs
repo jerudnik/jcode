@@ -185,6 +185,8 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
                     ..NodeMeta::default()
                 },
             )]),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
 

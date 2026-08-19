@@ -30,6 +30,24 @@ pub(super) fn resolve_run_plan_concurrency(
     }
 }
 
+/// Return true when graph growth has crossed the next doubling checkpoint.
+/// The caller advances `seed_count` to the next doubling after reporting so a
+/// stable graph does not emit the same checkpoint again.
+pub(super) fn growth_alarm(seed_count: usize, node_count: usize) -> bool {
+    seed_count > 0 && node_count > seed_count.saturating_mul(2)
+}
+
+pub(super) fn advance_growth_alarm_baseline(mut seed_count: usize, node_count: usize) -> usize {
+    while growth_alarm(seed_count, node_count) {
+        let next = seed_count.saturating_mul(2);
+        if next == seed_count {
+            break;
+        }
+        seed_count = next;
+    }
+    seed_count
+}
+
 /// Running tally of how well a `run_plan` drive used its concurrency budget.
 ///
 /// Deep mode's promise is comprehensiveness through parallel fan-out, so a run
@@ -564,6 +582,12 @@ pub(super) async fn run_swarm_plan_loop(
 ) -> Result<ToolOutput> {
     let initial_summary = fetch_plan_status(&ctx.session_id).await?;
     let is_deep = initial_summary.mode.eq_ignore_ascii_case("deep");
+    let initial_seed_count = if initial_summary.seeded_count > 0 {
+        initial_summary.seeded_count
+    } else {
+        initial_summary.item_count.max(1)
+    };
+    let mut growth_alarm_baseline = initial_seed_count;
 
     let configured_deep_cap = crate::config::config().agents.swarm_max_concurrent_agents;
     let concurrency_limit =
@@ -600,6 +624,22 @@ pub(super) async fn run_swarm_plan_loop(
         }
 
         let summary = fetch_plan_status(&ctx.session_id).await?;
+        if growth_alarm(growth_alarm_baseline, summary.item_count) {
+            let message = format!(
+                "Task graph growth checkpoint: seeded {} node(s), now {}. This crossed the next 2x growth threshold. Review `swarm plan_status`; if the new work is not intentional, call `swarm` with `action:\"freeze\"`. Otherwise keep the graph focused and continue.",
+                initial_seed_count, summary.item_count
+            );
+            reporter.checkpoint(&message).await;
+            if let Err(error) = broadcast_plan_alert(ctx, &message).await {
+                reporter
+                    .log(&format!(
+                        "failed to broadcast task-graph growth checkpoint to the swarm: {error}"
+                    ))
+                    .await;
+            }
+            growth_alarm_baseline =
+                advance_growth_alarm_baseline(growth_alarm_baseline, summary.item_count);
+        }
         let completed_before_wave = summary.completed_ids.len();
         if summary.item_count == 0 {
             return Ok(ToolOutput::new("No swarm plan items to run."));

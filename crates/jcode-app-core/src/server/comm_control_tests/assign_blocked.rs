@@ -36,6 +36,8 @@ async fn assign_task_rejects_explicit_blocked_task() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(

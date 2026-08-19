@@ -501,7 +501,15 @@ impl DesktopHotReloader {
             ));
         }
 
-        let worker_relaunch = relaunch.for_app(app, binary).for_app_worker();
+        let worker_relaunch = match relaunch.for_app(app, binary) {
+            Ok(relaunch) => relaunch.for_app_worker(),
+            Err(error) => {
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to prepare app worker for {reason}: {error:#}"
+                ));
+                return;
+            }
+        };
         match worker_relaunch.spawn_app_worker() {
             Ok(mut worker) => {
                 if let Err(error) =
@@ -541,7 +549,15 @@ impl DesktopHotReloader {
         binary: PathBuf,
         reason: &'static str,
     ) -> bool {
-        let relaunch = relaunch.for_app(app, binary);
+        let relaunch = match relaunch.for_app(app, binary) {
+            Ok(relaunch) => relaunch,
+            Err(error) => {
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to prepare {reason} desktop: {error:#}"
+                ));
+                return false;
+            }
+        };
         match relaunch.spawn_for_window(window) {
             Ok(Some(handoff)) => {
                 self.pending_handoff = Some(handoff);
@@ -670,13 +686,11 @@ impl DesktopRelaunch {
         Ok(handoff.as_ref().map(DesktopReloadHandoff::watcher))
     }
 
-    pub(crate) fn for_app(&self, app: &DesktopApp, binary: PathBuf) -> Self {
+    pub(crate) fn for_app(&self, app: &DesktopApp, binary: PathBuf) -> Result<Self> {
         if let DesktopApp::Workspace(workspace) = app
             && let Err(error) = desktop_prefs::save_preferences(&workspace.preferences())
         {
-            desktop_log::error(format_args!(
-                "jcode-desktop: failed to persist workspace state before hot reload: {error:#}"
-            ));
+            return Err(error).context("failed to persist workspace state before hot reload");
         }
 
         let mut args = desktop_args_without_resume(&self.args);
@@ -689,7 +703,7 @@ impl DesktopRelaunch {
                 }
             }
         }
-        Self { binary, args }
+        Ok(Self { binary, args })
     }
 
     pub(crate) fn for_app_worker(&self) -> Self {

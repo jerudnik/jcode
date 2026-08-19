@@ -241,6 +241,31 @@ pub const MAX_EXPANSION_DEPTH: usize = 2;
 /// remain reachable; the depth cap is the primary recursion guard.
 pub const MAX_EXPANSION_CHILDREN: usize = 24;
 
+/// Maximum number of gap nodes one gate may inject across all of its runs.
+/// Gate dependencies retain injected node ids and each injected node retains
+/// [`NodeOrigin::Gap`], so the quota survives plan round-trips without separate
+/// mutable accounting. Once exhausted, the gate must pass with its remaining
+/// doubts recorded or escalate them to the coordinator.
+pub const MAX_GATE_INJECTIONS: usize = 3;
+
+fn ensure_node_budget(
+    graph: &TaskGraph,
+    incoming: usize,
+    operation: &str,
+    alternative: &str,
+) -> Result<(), DagError> {
+    let Some(max_nodes) = graph.max_nodes else {
+        return Ok(());
+    };
+    let remaining = max_nodes.saturating_sub(graph.len());
+    if incoming > remaining {
+        return Err(DagError::GateMisuse(format!(
+            "graph node budget is {max_nodes}, with {remaining} nodes remaining; {operation} would add {incoming}. {alternative}"
+        )));
+    }
+    Ok(())
+}
+
 fn node_depth(graph: &TaskGraph, node_id: &str) -> usize {
     let mut depth = 0;
     let mut current = graph.get(node_id).and_then(|node| node.parent.clone());
@@ -301,6 +326,13 @@ pub fn expand_node(
                 children.len()
             )));
         }
+        let incoming = children.len() + usize::from(graph.mode.requires_gates());
+        ensure_node_budget(
+            graph,
+            incoming,
+            &format!("expanding '{node_id}'"),
+            "Do the work directly or ask the coordinator to raise the graph budget.",
+        )?;
     }
 
     // Validate child ids and dependency references. Collect the validated ids
@@ -543,6 +575,28 @@ pub fn inject_from_gate(
                 "inject_from_gate requires at least one new node".into(),
             ));
         }
+        let existing_injections = gate
+            .depends_on
+            .iter()
+            .filter(|dependency| {
+                graph
+                    .get(dependency)
+                    .is_some_and(|node| node.origin == Some(NodeOrigin::Gap))
+            })
+            .count();
+        let remaining = MAX_GATE_INJECTIONS.saturating_sub(existing_injections);
+        if new_nodes.len() > remaining {
+            return Err(DagError::GateMisuse(format!(
+                "gate '{gate_id}' has {remaining} injection slots remaining (quota {MAX_GATE_INJECTIONS}) but proposed {} nodes; pass the gate recording remaining doubts in open_questions, or escalate to the coordinator",
+                new_nodes.len()
+            )));
+        }
+        ensure_node_budget(
+            graph,
+            new_nodes.len(),
+            &format!("gate '{gate_id}' injection"),
+            "Pass the gate recording remaining doubts in open_questions, or escalate to the coordinator.",
+        )?;
         gate.parent.clone()
     };
 

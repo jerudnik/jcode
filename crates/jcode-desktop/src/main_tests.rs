@@ -377,7 +377,9 @@ fn desktop_hot_reload_rewrites_resume_to_live_session() {
     single_session.initialize_resumed_session("live-session");
     let app = DesktopApp::SingleSession(single_session);
 
-    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
+    let updated = relaunch
+        .for_app(&app, PathBuf::from("/new/jcode-desktop"))
+        .expect("relaunch should persist preferences");
 
     assert_eq!(updated.binary, PathBuf::from("/new/jcode-desktop"));
     assert_eq!(
@@ -402,16 +404,18 @@ fn desktop_hot_reload_drops_resume_when_current_app_is_fresh() {
     };
     let app = fresh_single_session_app();
 
-    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
+    let updated = relaunch
+        .for_app(&app, PathBuf::from("/new/jcode-desktop"))
+        .expect("relaunch should persist preferences");
 
     assert_eq!(updated.args, vec![OsString::from("--fullscreen")]);
 }
 
 #[test]
 fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
-    let Ok(_guard) = DESKTOP_PREFS_ENV_LOCK.lock() else {
-        anyhow::bail!("desktop hot reload env lock poisoned");
-    };
+    let _guard = DESKTOP_PREFS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let temp = unique_desktop_test_dir("desktop-hot-reload-workspace-state")?;
     let state_path = temp.join("desktop-state.json");
     unsafe {
@@ -451,7 +455,7 @@ fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
     });
     let app = DesktopApp::Workspace(workspace);
 
-    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
+    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"))?;
 
     assert_eq!(updated.args, vec![OsString::from("--workspace")]);
     let saved = desktop_prefs::load_preferences()?.expect("workspace preferences saved");
@@ -468,9 +472,9 @@ fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
 
 #[test]
 fn desktop_hot_reload_restarts_default_launched_workspace_as_workspace() -> Result<()> {
-    let Ok(_guard) = DESKTOP_PREFS_ENV_LOCK.lock() else {
-        anyhow::bail!("desktop hot reload env lock poisoned");
-    };
+    let _guard = DESKTOP_PREFS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let temp = unique_desktop_test_dir("desktop-hot-reload-default-workspace")?;
     let state_path = temp.join("desktop-state.json");
     unsafe {
@@ -492,7 +496,7 @@ fn desktop_hot_reload_restarts_default_launched_workspace_as_workspace() -> Resu
         },
     ]));
 
-    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
+    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"))?;
 
     assert_eq!(updated.binary, PathBuf::from("/new/jcode-desktop"));
     assert_eq!(updated.args, vec![OsString::from("--workspace")]);

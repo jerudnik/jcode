@@ -35,6 +35,8 @@ async fn task_control_wake_returns_structured_response_with_plan_summary() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -126,6 +128,8 @@ async fn task_control_resume_without_task_id_uses_unique_target_assignment() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -213,6 +217,8 @@ async fn task_control_without_task_id_rejects_ambiguous_target_assignments() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -310,6 +316,8 @@ async fn task_control_resume_busy_agent_rejects_without_mutating_plan() {
             task_progress: HashMap::from([("busy-task".to_string(), prior_progress.clone())]),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -412,6 +420,8 @@ async fn requeue_existing_assignment_preserves_prior_progress_history() {
             )]),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
 
@@ -506,6 +516,8 @@ async fn task_control_retry_re_dispatches_after_recent_identical_retry() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(

@@ -260,7 +260,7 @@ pub struct NodeMeta {
 }
 
 /// Versioned shared swarm plan state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VersionedPlan {
     pub items: Vec<PlanItem>,
     pub version: u64,
@@ -273,6 +273,13 @@ pub struct VersionedPlan {
     pub mode: String,
     /// Per-node task-DAG metadata keyed by plan item id.
     pub node_meta: HashMap<String, NodeMeta>,
+    /// Optional graph node cap. Legacy plans omit this and use the engine default
+    /// when lifted through the DAG bridge.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_nodes: Option<usize>,
+    /// When true, server policy rejects graph-seeding and graph-growth verbs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub frozen: bool,
 }
 
 impl VersionedPlan {
@@ -284,6 +291,8 @@ impl VersionedPlan {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         }
     }
 
@@ -1365,5 +1374,21 @@ mod tests {
         );
         // Would panic on a broken char boundary.
         let _ = summary.chars().count();
+    }
+
+    #[test]
+    fn versioned_plan_without_budget_or_freeze_fields_deserializes() {
+        let json = r#"{
+            "items": [],
+            "version": 7,
+            "participants": [],
+            "task_progress": {},
+            "mode": "deep",
+            "node_meta": {}
+        }"#;
+
+        let plan: VersionedPlan = serde_json::from_str(json).unwrap();
+        assert_eq!(plan.max_nodes, None);
+        assert!(!plan.frozen);
     }
 }

@@ -577,6 +577,55 @@ fn gate_injection_reblocks_composite_until_gap_drains() {
 }
 
 #[test]
+fn gate_injection_quota_rejects_after_max() {
+    let mut g = dag(Mode::Deep, vec![spec("root", NodeKind::Explore)]);
+    dispatch(&mut g, "root", "planner");
+    let outcome = expand_node(
+        &mut g,
+        "root",
+        "planner",
+        vec![spec("child", NodeKind::Explore)],
+    )
+    .unwrap();
+    let gate_id = outcome.gate_id.unwrap();
+
+    dispatch(&mut g, "child", "worker");
+    complete_node(&mut g, "child", "worker", sim::deep_artifact("child done")).unwrap();
+
+    for injection in 0..3 {
+        dispatch(&mut g, &gate_id, "critic");
+        let gap_id = format!("gap-{injection}");
+        inject_from_gate(
+            &mut g,
+            &gate_id,
+            "critic",
+            vec![spec(&gap_id, NodeKind::Explore)],
+        )
+        .unwrap();
+        dispatch(&mut g, &gap_id, "worker");
+        complete_node(&mut g, &gap_id, "worker", sim::deep_artifact("gap covered")).unwrap();
+    }
+
+    dispatch(&mut g, &gate_id, "critic");
+    let err = inject_from_gate(
+        &mut g,
+        &gate_id,
+        "critic",
+        vec![spec("gap-3", NodeKind::Explore)],
+    )
+    .expect_err("a gate must not inject beyond its quota");
+    let message = err.to_string();
+    assert!(
+        message.contains("open_questions"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("coordinator"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
 fn inject_from_gate_rejects_non_gate_node() {
     let mut g = dag(Mode::Deep, vec![spec("a", NodeKind::Explore)]);
     dispatch(&mut g, "a", "w0");
@@ -1481,4 +1530,41 @@ fn expansion_width_cap_blocks_shrapnel_fanout() {
         .map(|i| spec(&format!("root.k{i}"), NodeKind::Explore))
         .collect();
     expand_node(&mut g, "root", "w0", children).unwrap();
+}
+
+#[test]
+fn node_budget_rejects_expansion_past_cap() {
+    let mut g = dag(
+        Mode::Light,
+        vec![
+            spec("root", NodeKind::Explore),
+            spec("other", NodeKind::Explore),
+        ],
+    );
+    g.max_nodes = Some(10);
+
+    dispatch(&mut g, "root", "planner");
+    let children: Vec<NodeSpec> = (0..8)
+        .map(|i| spec(&format!("root.{i}"), NodeKind::Explore))
+        .collect();
+    expand_node(&mut g, "root", "planner", children).unwrap();
+    assert_eq!(g.len(), 10);
+
+    dispatch(&mut g, "other", "planner");
+    let err = expand_node(
+        &mut g,
+        "other",
+        "planner",
+        vec![spec("other.child", NodeKind::Explore)],
+    )
+    .expect_err("expansion past the graph budget must be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("0 nodes remaining"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("Do the work directly"),
+        "unexpected error: {message}"
+    );
 }
