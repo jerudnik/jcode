@@ -36,12 +36,22 @@ impl SetupCheck {
 }
 
 fn repository_revision(path: &std::path::Path) -> String {
-    Command::new("git")
+    let output = match Command::new("git")
         .arg("-C")
         .arg(path)
         .args(["rev-parse", "--short", "HEAD"])
         .output()
-        .ok()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            crate::logging::info(&format!(
+                "selfdev setup: could not read revision of {}: {error}",
+                path.display()
+            ));
+            return "unknown".to_string();
+        }
+    };
+    Some(output)
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .filter(|revision| !revision.is_empty())
