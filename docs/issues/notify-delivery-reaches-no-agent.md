@@ -1,6 +1,6 @@
 ---
 title: DM delivery mode notify reaches no agent-visible surface
-status: open
+status: partial
 priority: high
 owner: unassigned
 opened: 2026-08-18
@@ -8,12 +8,34 @@ opened: 2026-08-18
 
 # DM delivery mode notify reaches no agent-visible surface
 
+## Fix implemented
+
+On 2026-08-19, option 2 was implemented. `notify` now queues the same non-urgent
+system soft interrupt as `interrupt`, so the recipient model receives the
+message at its next turn boundary without starting a turn. This also fixes
+broadcasts with no explicit delivery mode because broadcasts default to
+`notify`.
+
+Worker completion reports now keep their `ServerEvent::Notification` for
+clients and also queue the report for the owning coordinator's next turn. The
+consumer test checks both paths separately, so accepting an event on a discarded
+headless channel cannot count as model delivery.
+
+Regression coverage:
+
+- `comm_message_notify_to_headless_member_queues_for_next_turn`
+- `comm_message_default_broadcast_to_headless_member_queues_for_next_turn`
+- `update_member_status_includes_completion_report_in_owner_notification`
+
+The investigation history below is retained for review. The separate long-body
+truncation and TUI rendering questions remain outside this fix.
+
 ## Summary
 
-A swarm message sent with `delivery: notify` performs **no delivery action
-toward the recipient agent at all**. It emits one `ServerEvent::Notification`
-on the recipient's client channel and returns success. Nothing is queued for
-the recipient's model, and no turn is started.
+Before the fix, a swarm message sent with `delivery: notify` performed **no
+delivery action toward the recipient agent at all**. It emitted one
+`ServerEvent::Notification` on the recipient's client channel and returned
+success. Nothing was queued for the recipient's model, and no turn was started.
 
 For a **headless** swarm member that channel is drained by a discard loop, so
 the send succeeds, the fanout counts a delivery, the sender's tool reports

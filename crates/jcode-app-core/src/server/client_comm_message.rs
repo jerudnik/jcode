@@ -280,8 +280,7 @@ pub(super) async fn handle_comm_message(
                 };
 
                 match delivery_mode {
-                    CommDeliveryMode::Notify => {}
-                    CommDeliveryMode::Interrupt => {
+                    CommDeliveryMode::Notify | CommDeliveryMode::Interrupt => {
                         let _ = queue_soft_interrupt_for_session(
                             session_id,
                             notification_msg.clone(),
@@ -304,7 +303,8 @@ pub(super) async fn handle_comm_message(
                                 &swarm_events.history,
                                 &swarm_events.counter,
                                 &swarm_events.tx,
-                            ),
+                            )
+                            .with_delivery(sessions, soft_interrupt_queues),
                         )
                         .await;
 
@@ -337,7 +337,8 @@ pub(super) async fn handle_comm_message(
                                         &swarm_events.history,
                                         &swarm_events.counter,
                                         &swarm_events.tx,
-                                    ),
+                                    )
+                                    .with_delivery(sessions, soft_interrupt_queues),
                                 );
                             }
                         }

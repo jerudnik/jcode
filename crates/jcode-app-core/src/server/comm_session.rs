@@ -891,6 +891,8 @@ pub(super) async fn spawn_swarm_agent(
             let fallback_detail_for_status = fallback_detail.clone();
             let swarm_members2 = Arc::clone(swarm_members);
             let swarms_by_id2 = Arc::clone(swarms_by_id);
+            let sessions2 = Arc::clone(sessions);
+            let soft_interrupt_queues2 = Arc::clone(soft_interrupt_queues);
             let event_history2 = Arc::clone(event_history);
             let event_counter2 = Arc::clone(event_counter);
             let swarm_event_tx2 = swarm_event_tx.clone();
@@ -967,6 +969,8 @@ pub(super) async fn spawn_swarm_agent(
                     completion_report,
                     &swarm_members2,
                     &swarms_by_id2,
+                    Some(&sessions2),
+                    Some(&soft_interrupt_queues2),
                     Some(&event_history2),
                     Some(&event_counter2),
                     Some(&swarm_event_tx2),

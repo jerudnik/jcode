@@ -7,7 +7,10 @@ use super::{
 };
 use crate::plan::PlanItem;
 use crate::protocol::{NotificationType, ServerEvent};
-use crate::server::{SwarmMember, VersionedPlan};
+use crate::server::{
+    SessionAgents, SessionInterruptQueues, SwarmMember, VersionedPlan,
+    register_session_interrupt_queue,
+};
 use jcode_swarm_core::{
     append_swarm_completion_report_instructions, summarize_plan_items, truncate_detail,
 };
@@ -979,6 +982,10 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
     )])));
 
     let (coord, mut coord_rx) = swarm_member("coord", "coordinator", false);
+    let coord_queue = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sessions: SessionAgents = Arc::new(RwLock::new(HashMap::new()));
+    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    register_session_interrupt_queue(&soft_interrupt_queues, "coord", coord_queue.clone()).await;
     let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
     worker.status = "running".to_string();
     worker.report_back_to_session_id = Some("coord".to_string());
@@ -995,6 +1002,8 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
         Some("Validated the parser and all tests passed.".to_string()),
         &swarm_members,
         &swarms_by_id,
+        Some(&sessions),
+        Some(&soft_interrupt_queues),
         None,
         None,
         None,
@@ -1013,6 +1022,21 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
                 && !message.contains("No final textual report")
         )
     }));
+    let pending = coord_queue.lock().expect("queue lock");
+    assert_eq!(
+        pending.len(),
+        1,
+        "completion report must reach the coordinator's next turn boundary, but the queue held {:?}",
+        pending
+            .iter()
+            .map(|message: &jcode_agent_runtime::SoftInterruptMessage| message.content.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        pending[0].content.contains("Report:\nValidated the parser"),
+        "completion report queued the wrong body: {:?}",
+        pending[0].content
+    );
 }
 
 #[tokio::test]
