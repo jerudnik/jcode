@@ -1,20 +1,11 @@
-// Propagation: does the directory a client started in leak into every session
-// that client later resumes?
+// Ownership: does each dormant session keep the directory recorded when the
+// client later resumes it?
 //
 // `Request::ResumeSession` carries no working directory, so the server has to
 // source one. `client_lifecycle.rs` has two resume call sites and they source
 // it differently. The subscribe-time site passes the directory the client
-// declared. The in-session site reads it off the agent the client is
-// *currently attached to*:
-//
-//     let resume_working_dir = {
-//         let agent_guard = agent.lock().await;
-//         agent_guard.working_dir().map(str::to_string)
-//     };
-//
-// After a resume that agent *is* the session just resumed, so the rewrite
-// characterized in `dormant_working_dir.rs` chains down the whole chain of
-// resumes.
+// declared. The in-session site must pass no override because the resumed
+// session owns its recorded directory.
 //
 // This test drives the real server loop — `handle_client` over a socket pair,
 // the same seam `client_lifecycle_tests.rs` uses — rather than replicating the
@@ -22,15 +13,16 @@
 // sentinels, none of which can coincide with each other or with anything else
 // in the harness.
 
+use crate::protocol::ServerEvent;
+use crate::server::await_members_state::AwaitMembersRuntime;
 use crate::server::client_lifecycle::handle_client;
+use crate::server::swarm_mutation_state::SwarmMutationRuntime;
 use crate::server::{
     ClientDebugState, FileTouchService, SessionAgents, SwarmEventState, SwarmState,
 };
-use crate::server::await_members_state::AwaitMembersRuntime;
-use crate::server::swarm_mutation_state::SwarmMutationRuntime;
 use jcode_protocol::Request;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 const PROP_CLIENT_STARTED_IN: &str = "/sentinel/client/started/in";
 const PROP_A_ROOTED_AT: &str = "/sentinel/first/resumed/rooted/at";
@@ -94,7 +86,8 @@ async fn prop_drive_two_resumes(
     prop_seed_dormant(session_a, PROP_A_ROOTED_AT)?;
     prop_seed_dormant(session_b, PROP_B_CREATED_IN)?;
 
-    let (server_stream, client_stream) = crate::transport::Stream::pair().map_err(|e| anyhow!(e))?;
+    let (server_stream, client_stream) =
+        crate::transport::Stream::pair().map_err(|e| anyhow!(e))?;
     let provider_template: Arc<dyn Provider> = Arc::new(MockProvider);
 
     let sessions: SessionAgents = Arc::new(RwLock::new(HashMap::new()));
@@ -137,8 +130,9 @@ async fn prop_drive_two_resumes(
 
     let (client_reader, mut client_writer) = client_stream.into_split();
 
-    // Drain the server's event stream so a full socket buffer can never stall
-    // the very resumes under test.
+    // Drain the server's event stream and report completed request ids so the
+    // stored-directory assertions cannot pass merely because a resume stalled.
+    let (done_tx, mut done_rx) = mpsc::unbounded_channel();
     let drain = tokio::spawn(async move {
         let mut reader = BufReader::new(client_reader);
         let mut line = String::new();
@@ -146,7 +140,11 @@ async fn prop_drive_two_resumes(
             line.clear();
             match reader.read_line(&mut line).await {
                 Ok(0) | Err(_) => break,
-                Ok(_) => {}
+                Ok(_) => {
+                    if let Ok(ServerEvent::Done { id }) = serde_json::from_str(line.trim()) {
+                        let _ = done_tx.send(id);
+                    }
+                }
             }
         }
     });
@@ -161,18 +159,15 @@ async fn prop_drive_two_resumes(
             .write_all(payload.as_bytes())
             .await
             .map_err(|e| anyhow!(e))?;
-        // Let each request settle before the next: the propagation under test
-        // is ordered, and interleaving would make the result ambiguous.
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
-    }
-
-    // Wait for B to be rewritten, but bound the wait so a call site that never
-    // rewrites it fails the assertion instead of hanging.
-    for _ in 0..80 {
-        if prop_stored_dir(session_b).as_deref() != Some(PROP_B_CREATED_IN) {
-            break;
+        loop {
+            let done_id = tokio::time::timeout(std::time::Duration::from_secs(5), done_rx.recv())
+                .await
+                .map_err(|_| anyhow!("timed out waiting for request completion"))?
+                .ok_or_else(|| anyhow!("server event stream closed before request completion"))?;
+            if done_id == request.id() {
+                break;
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     let a_dir = prop_stored_dir(session_a);
@@ -185,11 +180,9 @@ async fn prop_drive_two_resumes(
     Ok((a_dir, b_dir))
 }
 
-/// A directory the client never named for either session ends up recorded on
-/// both of them, purely because the client was attached to something rooted
-/// there when it resumed.
+/// Each dormant session keeps its recorded directory when resumed in-session.
 #[tokio::test]
-async fn resuming_two_sessions_propagates_the_clients_working_dir_to_both() -> Result<()> {
+async fn resuming_two_sessions_preserves_each_sessions_recorded_working_dir() -> Result<()> {
     let _guard = crate::storage::lock_test_env();
     let (_runtime, prev_runtime) = setup_runtime_dir()?;
 
@@ -199,24 +192,18 @@ async fn resuming_two_sessions_propagates_the_clients_working_dir_to_both() -> R
     restore_runtime_dir(prev_runtime);
     let (a_dir, b_dir) = result?;
 
-    // Link one: resuming A re-roots it at the client's directory.
     assert_eq!(
         a_dir.as_deref(),
-        Some(PROP_CLIENT_STARTED_IN),
-        "resuming a session rooted at {PROP_A_ROOTED_AT} from a client started \
-         in {PROP_CLIENT_STARTED_IN} should re-root it there"
+        Some(PROP_A_ROOTED_AT),
+        "resuming from a client started in {PROP_CLIENT_STARTED_IN} must keep \
+         the session's recorded directory {PROP_A_ROOTED_AT}"
     );
 
-    // Link two: the next resume inherits that same directory, even though the
-    // client named neither session's directory and B was created somewhere
-    // else entirely.
     assert_eq!(
         b_dir.as_deref(),
-        Some(PROP_CLIENT_STARTED_IN),
-        "a second resume should carry {PROP_CLIENT_STARTED_IN} onward rather \
-         than leaving {PROP_B_CREATED_IN} intact: the override is sourced from \
-         the agent the client is attached to, which is now the first resumed \
-         session"
+        Some(PROP_B_CREATED_IN),
+        "a second resume must keep {PROP_B_CREATED_IN} instead of inheriting \
+         {PROP_CLIENT_STARTED_IN} from the client or the first resumed session"
     );
 
     Ok(())

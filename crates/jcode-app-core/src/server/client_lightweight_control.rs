@@ -488,6 +488,8 @@ pub(super) async fn handle_lightweight_control_request(
                 tldr,
                 swarm_members,
                 swarms_by_id,
+                Some(sessions),
+                Some(soft_interrupt_queues),
                 Some(event_history),
                 Some(event_counter),
                 Some(swarm_event_tx),

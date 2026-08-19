@@ -1,5 +1,8 @@
-use super::state::{MAX_EVENT_HISTORY, fanout_session_event};
-use super::{SwarmEvent, SwarmEventType, SwarmMember, SwarmState, VersionedPlan};
+use super::state::{MAX_EVENT_HISTORY, fanout_session_event, queue_soft_interrupt_for_session};
+use super::{
+    SessionAgents, SessionInterruptQueues, SwarmEvent, SwarmEventType, SwarmMember, SwarmState,
+    VersionedPlan,
+};
 use super::{persist_swarm_state_for, remove_persisted_swarm_state_for};
 use crate::agent::Agent;
 use crate::plan::{PlanItem, newly_ready_item_ids};
@@ -7,6 +10,7 @@ use crate::protocol::{NotificationType, ServerEvent};
 use crate::tool::subagent::{SubagentParent, run_subagent_worker};
 use anyhow::Result;
 use futures::future::try_join_all;
+use jcode_agent_runtime::SoftInterruptSource;
 use jcode_swarm_core::{
     completion_notification_message, normalize_completion_report, truncate_detail,
 };
@@ -371,6 +375,8 @@ pub(in crate::server) async fn update_member_status(
         None,
         swarm_members,
         swarms_by_id,
+        None,
+        None,
         event_history,
         event_counter,
         swarm_event_tx,
@@ -389,6 +395,8 @@ pub(in crate::server) async fn update_member_status_with_report(
     completion_report: Option<String>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    sessions: Option<&SessionAgents>,
+    soft_interrupt_queues: Option<&SessionInterruptQueues>,
     event_history: Option<&Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>>,
     event_counter: Option<&Arc<std::sync::atomic::AtomicU64>>,
     swarm_event_tx: Option<&tokio_broadcast::Sender<SwarmEvent>>,
@@ -401,6 +409,8 @@ pub(in crate::server) async fn update_member_status_with_report(
         None,
         swarm_members,
         swarms_by_id,
+        sessions,
+        soft_interrupt_queues,
         event_history,
         event_counter,
         swarm_event_tx,
@@ -420,6 +430,8 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
     report_tldr: Option<String>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    sessions: Option<&SessionAgents>,
+    soft_interrupt_queues: Option<&SessionInterruptQueues>,
     event_history: Option<&Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>>,
     event_counter: Option<&Arc<std::sync::atomic::AtomicU64>>,
     swarm_event_tx: Option<&tokio_broadcast::Sender<SwarmEvent>>,
@@ -581,10 +593,23 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
                             scope: Some("swarm".to_string()),
                             tldr: report_tldr.clone(),
                         },
-                        message: msg,
+                        message: msg.clone(),
                     },
                 )
                 .await;
+                if let (Some(sessions), Some(soft_interrupt_queues)) =
+                    (sessions, soft_interrupt_queues)
+                {
+                    let _ = queue_soft_interrupt_for_session(
+                        &recipient_session_id,
+                        msg,
+                        false,
+                        SoftInterruptSource::System,
+                        soft_interrupt_queues,
+                        sessions,
+                    )
+                    .await;
+                }
             }
         }
     }

@@ -662,6 +662,7 @@ async fn resume_all_continues_interrupted_idle_live_session() {
         session_id.clone(),
         agent.clone(),
     )])));
+    let soft_interrupt_queues = Arc::new(RwLock::new(HashMap::new()));
     let (member, mut attach_rx) = live_member(&session_id);
     let swarm_members = Arc::new(RwLock::new(HashMap::from([(session_id.clone(), member)])));
     let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
@@ -670,6 +671,7 @@ async fn resume_all_continues_interrupted_idle_live_session() {
     handle_resume_all_sessions(
         91,
         &sessions,
+        &soft_interrupt_queues,
         &swarm_members,
         &swarms_by_id,
         &event_history,
@@ -764,6 +766,7 @@ async fn resume_all_skips_session_with_completed_turn() {
         session_id.clone(),
         agent.clone(),
     )])));
+    let soft_interrupt_queues = Arc::new(RwLock::new(HashMap::new()));
     let (member, _attach_rx) = live_member(&session_id);
     let swarm_members = Arc::new(RwLock::new(HashMap::from([(session_id.clone(), member)])));
     let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
@@ -772,6 +775,7 @@ async fn resume_all_skips_session_with_completed_turn() {
     handle_resume_all_sessions(
         92,
         &sessions,
+        &soft_interrupt_queues,
         &swarm_members,
         &swarms_by_id,
         &event_history,
