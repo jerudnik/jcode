@@ -35,18 +35,39 @@ The distinction that matters: `provider-confusion.md` Path A made the resolver
 a policy gate. A name that resolves perfectly well but violates the operator's
 routing policy still spawns.
 
-## What is NOT established
+## The one decision this needs
 
-- Whether enforcement is wanted at all, or whether advisory routing is the
-  deliberate design. An agent choosing a cheaper model for mechanical work is
-  the intended behaviour; the question is whether *any* choice should be
-  refusable.
-- What the policy vocabulary should be. Candidates: an allowlist per role
-  (ambient, swarm, subagent, coordinator), a cost or capability class rather
-  than named models, or a refusal only for models the operator has explicitly
-  denied.
-- Whether refusal should be hard, or a warning that still spawns and records
-  the divergence.
+Everything else follows from it: **should a resolvable model ever be
+refused?**
+
+- **No.** Then close this issue. Record the decision and delete the file; the
+  advisory prose is the design, not a gap.
+- **Yes.** Then the smallest useful version is a deny list, not an allowlist.
+  A deny list needs no per-role vocabulary, no capability classes, and no
+  agreement on what "mechanical work" means. It expresses the concrete thing
+  that has actually gone wrong: a model the operator does not want used at
+  all, used anyway.
+
+Start there and let the interface work decide whether anything richer earns
+its place. An allowlist per role (ambient, swarm, subagent, coordinator) and
+capability or cost classes are the richer options, but each needs a vocabulary
+that does not exist yet.
+
+## First slice, if the answer is yes
+
+1. Add a config key holding denied model identities. Route-prefixed form, so
+   `cursor:gpt-5.6-sol-high` and a bare `gpt-5.6-sol` are distinguishable.
+2. Check it in `resolve_swarm_spawn_selection` beside the existing
+   fail-closed branch, so both refusals share one error path and one message
+   shape.
+3. Refuse hard rather than warn. A warning that still spawns reproduces the
+   `provider-confusion` failure: the operator believes one thing while
+   another runs. That incident is the argument against soft failure.
+4. Apply the same check to `subagent`, which reconstructs selection from
+   inherited parent route state and is listed as a deferred follow-up in
+   `provider-confusion.md`.
+
+The test that must fail first: a spawn naming a denied model succeeds today.
 
 ## Relationship to the model picker work
 
