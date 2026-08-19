@@ -68,7 +68,8 @@ pub(super) async fn dispatch_background_task_completion(
                 event_history,
                 event_counter,
                 swarm_event_tx,
-            ),
+            )
+            .with_delivery(sessions, soft_interrupt_queues),
         )
         .await
         && !queue_soft_interrupt_for_session(
@@ -147,7 +148,8 @@ pub(super) async fn dispatch_swarm_await_completion(
             event_history,
             event_counter,
             swarm_event_tx,
-        ),
+        )
+        .with_delivery(sessions, soft_interrupt_queues),
     )
     .await
         && !queue_soft_interrupt_for_session(

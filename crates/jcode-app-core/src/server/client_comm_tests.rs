@@ -1,9 +1,9 @@
-use crate::server::client_comm_message::resolve_comm_delivery_mode;
 use super::{handle_comm_list, handle_comm_message};
 use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
 use crate::protocol::{CommDeliveryMode, NotificationType, ServerEvent};
 use crate::provider::{EventStream, Provider};
+use crate::server::client_comm_message::resolve_comm_delivery_mode;
 use crate::server::{
     ClientConnectionInfo, SessionInterruptQueues, SwarmEvent, SwarmEventState, SwarmMember,
     SwarmState, VersionedPlan, register_session_interrupt_queue,
@@ -976,22 +976,11 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
     let _ = target_event_rx.try_recv();
 }
 
-/// W3d (orchestration-hardening): `delivery: notify` performs NO delivery
-/// action toward the recipient agent. It emits a `ServerEvent::Notification`
-/// on the session's client channel and returns success; nothing is queued for
-/// the recipient's model and no turn is started.
-///
-/// For a HEADLESS swarm member that channel is drained by a discard loop
-/// (`headless.rs`: "Drain events to keep channel alive"), so the send succeeds,
-/// `fanout_session_event` counts a delivery, the sender's tool reports success,
-/// and the message is destroyed. Headless/inline is the default spawn mode, so
-/// this is the default worker shape.
-///
-/// The `Interrupt` arm is the control: same fixture, same message, only the
-/// delivery mode differs, and it DOES land in the recipient's queue. An empty
-/// queue in the notify arm is therefore a real absence, not an unobservable one.
+/// `delivery: notify` must reach a headless recipient's model at its next turn
+/// boundary. The `Interrupt` arm remains the control: same fixture and queue,
+/// with only the delivery mode changed.
 #[tokio::test]
-async fn comm_message_notify_to_headless_member_reaches_no_agent_surface() {
+async fn comm_message_notify_to_headless_member_queues_for_next_turn() {
     let sender = test_agent().await;
     let target = test_agent().await;
 
@@ -1140,12 +1129,21 @@ async fn comm_message_notify_to_headless_member_reaches_no_agent_surface() {
         other => panic!("expected a UI notification, got {other:?}"),
     }
 
-    // ... but nothing reached any surface the recipient's model reads.
+    // ... and the body is queued for the recipient's next turn boundary.
     let pending = target_queue.lock().expect("queue lock");
+    assert_eq!(
+        pending.len(),
+        1,
+        "notify delivery must reach the recipient's queue, but it held {:?}",
+        pending
+            .iter()
+            .map(|m| m.content.clone())
+            .collect::<Vec<_>>()
+    );
     assert!(
-        pending.is_empty(),
-        "notify delivery must reach an agent-visible surface, but the queue held {:?}",
-        pending.iter().map(|m| m.content.clone()).collect::<Vec<_>>()
+        pending[0].content.contains("notify body"),
+        "notify delivery queued the wrong body: {:?}",
+        pending[0].content
     );
 }
 
@@ -1154,9 +1152,8 @@ async fn comm_message_notify_to_headless_member_reaches_no_agent_surface() {
 /// straight through as `Option`, so these defaults are what ships whenever a
 /// caller does not opt in.
 ///
-/// Pinned as a unit because the two scopes resolve to opposite halves: a DM
-/// defaults to a mode that reaches the agent, a broadcast defaults to one that
-/// does not.
+/// Pinned as a unit because DMs default to waking an idle recipient while
+/// broadcasts default to queueing for the next turn boundary.
 #[test]
 fn resolve_comm_delivery_mode_defaults_split_by_scope() {
     assert_eq!(
@@ -1167,7 +1164,7 @@ fn resolve_comm_delivery_mode_defaults_split_by_scope() {
     assert_eq!(
         resolve_comm_delivery_mode("broadcast", None, None),
         CommDeliveryMode::Notify,
-        "a broadcast with no delivery and no wake defaults to Notify, whose arm is empty"
+        "a broadcast with no delivery and no wake defaults to queued Notify delivery"
     );
     // An explicit mode always wins, and `wake: true` upgrades a broadcast.
     assert_eq!(
@@ -1182,33 +1179,11 @@ fn resolve_comm_delivery_mode_defaults_split_by_scope() {
     );
 }
 
-/// A default `swarm broadcast` names no delivery mode and no wake flag, so the
-/// mode is whatever `resolve_comm_delivery_mode` picks. It picks `Notify`, and
-/// the `Notify` arm is empty, so the broadcast lands on the recipient's UI
-/// channel and on no surface its model reads -- while the sender is told
-/// "Broadcast sent to your spawned subtree" and `delivered_targets` counts the
-/// recipient as delivered.
-///
-/// The recipient here is ATTACHED (`is_headless: false`), unlike the headless
-/// fixture above. `client_comm_message.rs` never reads `is_headless` on the
-/// delivery path, so attachment cannot change the outcome; pinning the attached
-/// shape keeps that claim executable rather than asserted.
-///
-/// The `Interrupt` arm is the control: same fixture, same body, and it is
-/// OBSERVED landing in the queue before the broadcast arm runs, so the empty
-/// queue afterwards is a real absence rather than an unobservable one.
-///
-/// Mutation-checked, including a negative result worth recording: filling the
-/// empty `Notify` arm reddens this test, so it would catch a fix. But flipping
-/// the broadcast default from `Notify` to `Wake` does NOT redden it -- an idle
-/// recipient's wake turn does not surface on the swarm member's event stream in
-/// this fixture, so both modes look alike from here. This test therefore pins
-/// the emptiness of the `Notify` arm; the default that routes a plain broadcast
-/// into that arm is pinned separately by
-/// `resolve_comm_delivery_mode_defaults_split_by_scope`. Neither test covers the
-/// claim alone.
+/// A default `swarm broadcast` names no delivery mode and no wake flag, so it
+/// resolves to `Notify` and must be queued for a headless recipient's next turn.
+/// The explicit `Interrupt` arm proves the fixture can observe queue delivery.
 #[tokio::test]
-async fn comm_message_default_broadcast_to_attached_member_reaches_no_agent_surface() {
+async fn comm_message_default_broadcast_to_headless_member_queues_for_next_turn() {
     let sender = test_agent().await;
     let target = test_agent().await;
 
@@ -1223,8 +1198,8 @@ async fn comm_message_default_broadcast_to_attached_member_reaches_no_agent_surf
     ])));
 
     let (sender_event_tx, _sender_event_rx) = mpsc::unbounded_channel();
-    // An attached member's event_tx is the live client stream, so unlike the
-    // headless discard loop this receiver stands in for a TUI that really reads.
+    // A headless member's event_tx is drained by a discard loop. Keep a receiver
+    // here only to prove event-channel acceptance is not model delivery.
     let (target_event_tx, mut target_event_rx) = mpsc::unbounded_channel();
 
     let member = |session_id: &str,
@@ -1265,7 +1240,7 @@ async fn comm_message_default_broadcast_to_attached_member_reaches_no_agent_surf
         ),
         (
             target_id.clone(),
-            member(&target_id, target_event_tx, "bear", "agent", false),
+            member(&target_id, target_event_tx, "bear", "agent", true),
         ),
     ])));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
@@ -1349,8 +1324,7 @@ async fn comm_message_default_broadcast_to_attached_member_reaches_no_agent_surf
         client_event_rx.recv().await,
         Some(ServerEvent::Done { id: 2 })
     ));
-    // ... and the attached recipient's client stream really does carry it, so a
-    // human watching the TUI sees the broadcast ...
+    // ... and the recipient's event channel accepts it ...
     match target_event_rx.try_recv() {
         Ok(ServerEvent::Notification { message, .. }) => {
             assert!(
@@ -1361,23 +1335,21 @@ async fn comm_message_default_broadcast_to_attached_member_reaches_no_agent_surf
         other => panic!("expected a UI notification, got {other:?}"),
     }
 
-    // ... but nothing reached any surface the recipient's model reads. Being
-    // attached rather than headless changed who could SEE the broadcast, not
-    // whether the agent received it.
-    //
-    // An empty queue alone would NOT establish that: the `Wake` arm awaits
-    // `run_live_turn_if_idle`, and an idle recipient wakes immediately, which
-    // also leaves the queue empty. So assert the stronger fact -- the recipient
-    // saw the notification and then nothing at all. A mode that reaches the
-    // agent runs a turn here, and that turn's events would land on this stream.
-    match target_event_rx.try_recv() {
-        Err(mpsc::error::TryRecvError::Empty) => {}
-        other => panic!("expected no agent activity after the notification, got {other:?}"),
-    }
+    // ... and the body is independently queued for the recipient model's next
+    // turn boundary.
     let pending = target_queue.lock().expect("queue lock");
+    assert_eq!(
+        pending.len(),
+        1,
+        "a default broadcast must reach the recipient's queue, but it held {:?}",
+        pending
+            .iter()
+            .map(|m| m.content.clone())
+            .collect::<Vec<_>>()
+    );
     assert!(
-        pending.is_empty(),
-        "a default broadcast reached an agent-visible surface, but the queue held {:?}",
-        pending.iter().map(|m| m.content.clone()).collect::<Vec<_>>()
+        pending[0].content.contains("default broadcast body"),
+        "default broadcast queued the wrong body: {:?}",
+        pending[0].content
     );
 }

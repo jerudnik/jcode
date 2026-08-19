@@ -36,6 +36,8 @@ pub(super) struct LiveTurnSwarmContext {
     pub event_history: Arc<RwLock<VecDeque<SwarmEvent>>>,
     pub event_counter: Arc<AtomicU64>,
     pub event_tx: broadcast::Sender<SwarmEvent>,
+    pub sessions: Option<SessionAgents>,
+    pub soft_interrupt_queues: Option<super::SessionInterruptQueues>,
 }
 
 impl LiveTurnSwarmContext {
@@ -52,7 +54,19 @@ impl LiveTurnSwarmContext {
             event_history: Arc::clone(event_history),
             event_counter: Arc::clone(event_counter),
             event_tx: event_tx.clone(),
+            sessions: None,
+            soft_interrupt_queues: None,
         }
+    }
+
+    pub(super) fn with_delivery(
+        mut self,
+        sessions: &SessionAgents,
+        soft_interrupt_queues: &super::SessionInterruptQueues,
+    ) -> Self {
+        self.sessions = Some(Arc::clone(sessions));
+        self.soft_interrupt_queues = Some(Arc::clone(soft_interrupt_queues));
+        self
     }
 }
 
@@ -138,6 +152,8 @@ pub(super) async fn spawn_tracked_live_turn(
                     completion_report,
                     &swarm.members,
                     &swarm.swarms_by_id,
+                    swarm.sessions.as_ref(),
+                    swarm.soft_interrupt_queues.as_ref(),
                     Some(&swarm.event_history),
                     Some(&swarm.event_counter),
                     Some(&swarm.event_tx),

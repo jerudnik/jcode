@@ -35,6 +35,10 @@ reported, because the two carry different weight.
 Detail and a delivery-semantics matrix to fill in:
 `docs/issues/swarm-dm-delivery-investigation.md`.
 
+Update 2026-08-19: the notify delivery defect in item 1 is fixed in
+`notify-delivery-reaches-no-agent.md`; the long-body loss in item 2 remains
+open.
+
 ## Reported, not yet reproduced here
 
 4. **A third concurrent session** on its own worktree appeared to leak content
