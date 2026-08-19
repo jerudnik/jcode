@@ -98,3 +98,17 @@ Not a recommendation, and the choice changes what notify means.
 
 Option 1 does not fix the class; it makes one instance visible. Option 2 changes
 delivery semantics and needs a decision about ordering against wake.
+
+## Completion reports use the same notification-only delivery
+
+Worker completion and terminal-status updates send the owning coordinator a
+`ServerEvent::Notification`. That path records the report and fans out an
+event, but it does not itself enqueue model-visible input or start a
+coordinator turn.
+
+Treat this as a second consumer of the notification-only mechanism, not as
+proof that the direct-message route is the only affected path. Add a focused
+test with a headless or inline coordinator that completes a worker task and
+asserts the coordinator receives an actionable report at the next intended
+delivery point. The test should distinguish event-channel acceptance from
+delivery to the coordinator's model.

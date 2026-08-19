@@ -115,3 +115,33 @@ landed.
   demonstrated failing first.
 - `docs/issues/shared-git-hooks-couples-worktrees.md` — a non-messaging instance
   of concurrent sessions sharing state they appear not to share.
+
+## Design direction: immutable session identity and observation boundaries
+
+Carried from a proposal that is otherwise retired. Its name-ambiguity item
+already shipped: direct messages fail closed on an ambiguous name. What
+remains unbuilt is the render-cache half, and a current regression test
+confirms it — a session switch leaves the prior session's diagram in a
+process-global registry and still displays it in the pinned pane.
+
+Every operator-facing view must bind to one immutable `session_id`. A viewer
+may show a friendly name as a convenience, but it must never select, retarget,
+or continue rendering a session by name, list position, recent activity, or a
+global last-focused pointer. If the bound session terminates, the view must
+show its terminal state rather than silently switching to another session.
+
+Session switches must clear or namespace every session-derived render cache,
+including diagrams, todo views, status snapshots, and focus state. Incoming
+events must be checked against the bound session before they update a view.
+Actions must use the exact session id; a friendly name matching more than one
+relevant session must fail with the candidate ids.
+
+Observation and execution must be separate. Opening a viewer must not claim a
+member, overwrite its recorded working directory, interrupt its turn, or make
+coordinator status and summary requests unavailable.
+
+Acceptance tests should prove that a session switch cannot display an earlier
+session's diagram, todo, transcript, or status; that a namesake cannot replace
+a terminated bound session; that ambiguous actions fail closed; and that
+attaching a viewer preserves the observed session's working directory and
+coordinator visibility.

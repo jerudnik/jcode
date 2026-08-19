@@ -20,3 +20,19 @@ The scheduled and manually dispatched `fork-health` workflow reports success eve
 4. Decide whether the roughly 24-hour detection lag for an unprotected `fork-point` tag is accepted, or add tag-push detection/protection.
 
 Until the first two items are resolved, hosted fork-health results do not prove the governance invariant.
+
+## Bookkeeping invariant: green must mean the comparison completed
+
+Carried from a proposal that is otherwise retired; its compaction half already
+shipped as a watermark-drift warning with regression tests, leaving this
+assertion as the live remainder.
+
+Fork-health is bookkeeping about repository governance state. A successful
+workflow result must prove that the governance comparison actually ran and
+passed. If required comparison input is unavailable or the guard exits
+non-zero, the workflow must report failure rather than allowing a downstream
+command to mask it.
+
+Add a regression case that runs the hosted workflow path with the ruleset-read
+credential absent and asserts a failed job. The visible result should name both
+the unavailable input and the comparison that was therefore not performed.
