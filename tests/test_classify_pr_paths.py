@@ -9,7 +9,11 @@ and the narrow set that is allowed to become cheap.
 from __future__ import annotations
 
 import io
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -143,6 +147,114 @@ class OutputTests(unittest.TestCase):
         self._stdin = sys.stdin
         sys.stdin = io.StringIO("src/main.rs\n")
         self.addCleanup(setattr, sys, "stdin", self._stdin)
+
+
+class RenameTests(unittest.TestCase):
+    """A rename must be judged by both of its ends, not just where it landed.
+
+    `git diff --name-only` reports a detected rename as the destination alone.
+    A change set that moved a Rust source into `docs/` therefore read as prose:
+    the deleted path was never shown to the classifier, `docs_only` came back
+    true, and every leg that would have noticed the file leaving the build was
+    skipped. The check reported success because nothing ran.
+
+    These run real `git` against a scratch repository rather than a recorded
+    fixture, because the defect was in what git reports, not in how this file
+    handles what it is given. A fixture of the old output would have passed
+    against the old code and proved nothing.
+    """
+
+    def setUp(self) -> None:
+        self.repo = Path(tempfile.mkdtemp(prefix="classify-rename-"))
+        self.addCleanup(shutil.rmtree, self.repo, ignore_errors=True)
+        self.git("init", "-q", ".")
+        self.git("config", "user.email", "test@example.invalid")
+        self.git("config", "user.name", "test")
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=self.repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    def write(self, relative: str, text: str) -> None:
+        path = self.repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def commit(self, message: str) -> str:
+        self.git("add", "-A")
+        self.git("commit", "-qm", message)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def move(self, source: str, destination: str) -> None:
+        # git mv will not create the destination directory for you.
+        (self.repo / destination).parent.mkdir(parents=True, exist_ok=True)
+        self.git("mv", source, destination)
+
+    def changed(self, base: str, head: str) -> list[str]:
+        cwd = os.getcwd()
+        os.chdir(self.repo)
+        try:
+            return classifier.changed_paths(base, head)
+        finally:
+            os.chdir(cwd)
+
+    def test_a_source_file_renamed_into_docs_still_runs_the_product_legs(self) -> None:
+        self.write("crates/jcode/src/main.rs", "fn main() {}\n")
+        base = self.commit("base")
+        self.move("crates/jcode/src/main.rs", "docs/main.md")
+        head = self.commit("move the source into docs")
+
+        paths = self.changed(base, head)
+        self.assertIn("crates/jcode/src/main.rs", paths)
+        self.assertIn("docs/main.md", paths)
+        route = classifier.classify(paths)
+        self.assertFalse(route["docs_only"], "a deleted Rust source is not prose")
+        self.assertTrue(route["product_impacting"])
+
+    def test_a_prose_rename_keeps_the_docs_only_route(self) -> None:
+        self.write("docs/a.md", "a\n")
+        base = self.commit("base")
+        self.move("docs/a.md", "docs/b.md")
+        head = self.commit("rename prose")
+
+        route = classifier.classify(self.changed(base, head))
+        self.assertTrue(route["docs_only"], "prose moving within docs stays cheap")
+        self.assertFalse(route["product_impacting"])
+
+    def test_paths_containing_spaces_survive_the_parse(self) -> None:
+        self.write("crates/a file.rs", "fn main() {}\n")
+        base = self.commit("base")
+        self.move("crates/a file.rs", "crates/b file.rs")
+        head = self.commit("rename with spaces")
+
+        paths = self.changed(base, head)
+        self.assertIn("crates/a file.rs", paths)
+        self.assertIn("crates/b file.rs", paths)
+
+    def test_renames_are_read_alongside_ordinary_changes(self) -> None:
+        self.write("crates/jcode/src/main.rs", "fn main() {}\n")
+        self.write("docs/keep.md", "old\n")
+        self.write("root.txt", "z\n")
+        base = self.commit("base")
+        self.move("crates/jcode/src/main.rs", "docs/main.md")
+        self.write("docs/keep.md", "old\nnew\n")
+        self.git("rm", "-q", "root.txt")
+        head = self.commit("a mixed change set")
+
+        self.assertEqual(
+            sorted(self.changed(base, head)),
+            [
+                "crates/jcode/src/main.rs",
+                "docs/keep.md",
+                "docs/main.md",
+                "root.txt",
+            ],
+        )
 
 
 class RoutingInvocationTests(unittest.TestCase):

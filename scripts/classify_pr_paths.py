@@ -87,13 +87,42 @@ def classify(paths: Iterable[str]) -> dict[str, bool]:
 
 
 def changed_paths(base: str, head: str) -> list[str]:
+    """Every path the change set touches, including both ends of a rename.
+
+    `--name-only` reports a detected rename as its destination alone, so a
+    change set that moves a Rust source to `docs/` reads as prose: the
+    classifier never sees the deleted path and routes docs-only, skipping every
+    leg that would have noticed the file leaving the build. `--name-status -M`
+    reports `R<score>\tsource\tdestination`, and both ends are changes this
+    classifier has to judge. Same for `C` (copy), which carries a source too.
+
+    Nothing here decides whether a rename is benign. It only makes both paths
+    visible so the allowlist can fail closed on them, which is the property the
+    rest of this file relies on.
+    """
+
     completed = subprocess.run(
-        ["git", "diff", "--name-only", base, head],
+        ["git", "diff", "--name-status", "-M", "-z", base, head],
         check=True,
         capture_output=True,
         text=True,
     )
-    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    # -z separates every field with NUL, so a path containing whitespace or a
+    # quote stays one field. Without it git renders such a path quoted and
+    # escaped, and the allowlist would compare against the escaped spelling.
+    fields = [f for f in completed.stdout.split("\0") if f]
+    paths: list[str] = []
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        # R and C carry a similarity score (R100, C085) and two path fields.
+        takes_two = status[:1] in {"R", "C"}
+        wanted = 2 if takes_two else 1
+        for offset in range(1, wanted + 1):
+            if index + offset < len(fields):
+                paths.append(fields[index + offset].strip())
+        index += 1 + wanted
+    return [path for path in paths if path]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
