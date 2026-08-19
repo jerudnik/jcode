@@ -8,12 +8,19 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from check_reusable_workflow_calls import (  # noqa: E402
-    ReusableWorkflowCallChecker,
-    ReusableWorkflowCallError,
-)
+# Borrowed, not donated: append, import, remove (see test_ci_workflow_commands).
+_SCRIPTS_DIR = str(ROOT / "scripts")
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    from check_reusable_workflow_calls import (  # noqa: E402
+        ReusableWorkflowCallChecker,
+        ReusableWorkflowCallError,
+    )
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_DIR)
 
 
 class ReusableWorkflowCallPolicyTests(unittest.TestCase):
