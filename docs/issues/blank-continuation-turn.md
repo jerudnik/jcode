@@ -1412,3 +1412,14 @@ for the wire. A scoped lint run mistaken for CI. An uncommitted buffer read as
 `main`. A reload SHA verified without checking that it contained the commit
 under test. String-compared ISO timestamps that dropped exactly the new
 records a fix was being judged by.
+
+## Defense-in-depth intake guard (2026-08-19)
+
+The server now rejects a `Request::Message` when `content.trim()` is empty and
+the request has neither a `system_reminder` nor images. The check runs in
+`client_lifecycle.rs` before the turn starts, so the server returns a structured
+error without calling the provider or appending to session history.
+
+Empty content with `Some(system_reminder)` remains valid for hidden
+continuations. The intake check also runs before `Message::with_timestamps`, so
+a blank body cannot be hidden by the timestamp prefix added later at send time.
