@@ -16,9 +16,18 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-import ci_metrics as cmi
+# Borrowed, not donated: leaving scripts/ on sys.path leaks into every module
+# that imports after this one (the shadowing hazard the guards are hardened
+# against). Append, import, remove — same pattern as test_ci_workflow_commands.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    import ci_metrics as cmi
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_DIR)
 
 
 def iso8601(value: datetime) -> str:

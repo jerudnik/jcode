@@ -9,14 +9,21 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from check_workflow_permissions import (  # noqa: E402
-    PERMISSION_LEVELS,
-    PermissionCheckError,
-    WorkflowPermissionChecker,
-    _permission_vector,
-)
+# Borrowed, not donated: append, import, remove (see test_ci_workflow_commands).
+_SCRIPTS_DIR = str(ROOT / "scripts")
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    from check_workflow_permissions import (  # noqa: E402
+        PERMISSION_LEVELS,
+        PermissionCheckError,
+        WorkflowPermissionChecker,
+        _permission_vector,
+    )
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_DIR)
 
 
 FIXTURES = ROOT / "tests" / "fixtures" / "workflow_permissions"

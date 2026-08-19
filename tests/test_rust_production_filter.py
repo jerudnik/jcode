@@ -8,11 +8,18 @@ from textwrap import dedent
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-import check_panic_budget  # noqa: E402
-import check_swallowed_error_budget  # noqa: E402
-from rust_production_filter import is_test_rust_file, production_lines, production_lines_from_text  # noqa: E402
+# Borrowed, not donated: append, import, remove (see test_ci_workflow_commands).
+_SCRIPTS_PATH = str(SCRIPTS_DIR)
+_BORROWED_PATH_ENTRY = _SCRIPTS_PATH not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_PATH)
+try:
+    import check_panic_budget  # noqa: E402
+    import check_swallowed_error_budget  # noqa: E402
+    from rust_production_filter import is_test_rust_file, production_lines, production_lines_from_text  # noqa: E402
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_PATH)
 
 
 def production_text(source: str) -> str:

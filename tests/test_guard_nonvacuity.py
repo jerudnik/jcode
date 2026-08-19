@@ -33,9 +33,21 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
-
-import check_guard_nonvacuity as harness  # noqa: E402
+# Borrowed, not donated: leaving scripts/ on sys.path leaks into every module
+# that imports after this one (the shadowing hazard this very harness checks
+# for). Append, import, remove — same pattern as test_ci_workflow_commands,
+# except the harness itself scrubs scripts/ from sys.path on import (its own
+# shadowing defense, check_guard_nonvacuity.py:60-75), so the borrowed entry
+# may already be gone by the time the finally runs.
+_SCRIPTS_DIR = str(REPO_ROOT / "scripts")
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    import check_guard_nonvacuity as harness  # noqa: E402
+finally:
+    if _BORROWED_PATH_ENTRY and _SCRIPTS_DIR in sys.path:
+        sys.path.remove(_SCRIPTS_DIR)
 
 
 def _load_from(path: Path, name: str):

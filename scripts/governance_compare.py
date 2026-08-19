@@ -7,8 +7,7 @@ whether the observed state matches `scripts/required-checks.json`. Splitting it
 out is not decoration: the comparison is a deep, order-sensitive-in-places
 structural diff plus a fail-closed YAML extractor, and neither is honestly
 expressible in shell. R07 design.md section 4 protects "the comparator"; that
-noun covers this file as well as the shell entry point (see
-docs/fork/ideal-base/evidence/R07/stream-g-protected-paths-proposal.md).
+noun covers this file as well as the shell entry point.
 
 Input is one aggregate snapshot, acquired live by `fork-health.sh --live` or
 read from a fixture by `--fixture`. The snapshot shape is:
@@ -953,8 +952,8 @@ def check_protected_paths(manifest: dict[str, Any], report: Report) -> list[str]
     elif additions:
         report.note(
             f"{len(additions)} proposed protected-path addition(s) are pending adjudication "
-            "and are reported, not enforced (see "
-            "docs/fork/ideal-base/evidence/R07/stream-g-protected-paths-proposal.md)"
+            "and are reported, not enforced (adjudicate via the manifest's "
+            "protected_paths.additions_adjudicated flag)"
         )
     return required
 
