@@ -115,7 +115,8 @@ pub(super) async fn handle_notify_session(
                 ctx.event_history,
                 ctx.event_counter,
                 ctx.swarm_event_tx,
-            ),
+            )
+            .with_delivery(ctx.sessions, ctx.soft_interrupt_queues),
         )
         .await
     } else {
@@ -914,6 +915,7 @@ fn live_session_owes_continuation(agent: &Agent) -> bool {
 pub(super) async fn handle_resume_all_sessions(
     id: u64,
     sessions: &SessionAgents,
+    soft_interrupt_queues: &super::SessionInterruptQueues,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
@@ -989,7 +991,8 @@ pub(super) async fn handle_resume_all_sessions(
                 event_history,
                 event_counter,
                 swarm_event_tx,
-            ),
+            )
+            .with_delivery(sessions, soft_interrupt_queues),
         )
         .await;
 
