@@ -1,10 +1,11 @@
 use super::{
-    CommunicateInput, CommunicateTool, RunPlanChurnGuard, canonical_swarm_action,
-    cleanup_candidate_session_ids, coordination_in_flight_count, default_await_target_statuses,
-    default_cleanup_target_statuses, format_awaited_members, format_awaited_members_with_reports,
-    format_members, format_plan_status, format_swarm_fleet, format_swarm_model_list,
-    latest_assistant_report, resolve_optional_target_session, resolve_run_plan_concurrency,
-    swarm_member_is_drivable_worker, swarm_member_is_in_flight,
+    CommunicateInput, CommunicateTool, RunPlanChurnGuard, advance_growth_alarm_baseline,
+    canonical_swarm_action, cleanup_candidate_session_ids, coordination_in_flight_count,
+    default_await_target_statuses, default_cleanup_target_statuses, format_awaited_members,
+    format_awaited_members_with_reports, format_members, format_plan_status, format_swarm_fleet,
+    format_swarm_model_list, growth_alarm, latest_assistant_report,
+    resolve_optional_target_session, resolve_run_plan_concurrency, swarm_member_is_drivable_worker,
+    swarm_member_is_in_flight,
 };
 use crate::message::{Message, StreamEvent, ToolDefinition};
 use crate::protocol::{
@@ -29,6 +30,41 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 #[test]
 fn tool_is_named_swarm() {
     assert_eq!(CommunicateTool::new().name(), "swarm");
+}
+
+#[test]
+fn swarm_graph_node_budget_defaults_to_64() {
+    assert_eq!(
+        crate::config::AgentsConfig::default().swarm_max_graph_nodes,
+        64
+    );
+}
+
+#[test]
+fn growth_alarm_fires_only_after_seed_count_doubles() {
+    assert!(!growth_alarm(6, 11));
+    assert!(!growth_alarm(6, 12));
+    assert!(growth_alarm(6, 13));
+}
+
+#[test]
+fn growth_alarm_supports_one_checkpoint_per_subsequent_doubling() {
+    let mut baseline = 6;
+    assert!(growth_alarm(baseline, 13));
+    baseline = advance_growth_alarm_baseline(baseline, 13);
+    assert_eq!(baseline, 12);
+    assert!(!growth_alarm(baseline, 13));
+
+    assert!(!growth_alarm(baseline, 24));
+    assert!(growth_alarm(baseline, 25));
+    baseline = advance_growth_alarm_baseline(baseline, 25);
+    assert_eq!(baseline, 24);
+    assert!(!growth_alarm(baseline, 25));
+
+    assert!(!growth_alarm(baseline, 48));
+    assert!(growth_alarm(baseline, 49));
+
+    assert_eq!(advance_growth_alarm_baseline(6, 50), 48);
 }
 
 #[test]
@@ -1521,6 +1557,18 @@ fn schema_advertises_supported_swarm_fields() {
             .as_array()
             .expect("action enum")
             .contains(&json!("salvage"))
+    );
+    assert!(
+        schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("action enum")
+            .contains(&json!("freeze"))
+    );
+    assert!(
+        schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("action enum")
+            .contains(&json!("unfreeze"))
     );
 }
 

@@ -27,6 +27,19 @@ pub(super) fn test_env(dir: &tempfile::TempDir) -> EnvGuard {
 }
 
 #[test]
+fn persisted_plan_without_budget_or_freeze_fields_deserializes() {
+    let plan: PersistedVersionedPlan = serde_json::from_value(serde_json::json!({
+        "items": [],
+        "version": 1,
+        "participants": []
+    }))
+    .expect("legacy persisted plan should deserialize");
+
+    assert_eq!(plan.max_nodes, None);
+    assert!(!plan.frozen);
+}
+
+#[test]
 fn persisted_swarm_state_round_trips_and_marks_running_stale() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
@@ -70,6 +83,8 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
             )]),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: Some(64),
+            frozen: true,
         },
     );
     let coordinators = HashMap::from([("swarm-alpha".to_string(), "session-2".to_string())]);
@@ -111,6 +126,8 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
     let loaded_plan = loaded.plans.get("swarm-alpha").expect("loaded plan");
     assert_eq!(loaded_plan.version, 3);
     assert_eq!(loaded_plan.items.len(), 1);
+    assert_eq!(loaded_plan.max_nodes, Some(64));
+    assert!(loaded_plan.frozen);
     assert_eq!(loaded_plan.items[0].status, "running_stale");
     let progress = loaded_plan
         .task_progress
@@ -386,6 +403,8 @@ fn remove_swarm_state_deletes_persisted_snapshot() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )]);
     persist_swarm_state("swarm-beta", plans.get("swarm-beta"), None, &[], 0);
@@ -454,6 +473,8 @@ fn deep_plan_mode_and_node_meta_round_trip() {
         task_progress: HashMap::new(),
         mode: "deep".to_string(),
         node_meta,
+        max_nodes: Some(96),
+        frozen: true,
     };
 
     persist_swarm_state("swarm-deep", Some(&plan), None, &[], 0);
@@ -462,6 +483,8 @@ fn deep_plan_mode_and_node_meta_round_trip() {
     let loaded_plan = loaded.plans.get("swarm-deep").expect("loaded plan");
     assert_eq!(loaded_plan.mode, "deep");
     assert_eq!(loaded_plan.version, 7);
+    assert_eq!(loaded_plan.max_nodes, Some(96));
+    assert!(loaded_plan.frozen);
 
     // Edges survive on the item itself.
     let gate_item = loaded_plan

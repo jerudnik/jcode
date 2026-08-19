@@ -690,6 +690,8 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         task_progress: HashMap::new(),
         mode: "light".to_string(),
         node_meta: HashMap::new(),
+        max_nodes: None,
+        frozen: false,
     };
 
     // Write the log prefix the snapshot will cover.

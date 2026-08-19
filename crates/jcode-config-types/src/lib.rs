@@ -578,10 +578,19 @@ pub struct AgentsConfig {
     /// Env override: `JCODE_SWARM_MAX_CONCURRENT_AGENTS`.
     #[serde(default = "default_swarm_max_concurrent_agents")]
     pub swarm_max_concurrent_agents: usize,
+    /// Maximum number of nodes a newly seeded swarm task graph may grow to.
+    /// The DAG engine rejects expand/inject operations that would exceed this
+    /// budget and tells the model how many slots remain.
+    #[serde(default = "default_swarm_max_graph_nodes")]
+    pub swarm_max_graph_nodes: usize,
 }
 
 fn default_swarm_max_concurrent_agents() -> usize {
     32
+}
+
+fn default_swarm_max_graph_nodes() -> usize {
+    64
 }
 
 fn default_memory_embedding_backend() -> String {
@@ -622,6 +631,7 @@ impl Default for AgentsConfig {
             memory_embedding_base_url: None,
             memory_embedding_dim: None,
             swarm_max_concurrent_agents: default_swarm_max_concurrent_agents(),
+            swarm_max_graph_nodes: default_swarm_max_graph_nodes(),
         }
     }
 }

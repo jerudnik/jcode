@@ -93,6 +93,10 @@ fn status_to_plan(status: NodeStatus) -> &'static str {
 /// Lift a [`VersionedPlan`] into a validated [`TaskGraph`] for engine ops.
 pub fn to_task_graph(plan: &VersionedPlan) -> TaskGraph {
     let mut graph = TaskGraph::new(parse_mode(&plan.mode));
+    graph.max_nodes = Some(
+        plan.max_nodes
+            .unwrap_or(crate::dag::DEFAULT_MAX_GRAPH_NODES),
+    );
     for item in &plan.items {
         let meta = plan.node_meta.get(&item.id).cloned().unwrap_or_default();
         let artifact = meta
@@ -123,6 +127,7 @@ pub fn to_task_graph(plan: &VersionedPlan) -> TaskGraph {
 /// string) from the prior plan where ids still match.
 pub fn apply_task_graph(plan: &mut VersionedPlan, graph: &TaskGraph) {
     plan.mode = mode_str(graph.mode).to_string();
+    plan.max_nodes = graph.max_nodes;
 
     // Index prior items to retain non-engine fields.
     let prior: std::collections::HashMap<String, PlanItem> = plan
@@ -339,6 +344,7 @@ mod tests {
     fn round_trip_preserves_items_and_edges() {
         let mut plan = VersionedPlan::new();
         plan.mode = "deep".to_string();
+        plan.max_nodes = Some(10);
         plan.items = vec![
             plan_item("a", "completed"),
             PlanItem {
@@ -349,12 +355,14 @@ mod tests {
 
         let graph = to_task_graph(&plan);
         assert_eq!(graph.mode, Mode::Deep);
+        assert_eq!(graph.max_nodes, Some(10));
         assert_eq!(graph.len(), 2);
         assert!(graph.get("a").unwrap().is_done());
         assert_eq!(graph.get("b").unwrap().depends_on, vec!["a".to_string()]);
 
         let mut plan2 = plan.clone();
         apply_task_graph(&mut plan2, &graph);
+        assert_eq!(plan2.max_nodes, Some(10));
         assert_eq!(plan2.items.len(), 2);
         let b = plan2.items.iter().find(|i| i.id == "b").unwrap();
         assert_eq!(b.blocked_by, vec!["a".to_string()]);

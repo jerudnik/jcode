@@ -34,6 +34,8 @@ async fn assign_task_without_task_id_picks_highest_priority_runnable_task() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -139,6 +141,8 @@ async fn assign_task_marks_completed_worker_queued_before_returning() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -256,6 +260,8 @@ async fn assign_task_stale_direct_takeover_preserves_progress_history() {
             )]),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
