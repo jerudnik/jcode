@@ -13,6 +13,7 @@ use crate::agent::Agent;
 use crate::protocol::{NotificationType, ServerEvent};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{Mutex, RwLock, mpsc};
 
 /// Warn every attached client that a reconnect moved an established session to
@@ -34,23 +35,47 @@ pub(super) async fn apply_and_announce_working_dir(
     let previous_working_dir = {
         let mut agent_guard = agent.lock().await;
         let previous = agent_guard.working_dir().map(str::to_string);
-        agent_guard.set_working_dir(new_dir);
+        agent_guard
+            .set_working_dir_with_source(new_dir, crate::session::WorkingDirSetBy::Subscribe);
         previous
     };
     let Some(previous) = previous_working_dir.as_deref() else {
         return;
     };
+    announce_working_dir_change(
+        client_event_tx,
+        client_session_id,
+        client_connection_id,
+        crate::session::WorkingDirSetBy::Subscribe,
+        previous,
+        new_dir,
+    );
+}
+
+pub(super) fn announce_working_dir_change(
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+    client_session_id: &str,
+    client_connection_id: &str,
+    set_by: crate::session::WorkingDirSetBy,
+    previous: &str,
+    new_dir: &str,
+) {
     if previous == new_dir {
         return;
     }
+    let (action, phase, context) = match set_by {
+        crate::session::WorkingDirSetBy::Created => ("Creation", "created", "creation"),
+        crate::session::WorkingDirSetBy::Resumed => ("Resume", "resume", "resume"),
+        crate::session::WorkingDirSetBy::Subscribe => ("Subscribe", "subscribe", "reconnect"),
+    };
     crate::logging::warn(&format!(
-        "Subscribe changed established working_dir for session {} on connection {}: {} -> {}",
-        client_session_id, client_connection_id, previous, new_dir
+        "{} changed established working_dir for session {} on connection {}: {} -> {}",
+        action, client_session_id, client_connection_id, previous, new_dir
     ));
     crate::logging::event_warn(
         "SESSION_LIFECYCLE",
         vec![
-            ("phase", "subscribe_working_dir_changed".to_string()),
+            ("phase", format!("{phase}_working_dir_changed")),
             ("session_id", client_session_id.to_string()),
             ("client_connection_id", client_connection_id.to_string()),
             ("previous_working_dir", previous.to_string()),
@@ -66,8 +91,7 @@ pub(super) async fn apply_and_announce_working_dir(
                 tldr: None,
             },
             message: format!(
-                "⚠ Session working directory changed on reconnect: {} → {}. Relative paths and swarm identity now resolve against the new directory.",
-                previous, new_dir
+                "⚠ Session working directory changed on {context}: {previous} → {new_dir}. Relative paths and swarm identity now resolve against the new directory."
             ),
         })
         .is_err()
@@ -79,12 +103,61 @@ pub(super) async fn apply_and_announce_working_dir(
         crate::logging::event_warn(
             "SESSION_LIFECYCLE",
             vec![
-                ("phase", "subscribe_working_dir_notify_failed".to_string()),
+                ("phase", format!("{phase}_working_dir_notify_failed")),
                 ("session_id", client_session_id.to_string()),
                 ("client_connection_id", client_connection_id.to_string()),
                 ("previous_working_dir", previous.to_string()),
                 ("new_working_dir", new_dir.to_string()),
             ],
+        );
+    }
+}
+
+/// Captures the target session's directory before an explicit resume override.
+pub(super) struct ResumeWorkingDirChange {
+    session_id: String,
+    client_connection_id: String,
+    previous: Option<String>,
+    new_dir: Option<String>,
+}
+
+impl ResumeWorkingDirChange {
+    pub(super) fn capture(
+        session_id: &str,
+        client_connection_id: &str,
+        new_dir: Option<&str>,
+    ) -> Self {
+        let previous =
+            new_dir.and_then(
+                |_| match crate::session::Session::load_startup_stub(session_id) {
+                    Ok(session) => session.working_dir,
+                    Err(error) => {
+                        crate::logging::warn(&format!(
+                            "Failed to load pre-resume working directory for {session_id}: {error}"
+                        ));
+                        None
+                    }
+                },
+            );
+        Self {
+            session_id: session_id.to_string(),
+            client_connection_id: client_connection_id.to_string(),
+            previous,
+            new_dir: new_dir.map(str::to_string),
+        }
+    }
+
+    pub(super) fn announce(self, client_event_tx: &mpsc::UnboundedSender<ServerEvent>) {
+        let (Some(previous), Some(new_dir)) = (self.previous, self.new_dir) else {
+            return;
+        };
+        announce_working_dir_change(
+            client_event_tx,
+            &self.session_id,
+            &self.client_connection_id,
+            crate::session::WorkingDirSetBy::Resumed,
+            &previous,
+            &new_dir,
         );
     }
 }
@@ -151,6 +224,32 @@ pub(super) async fn find_conflicting_live_client(
         .values()
         .find(|info| info.client_id != client_connection_id && info.session_id == session_id)
         .cloned()
+}
+
+/// Atomically reserves an existing live target for this connection.
+///
+/// Reserving under the connection write lock prevents another connection's
+/// detached-source cleanup from observing no users after target selection.
+pub(super) async fn claim_live_target_agent(
+    session_id: &str,
+    client_connection_id: &str,
+    client_instance_id: Option<&str>,
+    source_agent: &Arc<Mutex<Agent>>,
+    sessions: &Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>,
+    client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
+) -> Option<Arc<Mutex<Agent>>> {
+    let mut connections = client_connections.write().await;
+    let sessions_guard = sessions.read().await;
+    let target = sessions_guard
+        .get(session_id)
+        .filter(|existing| !Arc::ptr_eq(existing, source_agent))
+        .cloned()?;
+
+    let info = connections.get_mut(client_connection_id)?;
+    info.session_id = session_id.to_string();
+    info.client_instance_id = client_instance_id.map(str::to_string);
+    info.last_seen = Instant::now();
+    Some(target)
 }
 
 /// Inputs to the resume-attach diagnostic line.

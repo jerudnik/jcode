@@ -8,6 +8,28 @@ opened: 2026-08-18
 
 # A session's working directory has no owner
 
+## Fix implemented
+
+Fixed on 2026-08-19. An in-session `ResumeSession` now passes no working
+directory override, so a dormant session keeps its recorded directory. The
+target-aware subscribe path still passes the directory the client explicitly
+declared.
+
+The remaining explicit change paths are visible and attributable:
+
+- a resume override and a subscribe change emit the existing client warning,
+  including the old and new directories;
+- session files record `working_dir_set_by` (`created`, `resumed`, or
+  `subscribe`) and `working_dir_set_at`;
+- both fields default to `None` when older session JSON or journal entries are
+  loaded.
+
+The end-to-end regression test was flipped before the production change. It
+failed with the first dormant session rewritten to the client's directory,
+then passed after the in-session call site changed to `None`. The low-level
+tests still prove that an explicit override is honored and that no override
+preserves the recorded directory.
+
 ## Symptom
 
 Sessions that were created in a working tree are later found rooted somewhere
@@ -175,7 +197,7 @@ Not prescriptive; shapes that would close it:
 
     cargo test -p jcode-app-core --lib working_dir
 
-Both `resume_rewrites_a_dormant_sessions_recorded_working_dir` and
+Both `resume_with_an_explicit_override_changes_the_recorded_working_dir` and
 `resume_without_an_override_keeps_the_recorded_working_dir` must appear in the
 output. If either is missing, the filter did not match and the result means
 nothing.

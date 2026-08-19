@@ -15,7 +15,7 @@ const ATTACHED_FROM: &str = "/sentinel/attached/from";
 async fn resume_dormant_session_with_override(
     target_session_id: &str,
     working_dir_override: Option<&str>,
-) -> Result<Option<String>> {
+) -> Result<(crate::session::Session, Vec<ServerEvent>)> {
     let temp_session_id = "session_temp_dormant_workdir";
 
     let mut persisted = crate::session::Session::create_with_id(
@@ -120,25 +120,42 @@ async fn resume_dormant_session_with_override(
     );
     assert_eq!(client_session_id, target_session_id);
 
-    Ok(crate::session::Session::load(target_session_id)?.working_dir)
+    Ok((crate::session::Session::load(target_session_id)?, events))
 }
 
 #[tokio::test]
-async fn resume_rewrites_a_dormant_sessions_recorded_working_dir() -> Result<()> {
+async fn resume_with_an_explicit_override_changes_the_recorded_working_dir() -> Result<()> {
     let _guard = crate::storage::lock_test_env();
     let (_runtime, prev_runtime) = setup_runtime_dir()?;
 
-    let stored = resume_dormant_session_with_override(
+    let (stored, events) = resume_dormant_session_with_override(
         "session_dormant_workdir_overridden",
         Some(ATTACHED_FROM),
     )
     .await?;
 
     assert_eq!(
-        stored.as_deref(),
+        stored.working_dir.as_deref(),
         Some(ATTACHED_FROM),
-        "resuming a dormant session from {ATTACHED_FROM} should replace the \
-         directory it was created in ({CREATED_IN})"
+        "an explicit override should replace the recorded directory {CREATED_IN}"
+    );
+    assert_eq!(
+        stored.working_dir_set_by,
+        Some(crate::session::WorkingDirSetBy::Resumed)
+    );
+    assert!(stored.working_dir_set_at.is_some());
+    let notice = events.iter().find_map(|event| match event {
+        ServerEvent::Notification { message, .. }
+            if message.contains("working directory changed") =>
+        {
+            Some(message)
+        }
+        _ => None,
+    });
+    assert!(
+        notice
+            .is_some_and(|message| message.contains(CREATED_IN) && message.contains(ATTACHED_FROM)),
+        "an explicit resume override must notify the client, got {events:?}"
     );
 
     restore_runtime_dir(prev_runtime);
@@ -152,13 +169,25 @@ async fn resume_without_an_override_keeps_the_recorded_working_dir() -> Result<(
     let _guard = crate::storage::lock_test_env();
     let (_runtime, prev_runtime) = setup_runtime_dir()?;
 
-    let stored =
+    let (stored, events) =
         resume_dormant_session_with_override("session_dormant_workdir_preserved", None).await?;
 
     assert_eq!(
-        stored.as_deref(),
+        stored.working_dir.as_deref(),
         Some(CREATED_IN),
         "a resume carrying no working directory must leave the recorded one alone"
+    );
+    assert_eq!(
+        stored.working_dir_set_by,
+        Some(crate::session::WorkingDirSetBy::Created)
+    );
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            ServerEvent::Notification { message, .. }
+                if message.contains("working directory changed")
+        )),
+        "a preserved working directory must stay quiet, got {events:?}"
     );
 
     restore_runtime_dir(prev_runtime);

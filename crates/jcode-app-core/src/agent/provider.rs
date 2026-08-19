@@ -220,10 +220,18 @@ impl Agent {
 
     /// Set the working directory for this session
     pub fn set_working_dir(&mut self, dir: &str) {
+        self.set_working_dir_with_source(dir, crate::session::WorkingDirSetBy::Subscribe);
+    }
+
+    pub(crate) fn set_working_dir_with_source(
+        &mut self,
+        dir: &str,
+        set_by: crate::session::WorkingDirSetBy,
+    ) {
         if self.session.working_dir.as_deref() == Some(dir) {
             return;
         }
-        self.session.working_dir = Some(dir.to_string());
+        self.session.set_recorded_working_dir(dir, set_by);
         self.provider
             .set_session_working_dir(Some(std::path::Path::new(dir)));
         self.session.refresh_initial_session_context_message();
@@ -233,6 +241,16 @@ impl Agent {
     /// Get the working directory for this session
     pub fn working_dir(&self) -> Option<&str> {
         self.session.working_dir.as_deref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn working_dir_set_by(&self) -> Option<crate::session::WorkingDirSetBy> {
+        self.session.working_dir_set_by
+    }
+
+    #[cfg(test)]
+    pub(crate) fn working_dir_set_at(&self) -> Option<&chrono::DateTime<chrono::Utc>> {
+        self.session.working_dir_set_at.as_ref()
     }
 
     /// Get the stored messages (for transcript export)
