@@ -5,6 +5,30 @@ pub(super) async fn handle_lifecycle_action(
     ctx: ToolContext,
 ) -> Result<ToolOutput> {
     match params.action.as_str() {
+        "freeze" | "unfreeze" => {
+            let action = params.action.clone();
+            let request = Request::CommTaskControl {
+                id: REQUEST_ID,
+                session_id: ctx.session_id.clone(),
+                action: action.clone(),
+                task_id: String::new(),
+                target_session: None,
+                message: params.message.clone(),
+            };
+            let response = send_request(request)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to {action} task graph: {e}"))?;
+            ensure_success(&response)?;
+            Ok(ToolOutput::new(format!(
+                "Task graph {}. Existing assigned work may continue.",
+                if action == "freeze" {
+                    "frozen"
+                } else {
+                    "unfrozen"
+                }
+            )))
+        }
+
         "start" | "start_task" | "wake" | "resume" | "retry" | "reassign" | "replace"
         | "salvage" => {
             let task_id = match params.task_id.clone() {

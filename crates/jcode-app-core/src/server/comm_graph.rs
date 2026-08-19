@@ -254,6 +254,15 @@ pub(super) async fn handle_comm_seed_graph(
         let plan = plans
             .entry(swarm_id.clone())
             .or_insert_with(VersionedPlan::new);
+        if plan.frozen {
+            err(
+                client_event_tx,
+                id,
+                "Seed rejected: this task graph is frozen. Ask the coordinator to call `swarm` with `action:\"unfreeze\"`, then retry seeding. Existing assigned work may still be completed while growth is frozen."
+                    .to_string(),
+            );
+            return;
+        }
         if !plan.items.is_empty() && !replace_existing {
             err(
                 client_event_tx,
@@ -296,6 +305,7 @@ pub(super) async fn handle_comm_seed_graph(
         // monotonic version so clients cannot mistake replacement for stale data.
         let mut replacement = VersionedPlan::new();
         replacement.version = plan.version;
+        replacement.max_nodes = Some(crate::config::config().agents.swarm_max_graph_nodes);
         if let Some(mode) = resolved_mode {
             replacement.mode = mode;
         }
@@ -376,15 +386,22 @@ pub(super) async fn handle_comm_expand_node(
             err(client_event_tx, id, "No plan for this swarm.".to_string());
             return;
         };
-        let mut graph = to_task_graph(plan);
-        claim_queued_node_for_actor(&mut graph, &node_id, &req_session_id);
-        match dag::expand_node(&mut graph, &node_id, &req_session_id, specs) {
-            Ok(_) => {
-                apply_task_graph(plan, &graph);
-                plan.version += 1;
-                Ok(())
+        if plan.frozen {
+            Err(
+                "Task graph is frozen. Complete the assigned node without adding children, or ask the coordinator to call `swarm` with `action:\"unfreeze\"` before retrying expand_node."
+                    .to_string(),
+            )
+        } else {
+            let mut graph = to_task_graph(plan);
+            claim_queued_node_for_actor(&mut graph, &node_id, &req_session_id);
+            match dag::expand_node(&mut graph, &node_id, &req_session_id, specs) {
+                Ok(_) => {
+                    apply_task_graph(plan, &graph);
+                    plan.version += 1;
+                    Ok(())
+                }
+                Err(e) => Err(e.to_string()),
             }
-            Err(e) => Err(e.to_string()),
         }
     };
 
@@ -559,15 +576,22 @@ pub(super) async fn handle_comm_inject_gap(
             err(client_event_tx, id, "No plan for this swarm.".to_string());
             return;
         };
-        let mut graph = to_task_graph(plan);
-        claim_queued_node_for_actor(&mut graph, &gate_id, &req_session_id);
-        match dag::inject_from_gate(&mut graph, &gate_id, &req_session_id, specs) {
-            Ok(_) => {
-                apply_task_graph(plan, &graph);
-                plan.version += 1;
-                Ok(())
+        if plan.frozen {
+            Err(
+                "Task graph is frozen. Pass the gate with remaining doubts recorded in open_questions, or ask the coordinator to call `swarm` with `action:\"unfreeze\"` before retrying inject_gap."
+                    .to_string(),
+            )
+        } else {
+            let mut graph = to_task_graph(plan);
+            claim_queued_node_for_actor(&mut graph, &gate_id, &req_session_id);
+            match dag::inject_from_gate(&mut graph, &gate_id, &req_session_id, specs) {
+                Ok(_) => {
+                    apply_task_graph(plan, &graph);
+                    plan.version += 1;
+                    Ok(())
+                }
+                Err(e) => Err(e.to_string()),
             }
-            Err(e) => Err(e.to_string()),
         }
     };
 
@@ -592,4 +616,87 @@ pub(super) async fn handle_comm_inject_gap(
         }
         Err(e) => err(client_event_tx, id, format!("Inject rejected: {e}")),
     }
+}
+
+/// Freeze or unfreeze graph growth without stopping work already in flight.
+///
+/// The DAG engine owns graph mechanics, but coordinator authority is a live
+/// swarm policy: membership and the elected coordinator are only visible here.
+/// Keep that policy at the server boundary, matching coordinator salvage.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "graph control threads runtime handles for persistence and broadcast"
+)]
+pub(super) async fn handle_comm_graph_freeze(
+    id: u64,
+    req_session_id: String,
+    frozen: bool,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
+    event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
+    event_counter: &Arc<std::sync::atomic::AtomicU64>,
+    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+) {
+    let Some(swarm_id) = swarm_id_for(&req_session_id, swarm_members).await else {
+        err(client_event_tx, id, "Not in a swarm.".to_string());
+        return;
+    };
+    let is_coordinator = swarm_coordinators
+        .read()
+        .await
+        .get(&swarm_id)
+        .is_some_and(|coordinator| coordinator == &req_session_id);
+    if !is_coordinator {
+        err(
+            client_event_tx,
+            id,
+            format!(
+                "Only the coordinator can {} task-graph growth. Ask the coordinator to call `swarm` with `action:\"{}\"`.",
+                if frozen { "freeze" } else { "unfreeze" },
+                if frozen { "freeze" } else { "unfreeze" }
+            ),
+        );
+        return;
+    }
+
+    {
+        let mut plans = swarm_plans.write().await;
+        let Some(plan) = plans.get_mut(&swarm_id) else {
+            err(client_event_tx, id, "No plan for this swarm.".to_string());
+            return;
+        };
+        if plan.frozen != frozen {
+            plan.frozen = frozen;
+            plan.version = plan.version.saturating_add(1);
+        }
+    }
+
+    finalize(
+        id,
+        &swarm_id,
+        &req_session_id,
+        if frozen {
+            "task_graph_freeze"
+        } else {
+            "task_graph_unfreeze"
+        },
+        swarm_plans
+            .read()
+            .await
+            .get(&swarm_id)
+            .map(|plan| plan.items.len())
+            .unwrap_or(0),
+        client_event_tx,
+        swarm_members,
+        swarms_by_id,
+        swarm_plans,
+        swarm_coordinators,
+        event_history,
+        event_counter,
+        swarm_event_tx,
+    )
+    .await;
 }

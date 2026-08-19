@@ -52,6 +52,8 @@ async fn f1_assign_next_reclaims_task_from_departed_assignee() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -171,6 +173,8 @@ async fn f2_await_members_ignores_mid_task_turn_boundary() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
@@ -269,6 +273,8 @@ async fn f3_coordinator_can_salvage_node_of_departed_owner() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -374,6 +380,8 @@ async fn f4_resync_plan_repairs_coordinator_map_desync() {
             task_progress: HashMap::new(),
             mode: "light".to_string(),
             node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
         },
     )])));
     // Desync: the coordinators map lost its entry (restart, race, stale

@@ -2176,10 +2176,28 @@ pub(super) async fn handle_comm_task_control(
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
     swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
+    if matches!(action.as_str(), "freeze" | "unfreeze") {
+        super::comm_graph::handle_comm_graph_freeze(
+            id,
+            req_session_id,
+            action == "freeze",
+            client_event_tx,
+            swarm_members,
+            swarms_by_id,
+            swarm_plans,
+            swarm_coordinators,
+            event_history,
+            event_counter,
+            swarm_event_tx,
+        )
+        .await;
+        return;
+    }
+
     let Some(action) = TaskControlAction::parse(&action) else {
         let _ = client_event_tx.send(ServerEvent::Error {
             id,
-            message: "Unknown task control action. Use start, wake, resume, retry, reassign, replace, or salvage.".to_string(),
+            message: "Unknown task control action. Use start, wake, resume, retry, reassign, replace, salvage, freeze, or unfreeze.".to_string(),
             retry_after_secs: None,
         });
         return;

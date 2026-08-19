@@ -95,6 +95,10 @@ struct PersistedVersionedPlan {
     mode: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     node_meta: HashMap<String, crate::plan::NodeMeta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_nodes: Option<usize>,
+    #[serde(default)]
+    frozen: bool,
 }
 
 fn default_plan_mode() -> String {
@@ -481,6 +485,8 @@ fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64
         task_progress: std::mem::take(&mut plan.task_progress),
         mode: std::mem::take(&mut plan.mode),
         node_meta: std::mem::take(&mut plan.node_meta),
+        max_nodes: plan.max_nodes,
+        frozen: plan.frozen,
     };
     mark_running_items_stale(&mut plan, updated_at_unix_ms);
     plan
@@ -511,6 +517,8 @@ fn to_persisted_plan(plan: &VersionedPlan) -> PersistedVersionedPlan {
         task_progress: plan.task_progress.clone(),
         mode: plan.mode.clone(),
         node_meta: plan.node_meta.clone(),
+        max_nodes: plan.max_nodes,
+        frozen: plan.frozen,
     }
 }
 

@@ -12,7 +12,7 @@ pub(super) fn parameters_schema() -> Value {
                          "propose_plan", "approve_plan", "reject_plan", "spawn", "stop", "assign_role",
                          "status", "report", "plan_status", "summary", "read_context", "resync_plan", "assign_task", "assign_next", "fill_slots", "run_plan", "cleanup",
                          "task_graph", "expand_node", "complete_node", "inject_gap",
-                         "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
+                         "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage", "freeze", "unfreeze",
                          "await_members", "list_models", "list_swarms"],
                 "description": "Action. Spawn requires a nonblank label and should include prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection. Use list_swarms for the live fleet dashboard snapshot."
             },

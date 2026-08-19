@@ -46,13 +46,13 @@ pub(super) async fn execute(input: Value, ctx: ToolContext) -> Result<ToolOutput
             dispatch_assignment::handle_assignment_action(params, ctx).await
         }
         "start" | "start_task" | "wake" | "resume" | "retry" | "reassign" | "replace"
-        | "salvage" | "await_members" => {
+        | "salvage" | "freeze" | "unfreeze" | "await_members" => {
             dispatch_lifecycle::handle_lifecycle_action(params, ctx).await
         }
         _ => Err(anyhow::anyhow!(
             "Unknown action '{}'. Valid actions: message, broadcast, dm, list, \
              propose_plan, approve_plan, reject_plan, spawn, stop, assign_role, status, report, plan_status, summary, read_context, \
-             resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, await_members, \
+             resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, freeze, unfreeze, await_members, \
              task_graph (seed the task DAG), expand_node, complete_node, inject_gap, list_models, list_swarms.",
             params.action
         )),
