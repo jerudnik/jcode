@@ -1564,3 +1564,57 @@ distribution path. Any of those makes reachability-by-history insufficient, at
 which point the belt is one command --
 `git push github 597598fb9:refs/tags/pre-docs-reorg-2026-08` -- anchoring
 `597598fb9`, not `794114a82`, which predates #154 and misses D034.
+
+## D041. A skipped required context merges under a ruleset, verified rather than cited
+
+The audit of check deciders (#187 through #190) closed three defects and filed
+four open items. All four are now closed, and the issue file is deleted rather
+than archived, per the rule that solved issues do not linger.
+
+**The platform question is settled by observation, not by documentation.**
+GitHub's troubleshooting page states that `success`, `skipped` and `neutral` all
+satisfy a required check, but says nothing about whether rulesets differ from
+classic branch protection, and this repository uses a ruleset. That gap was
+recorded as unresolvable from inside the fork, because settling it appeared to
+need a pull request that deliberately disables a gate here.
+
+It did not. A throwaway private repository carried the same shape -- one active
+ruleset, no bypass actors, one required context -- and three arms:
+
+| arm | required context | `mergeable_state` | merge attempt |
+| --- | --- | --- | --- |
+| gate runs | `success` | `clean` | not attempted |
+| gate fails | `failure` | `blocked` | refused, 405 "Required status check is failing" |
+| gate skipped by `if: ${{ false }}` | `skipped` | `clean` | **merged** |
+
+The third arm merged. So under a ruleset, as under classic protection, a
+required context skipped by a conditional satisfies the requirement. The failing
+arm proves the ruleset had teeth, which is what makes the third arm readable at
+all. The probe repository was archived afterwards; it holds no fork content.
+
+This is why the plants added in #188 matter more than the protection added in
+#189: the platform will not refuse a gate that has been switched off, so the
+refusal has to come from a check that runs.
+
+**Failure capability was mis-measured, and the correction is the interesting
+part.** The audit reported that only `Governance Root` had ever been observed
+failing. That was derived from the check-runs of *merged* pull request heads,
+which are green by construction -- the sample could not have produced any other
+answer. Querying failed workflow runs instead shows `PR Gate` failing 11 times,
+`Checks / Fork CI / Rust checks` 8, and every routed leg at least once. Eight of
+the ten audited checks have demonstrated they can fail; the two that have not
+are the two that gate nothing.
+
+**Two mechanisms replace the two remaining items.** The route contract
+(`_ROUTE_CONTRACT` plus `plant_route_contract`) pins which ci.yml jobs each of
+the three classifier routes runs, so widening a condition reddens rather than
+quietly skipping a leg. `CONTRACT_PLANTS` plus
+`_check_required_contexts_have_plants` requires every required context named in
+the manifest to have a plant proving its `if:` contract can fail, so adding a
+third required context without a detector is now a failure rather than a
+reproduction of the defect this workstream started from.
+
+**Reopen trigger:** GitHub changing how a skipped check is scored, which would
+show up as the merge in arm three being refused; or a required context being
+added by a path that does not read `scripts/required-checks.json`, which
+`_check_required_contexts_have_plants` would not see.

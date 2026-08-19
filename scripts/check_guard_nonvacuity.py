@@ -80,6 +80,7 @@ import dataclasses
 import datetime as dt
 import importlib.util
 import io
+import json
 import os
 import re
 import shutil
@@ -573,6 +574,184 @@ def plant_workflow_permissions() -> Outcome:
         evidence="; ".join(str(getattr(f, "message", f)) for f in planted),
         detail="; ".join(str(getattr(f, "message", f)) for f in clean),
     )
+
+
+# The three routes the classifier can produce, and the ci.yml jobs each one is
+# supposed to run. `docs_only=true, product_impacting=true` is unreachable: a
+# change set of pure prose cannot impact the build, and `classify` never emits
+# it. Only three rows, so they are written out rather than generated.
+#
+# The third row was observed in production exactly once (#189) before this
+# table existed. A route with no assertion and no traffic is a route nobody
+# would notice breaking, which is why it is pinned here rather than left to be
+# exercised by chance.
+_ROUTE_CONTRACT: tuple[tuple[bool, bool, frozenset[str]], ...] = (
+    # docs_only, product_impacting, jobs expected to run
+    (True, False, frozenset({"docs"})),
+    (False, False, frozenset({"docs", "fork-ci", "security", "nix"})),
+    (False, True, frozenset({"docs", "fork-ci", "security", "nix", "smoke"})),
+)
+
+
+def _evaluate_route_condition(expression: str, docs_only: bool, impacting: bool) -> bool:
+    """Evaluate the small condition language ci.yml actually uses.
+
+    Deliberately not a general GitHub expression engine. It understands the two
+    shapes present -- a negated input, and a conjunction of one negated and one
+    plain input -- and refuses anything else, so a condition that grows past
+    what this can read fails loudly instead of being silently evaluated wrong.
+    """
+
+    inner = expression.strip()
+    if inner.startswith("${{") and inner.endswith("}}"):
+        inner = inner[3:-2].strip()
+
+    values = {"inputs.docs_only": docs_only, "inputs.product_impacting": impacting}
+
+    def term(text: str) -> bool:
+        text = text.strip()
+        negated = text.startswith("!")
+        if negated:
+            text = text[1:].strip()
+        if text not in values:
+            raise ValueError(f"unreadable term {text!r} in condition {expression!r}")
+        return not values[text] if negated else values[text]
+
+    return all(term(part) for part in inner.split("&&"))
+
+
+def plant_route_contract() -> Outcome:
+    """Each route must run exactly the jobs it is supposed to run.
+
+    The classifier's two outputs decide which legs execute, and a leg that does
+    not execute reports success. Until now nothing asserted the mapping from
+    route to leg set: the plants covered what the classifier *emits*, not what
+    the workflow *does* with it. So a condition could be widened -- `smoke`
+    gaining a `docs_only` term, `fork-ci` losing one -- and every check would
+    stay green because the affected leg would simply stop running.
+
+    The planted defect is that widening, applied to the real ci.yml. The clean
+    control is the real file, which must match the table for all three routes.
+    """
+
+    document = _parse_ci_workflow()
+    jobs = document.get("jobs") or {}
+    expected_jobs = {job for _, _, names in _ROUTE_CONTRACT for job in names}
+    missing = sorted(expected_jobs - set(jobs))
+    if missing:
+        return Outcome(
+            rejected=False,
+            accepted=False,
+            evidence="",
+            detail=f"ci.yml no longer defines {', '.join(missing)}",
+        )
+
+    def running(conditions: dict[str, str | None], docs_only: bool, impacting: bool) -> frozenset[str]:
+        active = set()
+        for job, condition in conditions.items():
+            if condition is None or _evaluate_route_condition(condition, docs_only, impacting):
+                active.add(job)
+        return frozenset(active)
+
+    real = {job: jobs[job].get("if") for job in expected_jobs}
+    mismatches = [
+        f"{'docs_only' if d else 'not docs_only'}/"
+        f"{'impacting' if i else 'not impacting'}: ran {sorted(running(real, d, i))}, "
+        f"contract says {sorted(want)}"
+        for d, i, want in _ROUTE_CONTRACT
+        if running(real, d, i) != want
+    ]
+
+    # The plant: give `smoke` the condition `fork-ci` has, which makes it run on
+    # the route that is supposed to skip it.
+    planted = dict(real)
+    planted["smoke"] = "${{ !inputs.docs_only }}"
+    planted_mismatches = [
+        (d, i) for d, i, want in _ROUTE_CONTRACT if running(planted, d, i) != want
+    ]
+
+    return Outcome(
+        rejected=bool(planted_mismatches),
+        accepted=not mismatches,
+        evidence=(
+            f"widening smoke's condition breaks {len(planted_mismatches)} of "
+            f"{len(_ROUTE_CONTRACT)} routes"
+        ),
+        detail="; ".join(mismatches) if mismatches else "",
+    )
+
+
+def _parse_ci_workflow() -> dict[str, Any]:
+    guard = _load("scripts/governance_compare.py")
+    source = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    return guard.parse_workflow(source)
+
+
+# Which plant covers each required context's workflow contract. The audit that
+# prompted this found the same shape twice: a property that decides whether a
+# check runs, one detector for it, and that detector inside the blast radius of
+# the change it judged. Fixing the two instances did not stop a third from
+# being introduced -- adding a required context with no plant would reproduce
+# it exactly, and nothing would say so.
+#
+# `_check_required_contexts_have_plants` reads the manifest and fails if a
+# context named there is absent here. Adding a required context is then a
+# two-part edit: the manifest, and a plant proving its contract can fail.
+CONTRACT_PLANTS = {
+    "Governance Root": "scripts/governance_compare.py::job_contract",
+    "PR Gate": "scripts/governance_compare.py::pr_gate_contract",
+}
+
+
+def _check_required_contexts_have_plants() -> list[str]:
+    """Every required context must have a plant that can prove its contract fails.
+
+    A required context whose `if:` contract is unasserted is not hypothetical:
+    a job skipped by a conditional reports success to a ruleset, verified
+    directly rather than inferred, so an unasserted contract is a gate that can
+    be turned off without turning anything red.
+    """
+
+    manifest_path = REPO_ROOT / "scripts/required-checks.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"cannot read scripts/required-checks.json to check plant coverage: {error}"]
+
+    contexts = {
+        contract["context"]
+        for contract in manifest.get("workflow_contracts", [])
+        if isinstance(contract, dict) and contract.get("context")
+    }
+    if not contexts:
+        # An empty read would make every comparison below vacuously true.
+        return [
+            "scripts/required-checks.json declares no workflow_contracts; plant "
+            "coverage for required contexts cannot be checked"
+        ]
+
+    registered = {guard.script for guard in GUARDS}
+    failures: list[str] = []
+    for context in sorted(contexts):
+        plant = CONTRACT_PLANTS.get(context)
+        if plant is None:
+            failures.append(
+                f"required context {context!r} has no entry in CONTRACT_PLANTS, so "
+                f"nothing proves its `if:` contract can fail. A context whose "
+                f"contract is unasserted can be given a condition that never "
+                f"fires, and a skipped required context is reported as success."
+            )
+        elif plant not in registered:
+            failures.append(
+                f"required context {context!r} names plant {plant!r}, which is not "
+                f"a registered guard"
+            )
+    for context in sorted(set(CONTRACT_PLANTS) - contexts):
+        failures.append(
+            f"CONTRACT_PLANTS names {context!r}, which is no longer a required "
+            f"context in the manifest; drop it or restore the context"
+        )
+    return failures
 
 
 def plant_governance_job_contract() -> Outcome:
@@ -1139,6 +1318,12 @@ GUARDS: tuple[Guard, ...] = (
         plant=plant_pr_route_build_inputs,
     ),
     Guard(
+        script="scripts/classify_pr_paths.py::route_contract",
+        status=GATING,
+        wiring=(),  # same file as above; wiring asserted once
+        plant=plant_route_contract,
+    ),
+    Guard(
         script="scripts/check_advisory_policy.py",
         status=GATING,
         wiring=(
@@ -1623,6 +1808,13 @@ def run() -> tuple[list[str], list[str]]:
 
     failures = _check_registry_covers_every_guard()
     passes: list[str] = []
+
+    contract_coverage = _check_required_contexts_have_plants()
+    failures += contract_coverage
+    if not contract_coverage:
+        passes.append(
+            "every required context has a plant proving its `if:` contract can fail"
+        )
 
     shadowing = _check_no_import_shadowing()
     failures += shadowing
