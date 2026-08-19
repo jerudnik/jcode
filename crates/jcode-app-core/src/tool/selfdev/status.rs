@@ -1,6 +1,6 @@
 use super::*;
 
-pub fn selfdev_status_output() -> Result<ToolOutput> {
+pub fn selfdev_status_output(working_dir: Option<&std::path::Path>) -> Result<ToolOutput> {
     let manifest = build::BuildManifest::load()?;
 
     let mut status = String::new();
@@ -11,7 +11,7 @@ pub fn selfdev_status_output() -> Result<ToolOutput> {
         jcode_build_meta::VERSION
     ));
 
-    if let Some(repo_dir) = build::get_repo_dir() {
+    if let Some(repo_dir) = SelfDevTool::resolve_repo_dir(working_dir) {
         let output = std::process::Command::new("git")
             .args(["status", "--porcelain"])
             .current_dir(&repo_dir)
@@ -158,8 +158,8 @@ pub fn selfdev_status_output() -> Result<ToolOutput> {
 }
 
 impl SelfDevTool {
-    pub(super) async fn do_status(&self) -> Result<ToolOutput> {
-        selfdev_status_output()
+    pub(super) async fn do_status(&self, ctx: &ToolContext) -> Result<ToolOutput> {
+        selfdev_status_output(ctx.working_dir.as_deref())
     }
 
     pub(super) async fn do_socket_info(&self) -> Result<ToolOutput> {

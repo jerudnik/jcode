@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -97,6 +98,31 @@ def compiled_body(text: str, apply_to: str, label: str = "AGENTS.md") -> str:
     return body.split(end_marker, 1)[0].strip()
 
 
+def is_tracked(relative: Path, root: Path | None = None) -> bool:
+    root = ROOT if root is None else root
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def regenerate_compiled_body(path: Path, expected_body: str, label: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    marker = "## Files matching `**`\n\n"
+    if marker not in text:
+        raise ValueError(
+            f"{label}: unrecognized APM-generated format; regenerate with apm compile"
+        )
+    prefix = text.split(marker, 1)[0]
+    path.write_text(f"{prefix}{marker}{expected_body.strip()}\n", encoding="utf-8")
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -149,7 +175,18 @@ def main() -> int:
                 claude_path.read_text(encoding="utf-8"), "**", "CLAUDE.md"
             )
             if observed_body != "\n\n".join(body.strip() for body in bodies):
-                errors.append("CLAUDE.md is stale; run apm compile")
+                if is_tracked(Path("CLAUDE.md")):
+                    errors.append("CLAUDE.md is stale; run apm compile")
+                else:
+                    try:
+                        regenerate_compiled_body(
+                            claude_path,
+                            "\n\n".join(body.strip() for body in bodies),
+                            "CLAUDE.md",
+                        )
+                        print("agent-instructions: regenerated CLAUDE.md")
+                    except (OSError, ValueError) as error:
+                        errors.append(str(error))
         except ValueError as error:
             errors.append(str(error))
 

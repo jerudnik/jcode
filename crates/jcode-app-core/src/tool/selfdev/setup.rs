@@ -35,6 +35,29 @@ impl SetupCheck {
     }
 }
 
+fn repository_revision(path: &std::path::Path) -> String {
+    let output = match Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            crate::logging::info(&format!(
+                "selfdev setup: could not read revision of {}: {error}",
+                path.display()
+            ));
+            return "unknown".to_string();
+        }
+    };
+    Some(output)
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|revision| !revision.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 /// Run a command and capture trimmed stdout if it succeeds.
 fn command_version(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
@@ -56,7 +79,11 @@ impl SelfDevTool {
     /// checkout. This never installs anything irreversible automatically; it
     /// reports what is missing and how to fix it, and clones the source when no
     /// checkout exists yet.
-    pub(super) async fn do_setup(&self, ctx: &ToolContext) -> Result<ToolOutput> {
+    pub(super) async fn do_setup(
+        &self,
+        ctx: &ToolContext,
+        explicit_context: Option<&str>,
+    ) -> Result<ToolOutput> {
         let mut checks: Vec<SetupCheck> = Vec::new();
 
         // Rust toolchain: cargo + rustc are required to build jcode.
@@ -90,10 +117,22 @@ impl SelfDevTool {
             )),
         }
 
-        // Repository checkout: locate an existing repo or clone the source.
-        let mut repo_dir: Option<std::path::PathBuf> =
-            SelfDevTool::resolve_repo_dir(ctx.working_dir.as_deref());
-        let mut clone_note: Option<String> = None;
+        // Repository checkout: an explicit context path wins when it is already
+        // a jcode checkout. Otherwise resolve the session working directory.
+        let explicit_repo = explicit_context
+            .map(std::path::Path::new)
+            .filter(|path| build::is_jcode_repo(path))
+            .map(std::path::Path::to_path_buf);
+        let mut repo_dir = explicit_repo.clone().or_else(|| {
+            SelfDevTool::resolve_repo_dir(ctx.working_dir.as_deref())
+        });
+        let mut clone_note: Option<String> = explicit_repo.as_deref().map(|path| {
+            format!(
+                "Bound jcode repository {} at commit {}.",
+                path.display(),
+                repository_revision(path)
+            )
+        });
 
         if repo_dir.is_none() {
             // Only attempt a clone when git is available and we're not in a
@@ -233,7 +272,12 @@ impl SelfDevTool {
             repo_dir
                 .as_deref()
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "not found (run `selfdev setup`)".to_string())
+                .unwrap_or_else(|| {
+                    ctx.working_dir
+                        .as_deref()
+                        .map(|dir| format!("not found (searched ancestors of {})", dir.display()))
+                        .unwrap_or_else(|| "not found (searched repository candidates)".to_string())
+                })
         ));
 
         output.push_str("\n### Binaries\n\n");

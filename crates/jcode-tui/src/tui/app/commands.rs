@@ -2297,7 +2297,7 @@ fn handle_selfdev_command(app: &mut App, trimmed: &str) -> bool {
 
     let rest = trimmed.strip_prefix("/selfdev").unwrap_or_default().trim();
     if rest == "status" {
-        match crate::tool::selfdev::selfdev_status_output() {
+        match crate::tool::selfdev::selfdev_status_output(None) {
             Ok(output) => {
                 app.push_display_message(DisplayMessage::system(output.output));
                 app.set_status_notice("Self-dev status");
