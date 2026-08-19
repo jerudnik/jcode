@@ -718,6 +718,30 @@ async fn find_config_reports_key_paths() {
 }
 
 #[tokio::test]
+async fn find_config_reports_where_repository_search_stopped() {
+    let _lock = lock_env();
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
+    let missing_repo = tempfile::TempDir::new().expect("missing repo dir");
+
+    let mut session = session::Session::create(None, Some("Missing repository".to_string()));
+    session.save().expect("save session");
+
+    let output = SelfDevTool::new()
+        .execute(
+            json!({"action": "find-config"}),
+            create_test_context(&session.id, Some(missing_repo.path().to_path_buf())),
+        )
+        .await
+        .expect("find-config should succeed");
+
+    assert!(output.output.contains(&format!(
+        "not found (searched ancestors of {})",
+        missing_repo.path().display()
+    )));
+}
+
+#[tokio::test]
 async fn setup_reports_dependency_checks() {
     let _lock = lock_env();
     let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
@@ -746,6 +770,36 @@ async fn setup_reports_dependency_checks() {
         metadata["repo_dir"].as_str(),
         Some(repo.path().to_string_lossy().as_ref())
     );
+}
+
+#[tokio::test]
+async fn setup_binds_an_explicit_jcode_context() {
+    let _lock = lock_env();
+    let temp_home = crate::storage::RuntimePaths::test_root("jcode-selfdev-home-");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
+    let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
+    let repo = create_repo_fixture();
+
+    let mut session = session::Session::create(None, Some("Bind repository".to_string()));
+    session.save().expect("save session");
+
+    let output = SelfDevTool::new()
+        .execute(
+            json!({
+                "action": "setup",
+                "context": repo.path().to_string_lossy(),
+            }),
+            create_test_context(&session.id, None),
+        )
+        .await
+        .expect("setup should succeed");
+
+    assert_eq!(
+        output.metadata.as_ref().and_then(|metadata| metadata["repo_dir"].as_str()),
+        Some(repo.path().to_string_lossy().as_ref())
+    );
+    assert!(output.output.contains("Bound jcode repository"));
+    assert!(output.output.contains("at commit"));
 }
 
 #[tokio::test]
@@ -811,7 +865,7 @@ async fn build_queues_background_tasks_and_reports_queue_status() {
             .contains("attached instead of spawning a duplicate build")
     );
 
-    let status_output = selfdev_status_output().expect("status output");
+    let status_output = selfdev_status_output(None).expect("status output");
     assert!(status_output.output.contains("## Build Queue"));
     assert!(status_output.output.contains("first reason"));
     assert!(status_output.output.contains("Attached watchers: 1"));
@@ -964,7 +1018,7 @@ async fn build_dedupes_identical_reason_and_version_with_attached_watcher() {
         first_meta["request_id"].as_str()
     );
 
-    let status_output = selfdev_status_output().expect("status output");
+    let status_output = selfdev_status_output(None).expect("status output");
     assert!(status_output.output.contains("Attached watchers: 1"));
     assert!(status_output.output.contains("alpha"));
     assert!(status_output.output.contains("beta"));
@@ -1044,7 +1098,7 @@ async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
             .any(|request| request.request_id == cancelled_request.request_id)
     );
 
-    let status_output = selfdev_status_output().expect("status output");
+    let status_output = selfdev_status_output(None).expect("status output");
     assert!(!status_output.output.contains("cancel me"));
 
     let first_meta = first.metadata.expect("first metadata");
@@ -1096,7 +1150,7 @@ fn status_output_prunes_stale_pending_requests() {
     };
     request.save().expect("save stale request");
 
-    let status_output = selfdev_status_output().expect("status output");
+    let status_output = selfdev_status_output(None).expect("status output");
     assert!(
         !status_output.output.contains("stale reason"),
         "stale request should be pruned from queue output"
@@ -1132,7 +1186,7 @@ fn status_output_reports_the_published_build_from_its_source_sidecar() {
     let source = test_source_state(std::path::Path::new("/tmp/jcode"));
     build::write_dev_binary_source_metadata(&published, &source).expect("write sidecar");
 
-    let status_output = selfdev_status_output().expect("status output");
+    let status_output = selfdev_status_output(None).expect("status output");
     assert!(
         status_output
             .output

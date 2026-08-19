@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitStatus};
 
 use crate::bus::{Bus, BusEvent, ClientMaintenanceAction, ClientRebuildStatus};
-use crate::{build, update};
+use crate::{build, session, update};
 
 pub fn hot_rebuild(session_id: &str) -> Result<()> {
     let cwd = std::env::current_dir()?;
-    let repo_dir =
-        build::get_repo_dir().ok_or_else(|| anyhow::anyhow!("Could not find jcode repository"))?;
+    let working_dir = session_working_dir(session_id);
+    let repo_dir = resolve_repo_dir(working_dir.as_deref())
+        .ok_or_else(|| anyhow::anyhow!("Could not find jcode repository"))?;
 
     eprintln!("Rebuilding jcode with session {}...", session_id);
     pull_latest_changes_for_rebuild(&repo_dir);
@@ -93,7 +94,8 @@ fn exec_rebuilt_session(exe: &Path, session_id: &str, cwd: &Path, is_selfdev: bo
 
 fn run_background_session_rebuild(session_id: String) {
     let publisher = BackgroundRebuildPublisher::new(session_id);
-    let Some(repo_dir) = build::get_repo_dir() else {
+    let working_dir = session_working_dir(&publisher.session_id);
+    let Some(repo_dir) = resolve_repo_dir(working_dir.as_deref()) else {
         publisher.error("Rebuild failed: could not find the jcode repository.");
         return;
     };
@@ -107,6 +109,39 @@ fn run_background_session_rebuild(session_id: String) {
     }
     background_publish_local_build(&publisher, &repo_dir);
     publish_rebuild_ready_or_error(publisher, &repo_dir);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolver_uses_the_explicit_working_directory_first() {
+        let repo = tempfile::TempDir::new().expect("repo fixture");
+        std::fs::write(
+            repo.path().join("Cargo.toml"),
+            "[package]\nname = \"jcode\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("cargo manifest");
+        std::fs::create_dir(repo.path().join(".git")).expect("git marker");
+        let nested = repo.path().join("crates").join("jcode-app-core");
+        std::fs::create_dir_all(&nested).expect("nested working directory");
+
+        assert_eq!(resolve_repo_dir(Some(&nested)), Some(repo.path().to_path_buf()));
+    }
+}
+
+fn session_working_dir(session_id: &str) -> Option<PathBuf> {
+    session::Session::load(session_id)
+        .ok()
+        .and_then(|session| session.working_dir.map(PathBuf::from))
+}
+
+fn resolve_repo_dir(working_dir: Option<&Path>) -> Option<PathBuf> {
+    match working_dir {
+        Some(dir) => build::find_repo_in_ancestors(dir),
+        None => build::get_repo_dir(),
+    }
 }
 
 #[derive(Clone)]
