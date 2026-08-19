@@ -78,3 +78,37 @@ fail earlier in the session.
   leaks (orphaned children, stale markers). This issue is about logical runaway
   of a healthy swarm: the same theme of trusting cooperative signals where
   enforcement is needed.
+
+## Earlier precursor: repeated same-shape gate injection
+
+An earlier deep-mode run repeatedly injected near-identical gap nodes because
+the underlying external blocker could not be resolved by workers. Rewording the
+same verification request bypassed cooperative stopping and continued graph
+growth. This is the same mechanism as failure 1 above, seen before the incident
+that opened this issue.
+
+The existing churn breaker detects repeated assignment waves, but it is not a
+per-gate semantic quota. Add an acceptance criterion that one gate may inject
+only a bounded number of materially equivalent gaps. Once the quota is
+exhausted, the gate must enter a blocked state and wake the coordinator with
+the unresolved prerequisite and the attempts already made.
+
+## Partial remedy for failure 5: role-aware member liveness watchdog
+
+Carried from a proposal that is otherwise retired. This addresses only the
+absent-liveness-reporting mechanism above. It does not supply the graph
+budgets, capability tiers, or working-directory enforcement that failures 1
+through 4 require.
+
+Configuration currently has a single global idle timeout shared by all
+streaming-provider paths. Add optional foreground and subagent stream-idle
+budgets, keeping the global timeout as the fallback, and resolve the effective
+value as role-specific, then global, then built-in default. Interactive
+foreground sessions should fail a genuinely dead model stream promptly, while
+background members receive a longer budget for slow or intermittent streams.
+
+Use the resolved budget for a member-liveness watchdog, not only for stream
+termination. The watchdog should evaluate meaningful activity such as streamed
+bytes, tool progress, and durable journal or control-log activity. It must
+distinguish a member that has never produced activity from one that was active
+and then paused, and it must preserve the last-known machine-readable state.
