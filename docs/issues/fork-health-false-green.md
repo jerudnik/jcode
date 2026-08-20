@@ -1,6 +1,6 @@
 ---
 status: open
-priority: critical
+priority: low
 owner: maintainers
 opened: 2026-08-15
 related:
@@ -8,31 +8,36 @@ related:
   - scripts/fork-health.sh
 ---
 
-# Hosted fork-health governance check is a false green
+# Fork-health: two open maintainer decisions
 
-The scheduled and manually dispatched `fork-health` workflow reports success even when its live governance comparison cannot run. The guard exits 2 because `RULESET_AUDIT_TOKEN` is undefined, but the workflow pipes it through `tee` without `pipefail`, so `tee` masks the failure.
+The original defect here is fixed and regression-pinned; this file now holds
+only the two decisions it surfaced. History: the scheduled `fork-health`
+workflow reported success while its guard exited 2, because the guard was
+piped through `tee` without `pipefail`. Fixed in `074f50998` (2026-08-17);
+`RULESET_AUDIT_TOKEN` is defined and the live comparison runs green; PR #200
+added the regression tests (`tests/test_governance_compare.py`:
+`test_live_without_credential_is_exit_two_end_to_end`, mutation-proven, and
+`test_fork_health_workflow_step_fails_when_the_guard_fails`, which reds if the
+pipefail line is ever removed). The protected-path count history (7 → 32 → 5 →
+10 across `621f4d44d`/`8907e568d`/`cb6edabf9`) is reconciled in the planning
+records.
 
-## Required decision and fix
+## Decision 1: is the G10A protected-path reduction's residue accepted?
 
-1. Add `set -o pipefail` to the workflow step so a failed guard fails the job.
-2. Either define a ruleset-read token that includes `bypass_actors`, or formally make the governance comparison local-only and remove the nonfunctional hosted leg.
-3. Decide whether the production contract's reduction from 27 protected paths and four contexts to five paths and two contexts is intentional. Restore coverage or document the accepted reduction.
-4. Decide whether the roughly 24-hour detection lag for an unprotected `fork-point` tag is accepted, or add tag-push detection/protection.
+Commit `621f4d44d` ("Change local governance definition, Modernization-Node:
+G10A", 2026-08-08) cut the protected set from 31 paths to 5. Five governance
+paths have since been restored on evidence (10 today). The residue — roughly
+21 formerly protected `scripts/`/`tests/` files — remains unprotected. Confirm
+that residue is intentional, or nominate additions via the manifest's
+`proposed_additions` flow.
 
-Until the first two items are resolved, hosted fork-health results do not prove the governance invariant.
+## Decision 2: fork-point tag detection lag
 
-## Bookkeeping invariant: green must mean the comparison completed
+The `fork-point` tag has no tag ruleset (both live rulesets are
+branch-target). An unauthorized tag move is detected only by the daily
+fork-health run, a ~24-hour lag. Accept the lag, or add a tag ruleset — noting
+that a ruleset change alters the writable contract hash and is a governance
+event in its own right.
 
-Carried from a proposal that is otherwise retired; its compaction half already
-shipped as a watermark-drift warning with regression tests, leaving this
-assertion as the live remainder.
-
-Fork-health is bookkeeping about repository governance state. A successful
-workflow result must prove that the governance comparison actually ran and
-passed. If required comparison input is unavailable or the guard exits
-non-zero, the workflow must report failure rather than allowing a downstream
-command to mask it.
-
-Add a regression case that runs the hosted workflow path with the ruleset-read
-credential absent and asserts a failed job. The visible result should name both
-the unavailable input and the comparison that was therefore not performed.
+Also unrecorded anywhere in-repo: the `RULESET_AUDIT_TOKEN`'s owner, scopes,
+and rotation story (it demonstrably works; nothing documents its lifecycle).

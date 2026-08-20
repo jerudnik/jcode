@@ -169,7 +169,7 @@ impl App {
         // call `begin_remote_send` with an empty body and carry their payload
         // in a `system_reminder`, bypassing this path entirely; that class of
         // blank turn is fixed in the agent, not here. See
-        // docs/issues/blank-continuation-turn.md.
+        // the blank-continuation-turn investigation (deleted when solved; git log -- docs/issues/blank-continuation-turn.md).
         if input.trim().is_empty() && self.pending_images.is_empty() {
             crate::logging::info("Ignoring blank submit");
             return;

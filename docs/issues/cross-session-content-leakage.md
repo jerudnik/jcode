@@ -32,12 +32,15 @@ reported, because the two carry different weight.
    naming the file's actual sections. Modality, not content length, was the
    difference.
 
-Detail and a delivery-semantics matrix to fill in:
-`docs/issues/swarm-dm-delivery-investigation.md`.
+Detail lived in `docs/issues/swarm-dm-delivery-investigation.md` (deleted when
+its mechanism was resolved; `git log` retains it).
 
-Update 2026-08-19: the notify delivery defect in item 1 is fixed in
-`notify-delivery-reaches-no-agent.md`; the long-body loss in item 2 remains
-open.
+Update 2026-08-19: items 1-3 are resolved. The notify delivery defect (item 1)
+was fixed in PR #194 (notify/broadcast/completion reports now queue for the
+recipient's next turn boundary); with that, the "delivered but never
+actionable" observations are explained. The 220-char swarm event-history stub
+is the only server-side archive of DM bodies, so long-body reconstruction from
+swarm context stays lossy by design.
 
 ## Reported, not yet reproduced here
 
@@ -114,11 +117,12 @@ landed.
 
 ## Related
 
-- `docs/issues/swarm-dm-delivery-investigation.md` — the plan-only investigation
-  brief covering items 1-3, with a standard of proof requiring the fix be
-  demonstrated failing first.
-- `docs/issues/shared-git-hooks-couples-worktrees.md` — a non-messaging instance
-  of concurrent sessions sharing state they appear not to share.
+- The DM delivery investigation and its fix history: PR #194 and
+  `git log -- docs/issues/notify-delivery-reaches-no-agent.md
+  docs/issues/swarm-dm-delivery-investigation.md` (both deleted when solved).
+- `git log -- docs/issues/shared-git-hooks-couples-worktrees.md` — a
+  non-messaging instance of concurrent sessions sharing state they appear not
+  to share (fixed by f459a65c6, deleted when solved).
 
 ## Design direction: immutable session identity and observation boundaries
 

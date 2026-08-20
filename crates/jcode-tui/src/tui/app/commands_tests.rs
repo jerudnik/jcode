@@ -154,7 +154,7 @@ fn model_not_found_is_fatal_model_endpoint_error() {
 // changes the todo list, so the gate must not re-fire against unchanged state:
 // an unguarded gate re-queues the identical reminder every turn, producing an
 // unbounded empty-content send loop at model round-trip speed.
-// See docs/issues/blank-continuation-turn.md.
+// See the blank-continuation-turn investigation (deleted when solved; git log -- docs/issues/blank-continuation-turn.md).
 #[test]
 fn todo_gate_fingerprint_is_stable_for_unchanged_todos() {
     use super::super::todos_view::todo_gate_fingerprint;
