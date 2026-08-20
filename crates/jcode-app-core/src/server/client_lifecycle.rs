@@ -1,4 +1,8 @@
 mod message_intake;
+#[path = "client_lifecycle_turn_processing.rs"]
+mod turn_processing;
+
+pub(crate) use turn_processing::process_message_streaming_mpsc;
 
 use super::client_actions::{
     AgentTaskContext, NotifySessionContext, handle_agent_task, handle_compact, handle_input_shell,
@@ -58,7 +62,6 @@ use crate::surface_workspace::SurfaceWorkspaceStore;
 use crate::tool::Registry;
 use crate::transport::Stream;
 use anyhow::Result;
-use futures::FutureExt;
 use jcode_agent_runtime::{InterruptSignal, SoftInterruptSource, StreamError};
 use message_intake::ProcessingMessage;
 use std::collections::{HashMap, HashSet};
@@ -152,6 +155,26 @@ struct ProcessingState<'a> {
     message_id: &'a mut Option<u64>,
     session_id: &'a mut Option<String>,
     task: &'a mut Option<tokio::task::JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+struct PendingRateLimitedMessage {
+    content: String,
+    images: Vec<(String, String)>,
+    system_reminder: Option<String>,
+}
+
+impl PendingRateLimitedMessage {
+    fn matches(
+        &self,
+        content: &str,
+        images: &[(String, String)],
+        system_reminder: Option<&String>,
+    ) -> bool {
+        self.content == content
+            && self.images == images
+            && self.system_reminder.as_ref() == system_reminder
+    }
 }
 
 struct SwarmStatusRefs<'a> {
@@ -509,6 +532,8 @@ pub(super) async fn handle_client(
     let mut processing_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut processing_message_id: Option<u64> = None;
     let mut processing_session_id: Option<String> = None;
+    let mut processing_message: Option<PendingRateLimitedMessage> = None;
+    let mut last_rate_limited_message: Option<PendingRateLimitedMessage> = None;
     let mut current_client_instance_id: Option<String> = None;
     // Client selfdev status is determined by Subscribe request, not server's env
     let mut client_selfdev = false;
@@ -770,8 +795,10 @@ pub(super) async fn handle_client(
                     }
 
                     let done_session = processing_session_id.take();
+                    let completed_message = processing_message.take();
                     match result {
                         Ok(()) => {
+                            last_rate_limited_message = None;
                             if let Some(session_id) = done_session.as_deref() {
                                 update_member_status_with_report(
                                     session_id,
@@ -790,6 +817,14 @@ pub(super) async fn handle_client(
                             }
                         }
                         Err(e) => {
+                            let retry_after_secs = e
+                                .downcast_ref::<StreamError>()
+                                .and_then(|se| se.retry_after_secs);
+                            if retry_after_secs.is_some() {
+                                last_rate_limited_message = completed_message;
+                            } else {
+                                last_rate_limited_message = None;
+                            }
                             if let Some(session_id) = done_session.as_deref() {
                                 // W7b: deterministic terminal label via the
                                 // shared typed mapping; interrupted turns end
@@ -808,7 +843,6 @@ pub(super) async fn handle_client(
                                 )
                                 .await;
                             }
-                            let retry_after_secs = e.downcast_ref::<StreamError>().and_then(|se| se.retry_after_secs);
                             if retry_after_secs.is_some() {
                                 crate::telemetry::record_error(crate::telemetry::ErrorCategory::RateLimited);
                             } else {
@@ -1142,7 +1176,11 @@ pub(super) async fn handle_client(
                         info.current_tool_name = None;
                     }
                 }
-                start_processing_message(
+                let reuse_existing_user_message =
+                    last_rate_limited_message.as_ref().is_some_and(|pending| {
+                        pending.matches(&content, &images, system_reminder.as_ref())
+                    });
+                turn_processing::start_processing_message_with_rate_limit_state(
                     ProcessingMessage {
                         id,
                         content,
@@ -1159,6 +1197,8 @@ pub(super) async fn handle_client(
                     &agent,
                     &client_event_tx,
                     &processing_done_tx,
+                    &mut processing_message,
+                    reuse_existing_user_message,
                     &SwarmStatusRefs {
                         members: &swarm_members,
                         swarms_by_id: &swarms_by_id,
@@ -2806,6 +2846,7 @@ pub(super) async fn handle_client(
     Ok(())
 }
 
+#[cfg(test)]
 async fn start_processing_message(
     message: ProcessingMessage,
     client_session_id: &str,
@@ -2815,132 +2856,19 @@ async fn start_processing_message(
     processing_done_tx: &mpsc::UnboundedSender<(u64, Result<()>, Option<String>)>,
     swarm: &SwarmStatusRefs<'_>,
 ) {
-    let ProcessingMessage {
-        id,
-        content,
-        images,
-        system_reminder,
-    } = message;
-    if server_reload_starting() {
-        crate::logging::info(&format!(
-            "Rejecting new message for session {} because server reload is starting",
-            client_session_id
-        ));
-        let _ = client_event_tx.send(ServerEvent::Reloading { new_socket: None });
-        return;
-    }
-
-    if *state.client_is_processing {
-        let _ = client_event_tx.send(ServerEvent::Error {
-            id,
-            message: "Already processing a message".to_string(),
-            retry_after_secs: None,
-        });
-        return;
-    }
-
-    *state.client_is_processing = true;
-    *state.message_id = Some(id);
-    *state.session_id = Some(client_session_id.to_string());
-
-    if let Some(reminder) = system_reminder.as_deref()
-        && let Err(error) = super::reload_recovery::mark_delivered_if_matching_continuation(
-            client_session_id,
-            reminder,
-            "client_message_accepted",
-        )
-    {
-        crate::logging::warn(&format!(
-            "Failed to mark reload recovery intent delivered for accepted message session={} id={}: {}",
-            client_session_id, id, error
-        ));
-    }
-
-    update_member_status(
+    let mut processing_message = None;
+    turn_processing::start_processing_message_with_rate_limit_state(
+        message,
         client_session_id,
-        "running",
-        Some(truncate_detail(&content, 120)),
-        swarm.members,
-        swarm.swarms_by_id,
-        Some(swarm.event_history),
-        Some(swarm.event_counter),
-        Some(swarm.event_tx),
+        state,
+        agent,
+        client_event_tx,
+        processing_done_tx,
+        &mut processing_message,
+        false,
+        swarm,
     )
     .await;
-
-    let start_message_index = {
-        let agent_guard = agent.lock().await;
-        agent_guard.message_count()
-    };
-    let agent = Arc::clone(agent);
-    let report_agent = Arc::clone(&agent);
-    let tx = super::state::session_event_fanout_sender_with_fallback(
-        client_session_id.to_string(),
-        Arc::clone(swarm.members),
-        client_event_tx.clone(),
-    );
-    let done_tx = processing_done_tx.clone();
-    crate::logging::info(&format!("Processing message id={} spawning task", id));
-    *state.task = Some(tokio::spawn(async move {
-        let event_tx = tx.clone();
-        let result = match std::panic::AssertUnwindSafe(process_message_streaming_mpsc(
-            agent,
-            &content,
-            images,
-            system_reminder,
-            event_tx,
-        ))
-        .catch_unwind()
-        .await
-        {
-            Ok(result) => result,
-            Err(panic_payload) => {
-                let msg = if let Some(text) = panic_payload.downcast_ref::<&str>() {
-                    text.to_string()
-                } else if let Some(text) = panic_payload.downcast_ref::<String>() {
-                    text.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
-                crate::logging::error(&format!(
-                    "Processing task PANICKED for message id={}: {}",
-                    id, msg
-                ));
-                Err(anyhow::anyhow!("Processing task panicked: {}", msg))
-            }
-        };
-        match &result {
-            Ok(()) => crate::logging::info(&format!(
-                "Processing task completed OK for message id={}",
-                id
-            )),
-            Err(error) => crate::logging::warn(&format!(
-                "Processing task completed with error for message id={}: {}",
-                id, error
-            )),
-        }
-        let completion_report = if result.is_ok() {
-            let agent = report_agent.lock().await;
-            agent.latest_assistant_text_after(start_message_index)
-        } else {
-            None
-        };
-        // Keep the terminal event on the same ordered fanout channel as the
-        // stream. Sending it later from the owning client's event loop could
-        // race ahead of the final MessageEnd for newly attached clients.
-        let terminal_event = match &result {
-            Ok(()) => ServerEvent::Done { id },
-            Err(error) => ServerEvent::Error {
-                id,
-                message: crate::util::format_error_chain(error),
-                retry_after_secs: error
-                    .downcast_ref::<StreamError>()
-                    .and_then(|stream_error| stream_error.retry_after_secs),
-            },
-        };
-        let _ = tx.send(terminal_event);
-        let _ = done_tx.send((id, result, completion_report));
-    }));
 }
 
 async fn cancel_processing_message(
@@ -3198,48 +3126,6 @@ fn move_tool_to_background(
         "SERVER_BACKGROUND_TOOL_RESULT id={} session={} signalled={} ack_queued={}",
         id, session_control.session_id, signalled, ack_queued
     ));
-}
-
-/// Process a message and stream events (mpsc channel - per-client)
-pub(super) async fn process_message_streaming_mpsc(
-    agent: Arc<Mutex<Agent>>,
-    content: &str,
-    images: Vec<(String, String)>,
-    system_reminder: Option<String>,
-    event_tx: tokio::sync::mpsc::UnboundedSender<ServerEvent>,
-) -> Result<()> {
-    // Activity lease (F01 design 3.3): this is the common provider-turn
-    // boundary for every caller family (client message tasks, client
-    // actions, swarm assignment, spawned/headless initial turns, Jade relay,
-    // live wake turns, startup reload-recovery continuations). Acquiring at
-    // the top of the future covers all of them by construction, including
-    // the wait for the per-session agent mutex. A ShuttingDown refusal means
-    // the daemon is draining: no new turn may start.
-    let _lease = super::shutdown::acquire_lease(
-        jcode_core::activity::ActivityClass::ProviderTurn,
-        "streaming-turn",
-    )
-    .map_err(|refused| anyhow::anyhow!("turn refused: {refused}"))?;
-    let mut agent = agent.lock().await;
-    let session_id = agent.session_id().to_string();
-    let result = agent
-        .run_once_streaming_mpsc(content, images, system_reminder, event_tx)
-        .await;
-    if result.is_ok() {
-        crate::runtime_memory_log::emit_event(
-            crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
-                "turn_completed",
-                "message_turn_finished",
-            )
-            .with_session_id(session_id)
-            .force_attribution(),
-        );
-        crate::process_memory::release_retained_heap_debounced(
-            "server_turn_completed",
-            std::time::Duration::from_secs(30),
-        );
-    }
-    result
 }
 
 #[cfg(test)]

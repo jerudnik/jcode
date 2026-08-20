@@ -1491,7 +1491,7 @@ pub struct App {
 
 impl App {
     const AUTO_RETRY_BASE_DELAY_SECS: u64 = 2;
-    const AUTO_RETRY_MAX_ATTEMPTS: u8 = 3;
+    const AUTO_RETRY_MAX_ATTEMPTS: u8 = 8;
     /// Circuit breaker for credential failures: once this many consecutive
     /// turn errors classify as credential/auth failures, every automatic
     /// resend path (auto-retry, auto-poke, overnight poke, queued follow-ups)
