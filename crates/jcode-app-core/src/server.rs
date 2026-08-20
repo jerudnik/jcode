@@ -504,6 +504,8 @@ use self::util::{
 mod file_activity;
 use self::file_activity::file_activity_scope_label;
 
+mod file_scope_signal;
+
 mod file_touch_service;
 pub(crate) use self::file_touch_service::FileTouchService;
 
@@ -1840,7 +1842,7 @@ impl Server {
         swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
         swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
         _swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
-        _swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
+        swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
         sessions: Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>,
         soft_interrupt_queues: SessionInterruptQueues,
         event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
@@ -1849,6 +1851,12 @@ impl Server {
     ) {
         let mut receiver = Bus::global().subscribe();
         let mut last_cleanup = Instant::now();
+        let mut scope_signals = file_scope_signal::FileScopeSignals::new(
+            Arc::clone(&swarm_members),
+            Arc::clone(&swarm_coordinators),
+            Arc::clone(&sessions),
+            Arc::clone(&soft_interrupt_queues),
+        );
         const TOUCH_EXPIRY: Duration = Duration::from_secs(30 * 60); // 30 min
         const CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60); // 5 min
 
@@ -1864,21 +1872,7 @@ impl Server {
                     let path = touch.path.clone();
                     let session_id = touch.session_id.clone();
 
-                    // Record this touch
-                    file_touch
-                        .record_touch(
-                            path.clone(),
-                            FileAccess {
-                                session_id: session_id.clone(),
-                                op: touch.op.clone(),
-                                timestamp: Instant::now(),
-                                absolute_time: std::time::SystemTime::now(),
-                                intent: touch.intent.clone(),
-                                summary: touch.summary.clone(),
-                                detail: touch.detail.clone(),
-                            },
-                        )
-                        .await;
+                    scope_signals.record_touch(&file_touch, &touch).await;
 
                     // Record event for subscription
                     {
