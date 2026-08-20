@@ -36,6 +36,25 @@ then wakes to a wall of identical turns.
 - Consider coalescing: identical queued bodies collapse to one turn plus a
   count.
 
+## Investigation and implementation (2026-08-20)
+
+The accumulation is real on both sides of the client/server boundary. The TUI
+receives the provider's rate-limit error in
+`crates/jcode-tui/src/tui/app/remote/server_events.rs` and re-sends the stored
+`PendingRemoteMessage`. On the server, `Request::Message` is accepted again
+after the prior task finishes, and
+`Agent::run_once_streaming_mpsc` persists the user message before entering the
+provider turn. Replaying the same body therefore created another stored user
+turn on every accepted retry.
+
+The client retry path now counts attempts, schedules each retry after
+`max(retry_after, base_delay * attempts)`, and stops after eight attempts. At
+the cap it leaves the original content in the pending state and shows a
+manual `/poke` recovery message instead of dropping it. The server also keeps
+the last rate-limited payload per client and reuses the existing final user
+message when the next request has the same content, images, and system
+reminder, preventing another history copy.
+
 ## Related
 
 - `docs/issues/cross-session-content-leakage.md` — same morning, same fleet of

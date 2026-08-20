@@ -105,6 +105,22 @@ remote-attached), so the remote-pointer vs last-focused-pointer split is still
 open. Requires the operator's recollection of the pane or a repro before
 assigning blame between the two candidates.
 
+## Item 5 implementation finding (2026-08-20)
+
+The server-side inspection confirms that an accepted client retry is persisted
+inside `Agent::run_once_streaming_mpsc` before the provider call. That explains
+duplicate history turns, but not cross-session todo storage: the todo read and
+write paths remain keyed by `ctx.session_id` and
+`~/.jcode/todos/<session_id>.json`.
+
+The remaining client-side risk is the remote render pointer. Todo cards now
+include both `session_id` and the friendly name derived by
+`extract_session_name` in their payload and header. Both card display and live
+refresh log one info line when `is_remote` and the remote pointer differs from
+the local `session.id`, including an explicit `<none>` value for a missing
+pointer. This makes a stale or misrouted remote card identifiable without
+changing the session selection behavior.
+
 ## Why these are grouped
 
 All five are the same failure shape: a message is *delivered* by the system's own

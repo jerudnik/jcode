@@ -240,9 +240,70 @@ impl App {
         }
     }
 
+    pub(super) fn schedule_pending_remote_rate_limit_retry(
+        &mut self,
+        retry_after: Duration,
+        reason: &str,
+    ) -> bool {
+        let Some(pending) = self.rate_limit_pending_message.as_mut() else {
+            return false;
+        };
+        let current_attempts = pending.retry_attempts;
+        if current_attempts >= Self::AUTO_RETRY_MAX_ATTEMPTS {
+            let content = pending.content.clone();
+            pending.auto_retry = false;
+            self.rate_limit_reset = None;
+            self.push_display_message(DisplayMessage::error(format!(
+                "{} Auto-retry limit reached after {} attempts. Message preserved for manual `/poke`: {}",
+                reason, current_attempts, content
+            )));
+            return false;
+        }
+
+        pending.auto_retry = true;
+        pending.retry_attempts += 1;
+        let backoff_secs = Self::AUTO_RETRY_BASE_DELAY_SECS * u64::from(pending.retry_attempts);
+        let delay = retry_after.max(Duration::from_secs(backoff_secs));
+        let retry_at = Instant::now() + delay;
+        pending.retry_at = Some(retry_at);
+        self.rate_limit_reset = Some(retry_at);
+        true
+    }
+
     pub(super) fn clear_pending_remote_retry(&mut self) {
         self.rate_limit_pending_message = None;
         self.rate_limit_reset = None;
+    }
+
+    pub(super) fn reset_remote_rate_limit_processing_state(
+        &mut self,
+        remote: &mut impl backend::RemoteEventState,
+    ) {
+        self.is_processing = false;
+        self.status = ProcessingStatus::Idle;
+        self.stream_message_ended = false;
+        self.processing_started = None;
+        self.clear_visible_turn_started();
+        self.current_message_id = None;
+        remote.clear_pending();
+        remote.reset_call_output_tokens_seen();
+    }
+
+    pub(super) fn prepare_pending_remote_rate_limit_retry(
+        &mut self,
+        retry_after: Duration,
+        reason: &str,
+        remote: &mut impl backend::RemoteEventState,
+    ) -> Option<bool> {
+        let is_system = self
+            .rate_limit_pending_message
+            .as_ref()
+            .map(|pending| pending.is_system)?;
+        if !self.schedule_pending_remote_rate_limit_retry(retry_after, reason) {
+            self.reset_remote_rate_limit_processing_state(remote);
+            return Some(false);
+        }
+        Some(is_system)
     }
 
     /// Track a failed turn for the credential-failure circuit breaker.

@@ -1227,12 +1227,12 @@ pub(in crate::tui::app) fn handle_server_event(
                 .map(Duration::from_secs)
                 .or_else(|| parse_rate_limit_error(&message));
             if let Some(reset_duration) = reset_duration {
-                app.rate_limit_reset = Some(Instant::now() + reset_duration);
-                if let Some(is_system) = app
-                    .rate_limit_pending_message
-                    .as_ref()
-                    .map(|pending| pending.is_system)
+                if let Some(is_system) =
+                    app.prepare_pending_remote_rate_limit_retry(reset_duration, &message, remote)
                 {
+                    if app.rate_limit_reset.is_none() {
+                        return false;
+                    }
                     app.push_display_message(DisplayMessage::system(format!(
                         "⏳ Rate limit hit. Will auto-retry in {} seconds...",
                         reset_duration.as_secs()
@@ -1242,14 +1242,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     } else {
                         app.set_status_notice("Rate limited; queued retry");
                     }
-                    app.is_processing = false;
-                    app.status = ProcessingStatus::Idle;
-                    app.stream_message_ended = false;
-                    app.processing_started = None;
-                    app.clear_visible_turn_started();
-                    app.current_message_id = None;
-                    remote.clear_pending();
-                    remote.reset_call_output_tokens_seen();
+                    app.reset_remote_rate_limit_processing_state(remote);
                     return false;
                 }
             }

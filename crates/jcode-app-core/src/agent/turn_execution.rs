@@ -60,6 +60,24 @@ impl Agent {
         system_reminder: Option<String>,
         event_tx: mpsc::UnboundedSender<ServerEvent>,
     ) -> Result<()> {
+        self.run_once_streaming_mpsc_with_existing_user_message(
+            user_message,
+            images,
+            system_reminder,
+            event_tx,
+            false,
+        )
+        .await
+    }
+
+    pub async fn run_once_streaming_mpsc_with_existing_user_message(
+        &mut self,
+        user_message: &str,
+        images: Vec<(String, String)>,
+        system_reminder: Option<String>,
+        event_tx: mpsc::UnboundedSender<ServerEvent>,
+        reuse_existing_user_message: bool,
+    ) -> Result<()> {
         // Inject any pending notifications before the user message
         let alerts = self.take_alerts();
         if !alerts.is_empty() {
@@ -138,7 +156,10 @@ impl Agent {
         }
 
         let image_count = blocks.len().saturating_sub(1);
-        if !blocks.is_empty() {
+        let duplicate_user_message = reuse_existing_user_message
+            && self.last_message_role() == Some(Role::User)
+            && self.last_message_text() == Some(user_message);
+        if !blocks.is_empty() && !duplicate_user_message {
             self.add_message(Role::User, blocks);
         }
         crate::telemetry::record_turn();

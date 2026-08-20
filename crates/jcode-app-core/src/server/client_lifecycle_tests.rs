@@ -1411,3 +1411,5 @@ fn decode_request_or_event(line: &str) -> ServerEvent {
 
 #[path = "client_lifecycle_tests/empty_turn.rs"]
 mod empty_turn;
+#[path = "client_lifecycle_tests/rate_limit_coalescing.rs"]
+mod rate_limit_coalescing;
