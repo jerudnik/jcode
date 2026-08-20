@@ -87,7 +87,7 @@ pub(super) fn request_payload_summary(kind: &str, line: &str) -> Vec<(String, St
             // so omitting this field made an empty-bodied turn indistinguishable
             // from a truly empty one and produced a false negative that cost
             // hours of debugging. See
-            // docs/issues/blank-continuation-turn.md.
+            // the blank-continuation-turn investigation (deleted when solved; git log -- docs/issues/blank-continuation-turn.md).
             "system_reminder",
         ] {
             bytes_chars(name, &value, &mut fields);

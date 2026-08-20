@@ -112,3 +112,21 @@ termination. The watchdog should evaluate meaningful activity such as streamed
 bytes, tool progress, and durable journal or control-log activity. It must
 distinguish a member that has never produced activity from one that was active
 and then paused, and it must preserve the last-known machine-readable state.
+
+## Update 2026-08-19: budgets and freeze landed; enforcement tiers remain
+
+PR #197 implemented the tractable half: `MAX_GATE_INJECTIONS = 3` per gate,
+a total-node budget (`max_nodes`, default 64, config
+`agents.swarm_max_graph_nodes`) enforced in both `expand_node` and
+`inject_from_gate`, coordinator-only `freeze|unfreeze` with server-side
+rejection while frozen, and run_plan growth checkpoints (fire at 2x seed and
+each doubling). The engine probe that previously grew 2 seeds to 123 nodes
+with no cap now stops at a quota rejection at 6 nodes. PR #194 separately
+gave coordinator broadcasts teeth (failure mechanism 2's root: broadcasts
+defaulted to a delivery mode whose handler was empty).
+
+Still open from the protections list, deliberately deferred as design
+decisions: capability tiers per node kind (read-only enforcement at the tool
+layer), enforced working-directory scope at tool-call time (its prerequisite
+— a trustworthy recorded cwd — landed in PR #195), and the role-aware
+liveness watchdog sketched above.
