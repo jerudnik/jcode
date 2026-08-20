@@ -130,3 +130,11 @@ decisions: capability tiers per node kind (read-only enforcement at the tool
 layer), enforced working-directory scope at tool-call time (its prerequisite
 — a trustworthy recorded cwd — landed in PR #195), and the role-aware
 liveness watchdog sketched above.
+
+Maintainer decision 2026-08-20: working-directory drift now produces an
+observability signal, not tool-call interception or enforcement. When a swarm
+member first touches a file outside its recorded working directory, the server
+queues one non-urgent soft interrupt to that swarm's coordinator. The signal is
+deduplicated per member and recorded working directory. It does not reject,
+block, or rewrite the file operation, so the enforcement designs above remain
+open.
