@@ -187,8 +187,10 @@ async fn queue_soft_interrupt_for_session_persists_when_live_queue_is_unavailabl
 /// A backgrounded `swarm await` that resolves while the requesting session is
 /// busy is delivered as a NON-URGENT soft interrupt.
 ///
-/// This is the mechanism behind the delivery lag recorded in
-/// `docs/issues/await-notification-dating.md`. Urgency is what gates the
+/// This is the mechanism behind the delivery lag investigated in
+/// await-notification-dating (closed as working-as-designed 2026-08-20:
+/// gentle delivery is the chosen default; git log -- docs/issues/
+/// await-notification-dating.md). Urgency is what gates the
 /// skip-remaining-tools path (injection point C in
 /// `agent/turn_streaming_mpsc.rs`); a non-urgent interrupt is held for
 /// injection point D, "all tools done, before next API call". So an await
