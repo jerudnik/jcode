@@ -8,36 +8,41 @@ related:
   - scripts/fork-health.sh
 ---
 
-# Fork-health: two open maintainer decisions
+# Fork-health: residue of a fixed defect (decisions recorded)
 
-The original defect here is fixed and regression-pinned; this file now holds
-only the two decisions it surfaced. History: the scheduled `fork-health`
-workflow reported success while its guard exited 2, because the guard was
-piped through `tee` without `pipefail`. Fixed in `074f50998` (2026-08-17);
-`RULESET_AUDIT_TOKEN` is defined and the live comparison runs green; PR #200
-added the regression tests (`tests/test_governance_compare.py`:
-`test_live_without_credential_is_exit_two_end_to_end`, mutation-proven, and
+The original defect is fixed and regression-pinned. History: the scheduled
+`fork-health` workflow reported success while its guard exited 2, because the
+guard was piped through `tee` without `pipefail`. Fixed in `074f50998`
+(2026-08-17); `RULESET_AUDIT_TOKEN` is defined and the live comparison runs
+green; PR #200 added the regression tests
+(`test_live_without_credential_is_exit_two_end_to_end`, mutation-proven, and
 `test_fork_health_workflow_step_fails_when_the_guard_fails`, which reds if the
-pipefail line is ever removed). The protected-path count history (7 → 32 → 5 →
-10 across `621f4d44d`/`8907e568d`/`cb6edabf9`) is reconciled in the planning
-records.
+pipefail line is ever removed).
 
-## Decision 1: is the G10A protected-path reduction's residue accepted?
+## Decision 1 (answered 2026-08-20): the G10A reduction was intentional
 
-Commit `621f4d44d` ("Change local governance definition, Modernization-Node:
-G10A", 2026-08-08) cut the protected set from 31 paths to 5. Five governance
-paths have since been restored on evidence (10 today). The residue — roughly
-21 formerly protected `scripts/`/`tests/` files — remains unprotected. Confirm
-that residue is intentional, or nominate additions via the manifest's
-`proposed_additions` flow.
+Session-history archaeology settled it. `621f4d44d`'s 31→5 protected-path cut
+executed node G10A of the modernization task graph
+(`docs/modernization/TASK_GRAPH.json`), whose designed content read "Change
+the local governance definition. Remove Governance Root from the required
+checks, limit protected paths to long-lived rules...". The node was
+adversarially reviewed by two verify swarms on 2026-08-07 before execution,
+and its reversal of F23's earlier protected-path growth was consciously
+recorded afterwards (PR #154, `docs/fork/ideal-base/DECISIONS.md`). The
+five paths restored since (10 today) were evidence-driven post-audit
+additions, consistent with "long-lived rules". The ~21-path residue is
+therefore intentional by standing design; new additions go through the
+manifest's `proposed_additions` adjudication flow on evidence, as the last
+five did.
 
-## Decision 2: fork-point tag detection lag
+## Decision 2 (answered 2026-08-20): the tag-lag is accepted for now
 
-The `fork-point` tag has no tag ruleset (both live rulesets are
-branch-target). An unauthorized tag move is detected only by the daily
-fork-health run, a ~24-hour lag. Accept the lag, or add a tag ruleset — noting
-that a ruleset change alters the writable contract hash and is a governance
-event in its own right.
+The `fork-point` tag has no tag ruleset, so an unauthorized move is detected
+only by the daily fork-health run (~24h lag). Accepted unless a finding says
+otherwise; adding a tag ruleset would change the writable contract hash and
+is a governance event to take deliberately, not as a side effect.
 
-Also unrecorded anywhere in-repo: the `RULESET_AUDIT_TOKEN`'s owner, scopes,
-and rotation story (it demonstrably works; nothing documents its lifecycle).
+## Still unrecorded
+
+The `RULESET_AUDIT_TOKEN`'s owner, scopes, and rotation story (it demonstrably
+works; nothing in-repo documents its lifecycle).

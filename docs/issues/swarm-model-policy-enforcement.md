@@ -79,3 +79,25 @@ interface will describe a policy the system does not keep.
 Sequencing: settle the routing model in the interface work, then implement
 enforcement here. Implementing enforcement first risks pinning a vocabulary
 the interface then has to work around.
+
+## Decision direction (maintainer, 2026-08-20)
+
+The answer to "should a resolvable model ever be refused" is **yes**, but the
+enforcement point arrives as part of a larger routing rework rather than as a
+standalone deny list now. The intended shape:
+
+- The model picker is overgrown and gets cleaned up.
+- Effort/parameter communication to models gets normalized (one vocabulary
+  for effort and similar knobs across providers).
+- Certain models become **completely disableable via the UI or config** —
+  disabled means 100% unroutable: not spawnable, not pickable, not
+  inheritable by subagents, refused at resolution with the fail-closed error
+  shape `provider-confusion.md` Path A established.
+
+This matches the issue's own sequencing advice: settle the routing model in
+the interface work, then enforce it in `resolve_swarm_spawn_selection` (and
+the subagent inheritance path), so the interface never describes a policy the
+resolver does not keep. Fresh evidence for the resolution half while this was
+decided (2026-08-19): three bare-name spawns (`deepseek-v4-pro`, `glm-5.2`,
+`k3`) failed closed with the Path A error, exactly as designed — the policy
+half remains the gap this issue tracks.
