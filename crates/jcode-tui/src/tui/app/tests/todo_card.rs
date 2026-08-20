@@ -99,6 +99,11 @@ fn refresh_todo_card_updates_content_when_todos_change() {
             .expect("todo card pushed");
         assert!(card.content.contains("write the card"));
         assert!(card.content.contains("\"goals\""));
+        assert!(
+            card.content
+                .contains(&format!("\"session_id\":\"{}\"", session_id))
+        );
+        assert!(card.content.contains("\"session_name\""));
 
         // Unchanged todos: refresh is a no-op.
         assert!(!app.refresh_todo_card_if_needed());

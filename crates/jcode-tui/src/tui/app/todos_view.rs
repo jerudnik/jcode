@@ -39,10 +39,11 @@ impl App {
     /// Push (or move to the bottom) the inline todo card with fresh data. The
     /// transcript keeps at most one card so repeated toggles don't stack.
     pub(super) fn show_todo_card(&mut self) {
+        self.log_remote_todo_card_misroute();
         let session_id = self.active_client_session_id().map(str::to_string);
         let todos = load_current_session_todos(session_id.as_deref());
         let goals = load_current_session_goals(session_id.as_deref());
-        let content = todo_card_payload_json(&todos, &goals);
+        let content = todo_card_payload_json(session_id.as_deref(), &todos, &goals);
         self.todo_card_rendered_hash = hash_todos_payload(session_id.as_deref(), &todos, &goals);
 
         if let Some(idx) = self.latest_todo_card_index() {
@@ -59,6 +60,7 @@ impl App {
     /// Live-refresh the inline todo card when the session todo list changed.
     /// Returns true when the transcript was updated.
     pub(super) fn refresh_todo_card_if_needed(&mut self) -> bool {
+        self.log_remote_todo_card_misroute();
         let Some(idx) = self.latest_todo_card_index() else {
             return false;
         };
@@ -70,8 +72,21 @@ impl App {
             return false;
         }
         self.todo_card_rendered_hash = next_hash;
-        let content = todo_card_payload_json(&todos, &goals);
+        let content = todo_card_payload_json(session_id.as_deref(), &todos, &goals);
         self.replace_display_message_content(idx, content)
+    }
+
+    fn log_remote_todo_card_misroute(&self) {
+        if self.is_remote {
+            let remote_session_id = self.remote_session_id.as_deref();
+            if remote_session_id != Some(self.session.id.as_str()) {
+                crate::logging::info(&format!(
+                    "Todo card session mismatch: rendering session_id={} remote_session_id={}",
+                    self.session.id,
+                    remote_session_id.unwrap_or("<none>"),
+                ));
+            }
+        }
     }
 
     pub(super) fn set_todos_view_enabled(&mut self, enabled: bool, focus: bool) {
@@ -285,8 +300,14 @@ fn load_current_session_goals(session_id: Option<&str>) -> Vec<crate::todo::Todo
     crate::todo::load_goals(session_id).unwrap_or_default()
 }
 
-fn todo_card_payload_json(todos: &[TodoItem], goals: &[crate::todo::TodoGoal]) -> String {
+fn todo_card_payload_json(
+    session_id: Option<&str>,
+    todos: &[TodoItem],
+    goals: &[crate::todo::TodoGoal],
+) -> String {
     serde_json::to_string(&serde_json::json!({
+        "session_id": session_id,
+        "session_name": session_id.and_then(crate::id::extract_session_name),
         "todos": todos,
         "goals": goals,
     }))

@@ -8,7 +8,10 @@ use crate::message::{
 };
 pub(super) use cache_support::get_cached_message_lines;
 use cache_support::{centered_wrap_width, left_pad_lines_for_centered_mode};
+#[path = "ui_todo_card.rs"]
+mod todo_card_support;
 use std::borrow::Cow;
+use todo_card_support::{TodoCardPayload, render_session_spans};
 use unicode_width::UnicodeWidthStr;
 
 const MAX_INLINE_DIFF_LINES: usize = 12;
@@ -870,18 +873,6 @@ pub(crate) fn render_overnight_message(
     lines
 }
 
-#[derive(serde::Deserialize)]
-#[serde(untagged)]
-enum TodoCardPayload {
-    Current {
-        #[serde(default)]
-        todos: Vec<crate::todo::TodoItem>,
-        #[serde(default)]
-        goals: Vec<crate::todo::TodoGoal>,
-    },
-    Legacy(Vec<crate::todo::TodoItem>),
-}
-
 // Todo cards sit directly on the terminal background, so the global
 // `dim_color()` (RGB 80) is too faint for meaningful metadata. Keep a compact
 // semantic palette here: cool colors describe structure/state, while amber is
@@ -904,15 +895,6 @@ fn todo_score_color() -> Color {
 
 fn todo_confidence_color() -> Color {
     rgb(135, 155, 180)
-}
-
-impl TodoCardPayload {
-    fn into_parts(self) -> (Vec<crate::todo::TodoItem>, Vec<crate::todo::TodoGoal>) {
-        match self {
-            Self::Current { todos, goals } => (todos, goals),
-            Self::Legacy(todos) => (todos, Vec::new()),
-        }
-    }
 }
 
 fn parse_todo_tool_output(
@@ -992,7 +974,7 @@ pub(crate) fn render_todos_message(
     let Ok(payload) = serde_json::from_str::<TodoCardPayload>(&msg.content) else {
         return render_system_message(msg, width, diff_mode);
     };
-    let (todos, goals) = payload.into_parts();
+    let (session, todos, goals) = payload.into_parts();
 
     let centered = markdown::center_code_blocks();
     let meta_style = Style::default().fg(todo_meta_color());
@@ -1006,6 +988,9 @@ pub(crate) fn render_todos_message(
     let inner_width = card_width.saturating_sub(base_indent.width()).max(1);
 
     let mut lines = Vec::new();
+    if let Some(spans) = render_session_spans(&session, meta_style) {
+        lines.push(todo_card_line(spans, base_indent, inner_width));
+    }
     if todos.is_empty() {
         lines.push(todo_card_line(
             vec![Span::styled(
