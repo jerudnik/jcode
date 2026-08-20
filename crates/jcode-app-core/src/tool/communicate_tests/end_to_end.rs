@@ -401,8 +401,10 @@ async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_clea
         seed_output.output
     );
 
+    // Worker startup cannot be hoisted from this operation. Use the setup budget
+    // from `docs/issues/comm-e2e-tests-flake-under-saturation.md`.
     let error = tokio::time::timeout(
-        Duration::from_secs(30),
+        E2E_SETUP_BUDGET,
         tool.execute(
             json!({
                 "action": "run_plan",
@@ -422,10 +424,8 @@ async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_clea
         configured_concurrency * RunPlanChurnGuard::max_created_sessions_before_abort(1);
     assert_eq!(declared_bound, 6, "configured concurrency * 3 bound");
 
-    // Provider attempts are not a session count: provider-open retry policy can
-    // legitimately call the same failing provider more than once per worker.
-    // The churn guard's diagnostic carries the unique lost worker sessions,
-    // which is the authority this fixture is intended to bound.
+    // Provider retries may call a failing provider more than once per worker;
+    // the churn diagnostic's unique lost sessions are the bounded authority.
     let lost_workers = message
         .split_once("Lost worker(s): ")
         .and_then(|(_, tail)| tail.split_once(". Residue policy:"))
