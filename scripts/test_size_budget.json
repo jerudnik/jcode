@@ -9,7 +9,6 @@
     "crates/jcode-app-core/src/server/provider_control_tests.rs": 1228,
     "crates/jcode-app-core/src/server/swarm/tests.rs": 1656,
     "crates/jcode-app-core/src/tool/communicate_tests.rs": 1761,
-    "crates/jcode-app-core/src/tool/selfdev/tests.rs": 1202,
     "crates/jcode-base/src/compaction_tests.rs": 1293,
     "crates/jcode-base/src/config_tests.rs": 1313,
     "crates/jcode-base/src/live_tests.rs": 3088,
