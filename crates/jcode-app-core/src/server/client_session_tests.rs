@@ -10,7 +10,7 @@ use crate::message::{Message, ToolDefinition};
 use crate::protocol::ServerEvent;
 use crate::provider::{EventStream, Provider};
 use crate::server::{
-    ClientConnectionInfo, ClientDebugState, FileTouchService, SessionInterruptQueues, SwarmEvent,
+    ClientConnectionInfo, FileTouchService, SessionInterruptQueues, SwarmEvent,
     SwarmMember, VersionedPlan,
 };
 use crate::tool::Registry;
