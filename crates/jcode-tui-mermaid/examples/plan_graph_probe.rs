@@ -1,5 +1,5 @@
-//! Probe: render a swarm-plan-style flowchart (the exact shape
-//! `jcode-tui`'s `swarm_plan_graph` emits) through the real mermaid pipeline
+//! Probe: render a swarm-plan-style flowchart (the shape emitted by
+//! `jcode_plan::mermaid::swarm_plan_mermaid`) through the real mermaid pipeline
 //! and report success/error. Useful when iterating on the renderer:
 //!   cargo run -p jcode-tui-mermaid --features renderer --example plan_graph_probe
 fn probe(name: &str, src: &str) -> bool {
