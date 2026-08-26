@@ -144,9 +144,12 @@ landed.
 
 Carried from a proposal that is otherwise retired. Its name-ambiguity item
 already shipped: direct messages fail closed on an ambiguous name. What
-remains unbuilt is the render-cache half, and a current regression test
-confirms it — a session switch leaves the prior session's diagram in a
-process-global registry and still displays it in the pinned pane.
+remains unbuilt is the render-cache half. An orphaned test file once asserted
+that a session switch leaves the prior session's diagram in a process-global
+registry and still displays it in the pinned pane, but that file has not
+compiled since 2026-07-14 and its premise no longer matches current behavior.
+The claim is recorded here as a design requirement, not as verified current
+behavior.
 
 Every operator-facing view must bind to one immutable `session_id`. A viewer
 may show a friendly name as a convenience, but it must never select, retarget,

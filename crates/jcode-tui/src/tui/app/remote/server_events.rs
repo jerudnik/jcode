@@ -9,21 +9,14 @@ fn allow_runtime_identity_mismatch() -> bool {
     std::env::var_os("JCODE_ALLOW_SERVER_VERSION_MISMATCH").is_some()
 }
 
-/// Parse a jcode version string into an orderable `(major, minor, patch)`, but
-/// only for *clean release* builds.
-///
-/// Dev/dirty builds share a base semver and cannot be ordered against each other
-/// or against releases (issue #277/#291: a self-dev / branched daemon must never
-/// be force-downgraded just because its version string differs). So we refuse to
-/// classify anything carrying a `-dev` or `dirty` marker as an orderable version
-/// and return `None`, leaving such daemons to the existing `server_has_update`
-/// (mtime-directional) path.
+/// Parses clean release semvers. Dev and dirty builds remain deliberately
+/// unordered so self-dev daemons cannot be force-downgraded.
 fn parse_release_semver(version: &str) -> Option<(u32, u32, u32)> {
     let lower = version.trim().to_ascii_lowercase();
     if lower.contains("-dev") || lower.contains("dirty") {
         return None;
     }
-    // Take the leading token, e.g. "v0.17.0 (d741696f)" -> "0.17.0".
+    // Build metadata follows the leading version token.
     let token = lower
         .split([' ', '(', ')', ','])
         .next()
@@ -37,17 +30,7 @@ fn parse_release_semver(version: &str) -> Option<(u32, u32, u32)> {
     Some((major, minor, patch))
 }
 
-/// True when the connected server reports a clean release version strictly older
-/// than this client's own clean release version.
-///
-/// This is the missing client-side staleness signal behind issue #295: a server
-/// old enough to predate the self-reported staleness machinery reports
-/// `server_has_update: None`, so it can never tell us it is stale and the client
-/// happily attaches to it (then a `set_route`-shaped request explodes against the
-/// ancient protocol). We detect that case independently here.
-///
-/// Gated on clean release semvers on BOTH sides, so dev/dirty/self-dev daemons
-/// (which cannot be ordered) are never affected.
+/// Detects stale pre-self-report servers by comparing clean release semvers.
 fn server_release_is_older_than_client(server_version: Option<&str>, client_version: &str) -> bool {
     let Some(server) = server_version.and_then(parse_release_semver) else {
         return false;
@@ -58,27 +41,9 @@ fn server_release_is_older_than_client(server_version: Option<&str>, client_vers
     server < client
 }
 
-/// Decide whether to defer applying remote session state because the server we
-/// attached to is not running the binary we expect.
-///
-/// Precedence:
-/// - The client independently measured the server's release version as strictly
-///   older than its own clean release version -> defer. This wins even over the
-///   server's own `server_has_update: Some(false)` self-report, because a stale
-///   long-lived daemon legitimately reports "no newer binary to reload into"
-///   (its `shared-server` channel still points at its own old build) while the
-///   client can plainly see it is an older release. Trusting the server here is
-///   exactly what left "current client, stale server" stuck (the daemon's reload
-///   decision runs old code that can never drag itself forward). The newer
-///   client is authoritative, so it defers and repairs the channel before
-///   reloading.
-/// - `Some(true)`: the server self-reported a newer binary on disk -> defer.
-/// - `Some(false)`: the server is new enough to self-assess and found nothing
-///   newer to reload into, AND the client could not prove it is older -> trust
-///   it, do not fight it with a forced reload.
-/// - `None`: the server is too old to self-report. Fall back to our own
-///   client-side release-version comparison, which is the only signal that can
-///   catch a pre-self-heal daemon.
+/// Defers history for a stale runtime. A client-proven older release overrides
+/// the server's self-report; otherwise `Some(true)` defers and `Some(false)` is
+/// trusted. `None` relies entirely on the clean-semver comparison.
 fn should_defer_history_for_runtime_identity_with_allow(
     server_has_update: Option<bool>,
     client_detected_stale: bool,
@@ -87,9 +52,7 @@ fn should_defer_history_for_runtime_identity_with_allow(
     if allow_mismatch {
         return false;
     }
-    // A client-proven-older server always wins: never let an old daemon's
-    // (locally correct but globally wrong) "no update" self-report veto the
-    // client's own release-order comparison.
+    // Client-observed release ordering is authoritative over a stale self-report.
     if client_detected_stale {
         return true;
     }
@@ -100,12 +63,7 @@ fn should_defer_history_for_runtime_identity_with_allow(
     }
 }
 
-/// The client's own version string, used for release-staleness comparison.
-///
-/// Production always reads the compiled-in build metadata. A test-only env
-/// override exists so the end-to-end `handle_server_event` path can be exercised
-/// from a dev/dirty test binary (whose real version would otherwise be
-/// unorderable and short-circuit the comparison).
+/// Uses compiled metadata, with a test override for otherwise-unordered dev builds.
 fn client_release_version() -> String {
     if (cfg!(test) || cfg!(debug_assertions))
         && let Some(v) = std::env::var_os("JCODE_TEST_CLIENT_VERSION_OVERRIDE")
@@ -166,25 +124,14 @@ mod runtime_identity_tests {
 
     #[test]
     fn client_detected_older_server_always_defers() {
-        // Ancient server (server_has_update: None) that the client independently
-        // measured as older -> defer. This is the issue #295 macOS case where a
-        // pre-self-heal daemon can never set server_has_update itself.
         assert!(should_defer_history_for_runtime_identity_with_allow(
             None, true, false
         ));
-        // A server that self-reports "no newer binary" (Some(false)) but that the
-        // client can PROVE is an older release -> still defer. The daemon's
-        // self-report is locally correct (its own shared-server channel points at
-        // its old build) but globally wrong; the newer client is authoritative.
-        // This is the "current client, stale server" report: trusting Some(false)
-        // here is exactly what left the server stuck on the old version forever.
         assert!(should_defer_history_for_runtime_identity_with_allow(
             Some(false),
             true,
             false
         ));
-        // Same-release/newer server (client could not prove it is older) that
-        // self-reports "no newer binary" -> trust it, do not force a reload loop.
         assert!(!should_defer_history_for_runtime_identity_with_allow(
             Some(false),
             false,
@@ -196,7 +143,6 @@ mod runtime_identity_tests {
     fn parse_release_semver_refuses_unorderable_dev_builds() {
         assert_eq!(parse_release_semver("v0.17.0 (d741696f)"), Some((0, 17, 0)));
         assert_eq!(parse_release_semver("0.14.2"), Some((0, 14, 2)));
-        // Dev/dirty builds share a base semver and must not be ordered.
         assert_eq!(parse_release_semver("v0.18.4-dev (102e9750, dirty)"), None);
         assert_eq!(parse_release_semver("v0.14.2-dev (38452185, dirty)"), None);
         assert_eq!(parse_release_semver("unknown"), None);
@@ -204,12 +150,10 @@ mod runtime_identity_tests {
 
     #[test]
     fn server_release_older_than_client_is_selfdev_safe() {
-        // Clean release older than clean client -> stale.
         assert!(server_release_is_older_than_client(
             Some("v0.14.2 (38452185)"),
             "v0.17.0 (d741696f)"
         ));
-        // Equal or newer -> not stale.
         assert!(!server_release_is_older_than_client(
             Some("v0.17.0"),
             "v0.17.0"
@@ -218,8 +162,6 @@ mod runtime_identity_tests {
             Some("v0.18.0"),
             "v0.17.0"
         ));
-        // Either side dev/dirty/unparseable -> never claim staleness (protects
-        // self-dev and branched daemons from a forced downgrade).
         assert!(!server_release_is_older_than_client(
             Some("v0.14.2-dev (abc, dirty)"),
             "v0.17.0"
@@ -232,24 +174,15 @@ mod runtime_identity_tests {
     }
 }
 
-/// Fingerprint of the last fully-applied History payload for one client
-/// instance, so byte-identical bootstrap redeliveries can be dropped without
-/// rebuilding the display transcript.
+/// Last applied history identity for one client instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AppliedHistoryFingerprint {
     session_id: String,
     fingerprint: u64,
 }
 
-/// Last fully-applied History payload fingerprint, keyed by
-/// `App::remote_client_instance_id`.
-///
-/// This is deliberately NOT stored on `RemoteConnection`: a reconnect builds a
-/// fresh connection (resetting `has_loaded_history`), and that reconnect
-/// re-bootstrap is exactly the duplicate full-payload delivery this state must
-/// survive to dedup. Keeping it module-local also keeps the dedup concern
-/// entirely inside the History handler. Entries are tiny (session id + u64);
-/// the map is bounded because many short-lived `App`s only exist in tests.
+/// Module-local so dedup survives replacement of `RemoteConnection` on reconnect.
+/// The bounded map also contains short-lived test clients.
 static LAST_APPLIED_HISTORY: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, AppliedHistoryFingerprint>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -263,9 +196,7 @@ fn last_applied_history_fingerprint(instance_id: &str) -> Option<AppliedHistoryF
 
 fn record_applied_history_fingerprint(instance_id: &str, session_id: &str, fingerprint: u64) {
     if let Ok(mut map) = LAST_APPLIED_HISTORY.lock() {
-        // Bound growth from short-lived test/replay Apps; one entry per live
-        // client is the steady state, so clearing is harmless (worst case one
-        // extra full re-apply per client).
+        // Clearing only permits one extra full re-apply per live client.
         if !map.contains_key(instance_id) && map.len() >= 64 {
             map.clear();
         }
@@ -279,8 +210,7 @@ fn record_applied_history_fingerprint(instance_id: &str, session_id: &str, finge
     }
 }
 
-/// Hash a JSON value structurally without serializing it to a string, so large
-/// tool inputs contribute to the fingerprint in one allocation-free pass.
+/// Structurally hashes JSON without allocating a serialized copy.
 fn hash_json_value(value: &serde_json::Value, hasher: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     match value {
@@ -315,13 +245,7 @@ fn hash_json_value(value: &serde_json::Value, hasher: &mut impl std::hash::Hashe
     }
 }
 
-/// Cheap structural fingerprint of a full History payload.
-///
-/// Reconnects, session-switch storms, and the history-recovery watchdog can
-/// redeliver the same multi-megabyte bootstrap payload within seconds.
-/// Re-applying it rebuilds the whole display transcript (~3-4x the wire size
-/// in transient arenas) for zero visible change. One pass over message bytes,
-/// no allocations proportional to payload size.
+/// Allocation-light fingerprint used to drop repeated multi-megabyte bootstraps.
 fn history_payload_fingerprint(messages: &[crate::protocol::HistoryMessage]) -> u64 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -355,11 +279,7 @@ fn history_payload_fingerprint(messages: &[crate::protocol::HistoryMessage]) -> 
     hasher.finish()
 }
 
-/// Pure skip decision for a full History payload: skip only when the session
-/// did not change, the display still has content to preserve, and the payload
-/// fingerprints identical to the one most recently applied for this session.
-/// Session switches and rewinds always re-apply (a rewind's truncated payload
-/// fingerprints differently, and a session switch flips `session_changed`).
+/// Skips only an identical same-session payload when visible history is intact.
 fn should_skip_identical_history_payload(
     session_changed: bool,
     display_is_empty: bool,
@@ -373,10 +293,7 @@ fn should_skip_identical_history_payload(
             .is_some_and(|entry| entry.session_id == session_id && entry.fingerprint == fingerprint)
 }
 
-/// True when the incoming rendered-image set is (cheaply) identical to the
-/// already-retained set: same count and, per image, same data length plus
-/// equal cheap metadata. Image data is compared by length only so duplicate
-/// multi-megabyte base64 payloads are never traversed byte-by-byte.
+/// Compares image metadata and data lengths without traversing base64 payloads.
 fn history_images_match_retained(
     incoming: &[crate::session::RenderedImage],
     retained: &[crate::session::RenderedImage],
@@ -453,7 +370,6 @@ mod history_dedup_tests {
         });
         assert_ne!(fp, history_payload_fingerprint(&tool));
 
-        // Same tool call with different input must differ too.
         let mut tool_other = tool.clone();
         tool_other[1].tool_data.as_mut().unwrap().input = serde_json::json!({"command": "pwd"});
         assert_ne!(
@@ -469,7 +385,6 @@ mod history_dedup_tests {
             fingerprint: 42,
         };
 
-        // Exact match with intact display and unchanged session -> skip.
         assert!(should_skip_identical_history_payload(
             false,
             false,
@@ -477,7 +392,6 @@ mod history_dedup_tests {
             "ses_a",
             42
         ));
-        // Session switch must always re-apply.
         assert!(!should_skip_identical_history_payload(
             true,
             false,
@@ -485,7 +399,6 @@ mod history_dedup_tests {
             "ses_a",
             42
         ));
-        // A cleared display must be repopulated even for an identical payload.
         assert!(!should_skip_identical_history_payload(
             false,
             true,
@@ -493,7 +406,6 @@ mod history_dedup_tests {
             "ses_a",
             42
         ));
-        // Different session id -> re-apply.
         assert!(!should_skip_identical_history_payload(
             false,
             false,
@@ -501,7 +413,6 @@ mod history_dedup_tests {
             "ses_b",
             42
         ));
-        // Different payload (e.g. rewind truncation) -> re-apply.
         assert!(!should_skip_identical_history_payload(
             false,
             false,
@@ -509,7 +420,6 @@ mod history_dedup_tests {
             "ses_a",
             43
         ));
-        // Nothing applied yet -> re-apply.
         assert!(!should_skip_identical_history_payload(
             false, false, None, "ses_a", 42
         ));
@@ -520,7 +430,6 @@ mod history_dedup_tests {
         let retained = vec![image("aaaa"), image("bbbbbb")];
         let same = vec![image("aaaa"), image("bbbbbb")];
         assert!(history_images_match_retained(&same, &retained));
-        // Length-only comparison: equal lengths count as identical.
         let same_len = vec![image("cccc"), image("dddddd")];
         assert!(history_images_match_retained(&same_len, &retained));
 
@@ -548,12 +457,8 @@ pub(in crate::tui::app) fn handle_server_event(
 
     let had_remote_resume_activity = app.remote_resume_activity.is_some();
 
-    // A turn can start in this session without this client sending a message:
-    // swarm wake delivery, background-task wakes, scheduled tasks, resume-all,
-    // or another window attached to the same session. When live turn-stream
-    // events arrive while this client thinks the session is idle, adopt the
-    // turn so the status line/spinner reflect the in-progress work and the
-    // terminal Done/Error event can settle it like a resumed remote turn.
+    // Background work or another client can start a turn. Adopt unexpected live
+    // events so status updates and terminal events settle it normally.
     let externally_started_turn_event = app.current_message_id.is_none()
         && !app.is_processing
         && matches!(
@@ -646,15 +551,8 @@ pub(in crate::tui::app) fn handle_server_event(
             true
         }
         ServerEvent::ReasoningDelta { text } => {
-            // Reasoning streams live (dim+italic) before the answer, paced through
-            // the same segment-aware StreamBuffer as normal text so provider
-            // bursts trickle in smoothly and ordering is preserved without
-            // flushing the backlog.
-            // Surface active reasoning in the status line. The server emits a
-            // `ConnectionPhase::Streaming` when reasoning starts (to kick off the
-            // client TPS timer), so the status arrives here as `Streaming`; flip it
-            // to `Thinking` while reasoning deltas flow. The next `TextDelta` moves
-            // it back to `Streaming`.
+            // Pace reasoning through the text buffer to preserve ordering. Its initial
+            // Streaming phase starts TPS timing; deltas display Thinking until answer text.
             if !matches!(app.status, ProcessingStatus::RunningTool(_)) {
                 let thinking_start = *app.thinking_start.get_or_insert_with(Instant::now);
                 if !matches!(app.status, ProcessingStatus::Thinking(_)) {
@@ -669,16 +567,13 @@ pub(in crate::tui::app) fn handle_server_event(
         }
         ServerEvent::ReasoningDone { .. } => {
             app.thinking_start = None;
-            // Queue the region close behind any still-buffered reasoning so it
-            // lands exactly after the final reasoning character reveals.
+            // Queue closure behind buffered reasoning to preserve display order.
             let ops = app.stream_buffer.push_close_reasoning();
             app.apply_stream_ops(ops);
             eager_stream_redraw
         }
         ServerEvent::ToolStart { id, name } => {
-            // Tool-call JSON is provider-generated output and is included in output-token
-            // usage. Keep the TPS timer running until the server reports ToolExec; actual
-            // tool execution time is excluded after that point.
+            // Tool JSON counts as generated output; ToolExec begins excluded runtime.
             app.resume_streaming_tps();
             app.clear_active_experimental_feature_notice();
             remote.handle_tool_start(&id, &name);
@@ -701,9 +596,7 @@ pub(in crate::tui::app) fn handle_server_event(
             false
         }
         ServerEvent::ToolExec { id, name } => {
-            // Provider output generation for this tool call is complete, but final usage
-            // snapshots often arrive later. Keep collecting deltas while excluding tool
-            // runtime from the elapsed TPS denominator.
+            // Final usage may arrive after generation; exclude tool runtime from TPS.
             app.pause_streaming_tps(true);
             let parsed_input = remote.get_current_tool_input();
             let tool_call = ToolCall {
@@ -766,9 +659,7 @@ pub(in crate::tui::app) fn handle_server_event(
             let previous_cache_creation = app.streaming.streaming_cache_creation_tokens;
             let was_recorded = app.kv_cache.current_api_usage_recorded;
             app.accumulate_streaming_output_tokens(output, call_output_tokens_seen);
-            // Per-call replace semantics for input/cache counters: a stale
-            // cache-read figure from a previous call must not leak into this
-            // call's context accounting (issue #441).
+            // Replace per-call counters so stale cache reads cannot leak across calls.
             app.apply_stream_usage_input_report(
                 Some(input),
                 cache_read_input,
@@ -784,9 +675,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     .token_accounting
                     .total_output_tokens
                     .saturating_add(output);
-                // The server only reports tokens, never a dollar cost, so the
-                // remote client prices each completed call itself. This is the
-                // first usage snapshot for this call, so bill the full counts.
+                // Price the first token-only usage snapshot in full on the client.
                 app.accrue_remote_call_cost(
                     input,
                     output,
@@ -796,9 +685,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.last_api_completed = Some(Instant::now());
                 app.last_api_completed_provider = Some(<App as TuiState>::provider_name(app));
                 app.last_api_completed_model = Some(<App as TuiState>::provider_model(app));
-                // Effective prompt (input + read + creation), matching the
-                // local push_turn_footer path: this feeds the cache
-                // countdown/cold indicators as "what gets resent".
+                // Effective prompt includes cache read/creation because all are resent cold.
                 let effective = crate::tui::info_widget::effective_prompt_tokens(
                     input,
                     app.streaming.streaming_cache_read_tokens.unwrap_or(0),
@@ -814,9 +701,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     .token_accounting
                     .total_output_tokens
                     .saturating_add(output.saturating_sub(previous_output));
-                // Bill only the new tokens since the previous snapshot for this
-                // same call, so a call that reports usage multiple times while
-                // streaming is billed exactly once overall.
+                // Bill snapshot deltas so repeated reports charge each token once.
                 app.accrue_remote_call_cost(
                     input.saturating_sub(previous_input),
                     output.saturating_sub(previous_output),
@@ -873,10 +758,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
                 );
                 if let Some(baseline) = app.kv_cache.kv_cache_baseline.as_mut() {
-                    // Store the effective prompt (input + read + creation): for
-                    // split-accounting providers bare `input` is only the
-                    // uncached remainder, while the whole effective prompt is
-                    // what gets resent when the cache goes cold.
+                    // Split-accounting input omits cached tokens; store the full cold prompt.
                     baseline.input_tokens = effective_prompt_tokens;
                     baseline.completed_at = Instant::now();
                 }
@@ -948,9 +830,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.connection_phase_started = None;
                 ProcessingStatus::Streaming
             } else {
-                // Start the "suspiciously long" timer when we first enter the
-                // connecting group so later round-trips in a turn don't inherit
-                // the whole-turn elapsed and immediately render yellow.
+                // Time each connecting phase separately from the whole turn.
                 if !matches!(app.status, ProcessingStatus::Connecting(_)) {
                     app.connection_phase_started = Some(Instant::now());
                 }
@@ -968,12 +848,8 @@ pub(in crate::tui::app) fn handle_server_event(
             true
         }
         ServerEvent::RetryRollback { attempt, max } => {
-            // A transient transport fault interrupted the provider mid-response
-            // and the server is retrying the request from the top. The retry is
-            // a fresh sample, not a deterministic replay, so all partial output
-            // from the aborted attempt must be discarded: the live streaming
-            // buffer, in-progress tool calls, and any assistant text already
-            // committed to the transcript by a mid-stream ToolStart boundary.
+            // A provider retry is a fresh sample. Discard every partial artifact from
+            // the aborted attempt, including text committed at tool boundaries.
             crate::logging::warn(&format!(
                 "Retry rollback (attempt {}/{}): discarding partial streamed output",
                 attempt, max
@@ -1071,15 +947,10 @@ pub(in crate::tui::app) fn handle_server_event(
                 .as_deref()
                 .filter(|r| !r.trim().is_empty())
                 .unwrap_or("guardrail");
-            // Plain text prefix: U+1F6E1 shield renders poorly in some
-            // terminals (kitty shows a narrow monochrome glyph).
+            // Avoid the inconsistently rendered U+1F6E1 shield glyph.
             app.push_display_message(DisplayMessage::system(format!("[guardrail] {}", message)));
             app.set_status_notice(format!("Provider guardrail: {}", label));
-            // Guardrail refusals are model-side policy stops: retrying the
-            // same model usually refuses again, but a stronger model often
-            // handles the same legitimate request. Offer a one-keypress
-            // reroute to the strongest Anthropic route and resend. The offer
-            // sets its own (more actionable) status notice when armed.
+            // Policy refusals rarely improve on retry; offer a stronger route instead.
             app.offer_guardrail_reroute();
             true
         }
@@ -1114,11 +985,8 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.reset_credential_failure_breaker();
                 let ops = app.stream_buffer.flush();
                 app.apply_stream_ops(ops);
-                // The turn can finish with a reasoning region still open (the
-                // model streamed reasoning but never sent ReasoningDone and never
-                // began answer text). Close it as a hard message boundary so the
-                // live-rendered reasoning is anchored/retained instead of being
-                // silently stripped by `collapse_reasoning_for_commit` below.
+                // Close unterminated reasoning at the message boundary so commit
+                // normalization retains what was already shown live.
                 if app.reasoning_streaming {
                     app.close_reasoning_region(None);
                 }
@@ -1146,8 +1014,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.is_processing = false;
                 app.status = ProcessingStatus::Idle;
                 app.stream_message_ended = false;
-                // Turn completed successfully; drop the saved prompt so a later
-                // unrelated failure cannot restore stale text into the input box.
+                // Prevent later failures from restoring a completed turn's prompt.
                 app.last_submitted_input = None;
                 app.processing_started = None;
                 app.replay_processing_started_ms = None;
@@ -1195,15 +1062,8 @@ pub(in crate::tui::app) fn handle_server_event(
             retry_after_secs,
             ..
         } => {
-            // The server rejects a Message request with this error while its
-            // previous turn is still running. This typically happens when a
-            // reload/reconnect raced the turn-end dispatch: the history
-            // activity snapshot said "idle", the client dequeued and sent a
-            // queued follow-up, but the server-side turn had not actually
-            // finished. Dropping the pending send here would silently lose the
-            // user's queued message (issue #391). Instead, put it back on the
-            // queue and re-adopt the running-turn state so the queue
-            // dispatches once the real turn completes.
+            // Reconnect can report idle before the server's turn-end dispatch. Requeue
+            // the rejected follow-up and adopt the still-running turn to avoid data loss.
             if message == "Already processing a message"
                 && recover_undelivered_queued_continuation(app, "server busy rejection")
             {
@@ -1226,32 +1086,28 @@ pub(in crate::tui::app) fn handle_server_event(
             let reset_duration = retry_after_secs
                 .map(Duration::from_secs)
                 .or_else(|| parse_rate_limit_error(&message));
-            if let Some(reset_duration) = reset_duration {
-                if let Some(is_system) =
+            if let Some(reset_duration) = reset_duration
+                && let Some(is_system) =
                     app.prepare_pending_remote_rate_limit_retry(reset_duration, &message, remote)
-                {
-                    if app.rate_limit_reset.is_none() {
-                        return false;
-                    }
-                    app.push_display_message(DisplayMessage::system(format!(
-                        "⏳ Rate limit hit. Will auto-retry in {} seconds...",
-                        reset_duration.as_secs()
-                    )));
-                    if is_system {
-                        app.set_status_notice("Rate limited; queued system retry");
-                    } else {
-                        app.set_status_notice("Rate limited; queued retry");
-                    }
-                    app.reset_remote_rate_limit_processing_state(remote);
+            {
+                if app.rate_limit_reset.is_none() {
                     return false;
                 }
+                app.push_display_message(DisplayMessage::system(format!(
+                    "⏳ Rate limit hit. Will auto-retry in {} seconds...",
+                    reset_duration.as_secs()
+                )));
+                if is_system {
+                    app.set_status_notice("Rate limited; queued system retry");
+                } else {
+                    app.set_status_notice("Rate limited; queued retry");
+                }
+                app.reset_remote_rate_limit_processing_state(remote);
+                return false;
             }
             let is_failover_prompt =
                 crate::provider::parse_failover_prompt_message(&message).is_some();
-            // Snapshot the failed turn's payload before the cleanup below (and
-            // the retry-budget bookkeeping) clears it, so a fallback offer
-            // armed at a terminal no-retry point can resend it after the user
-            // accepts a switch to a working route.
+            // Preserve the payload before cleanup so an accepted fallback can resend it.
             let failed_fallback_payload = app.rate_limit_pending_message.as_ref().map(|pending| {
                 app_mod::FallbackResendPayload {
                     content: pending.content.clone(),
@@ -1286,12 +1142,8 @@ pub(in crate::tui::app) fn handle_server_event(
             }
             remote.clear_pending();
             remote.reset_call_output_tokens_seen();
-            // Connectivity failures (DNS, connection reset, no route, transient
-            // TLS, timeouts) are always transient: the request never reached the
-            // provider. Hold the turn and resume when the network recovers,
-            // regardless of the pending message's auto_retry flag. This must run
-            // before the non-retryable auto-poke check so a transient disconnect
-            // is never misclassified as a permanent failure that stops auto-poke.
+            // Transport failures precede retry-policy checks: the request may not have
+            // reached the provider, so hold it for network recovery.
             let is_connectivity_error =
                 crate::tui::app::commands::is_auto_poke_connectivity_error(&message)
                     || crate::network_retry::classify_message(&message).is_some();
@@ -1300,11 +1152,8 @@ pub(in crate::tui::app) fn handle_server_event(
             {
                 return false;
             }
-            // Credential-failure circuit breaker: repeated auth failures mean
-            // the login/API key is dead. Resending the identical request can
-            // never succeed and (before this breaker) produced runaway retry
-            // loops logging thousands of 401s per session. Stop every
-            // automatic resend path and tell the user to /login or /model.
+            // Auth failures cannot improve on identical resend; break every automatic
+            // retry path before it becomes a runaway 401 loop.
             if !is_connectivity_error && app.note_error_for_credential_breaker(&message) {
                 app.trip_credential_failure_breaker(&message);
                 app.offer_fallback_after_error_with_payload(
@@ -1313,11 +1162,8 @@ pub(in crate::tui::app) fn handle_server_event(
                 );
                 return false;
             }
-            // Deterministic model/endpoint-capability failures (e.g. Volcengine
-            // Ark's coding-plan endpoint returning 404 UnsupportedModel, or a
-            // model-not-found) can never succeed by resending the identical
-            // request. Fail fast with an actionable hint instead of burning the
-            // auto-retry budget on guaranteed 4xx responses (#387).
+            // Deterministic model/endpoint mismatches cannot improve on resend; fail
+            // before consuming retry budget on guaranteed 4xx responses.
             if crate::tui::app::commands::is_fatal_model_endpoint_error(&message) {
                 app.clear_pending_remote_retry();
                 if app.auto_poke_incomplete_todos {
@@ -1330,8 +1176,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 ));
                 app.set_status_notice("Stopped: model/endpoint mismatch");
                 app.restore_failed_input_to_box();
-                // Switching models is exactly the right fix for a
-                // model/endpoint mismatch: offer the next best route.
+                // A different route can resolve a model/endpoint mismatch.
                 app.offer_fallback_after_error_with_payload(
                     &message,
                     failed_fallback_payload.clone(),
@@ -1348,9 +1193,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     return false;
                 }
                 crate::tui::app::commands::stop_auto_poke_for_non_retryable_error(app, &message);
-                // Terminal: no retry will fire. Offer a one-keypress switch to
-                // the next best model/auth-method (e.g. an expired OAuth login
-                // -> a working provider) with the failed payload staged.
+                // With retries exhausted, stage the payload for a one-key fallback.
                 app.offer_fallback_after_error_with_payload(
                     &message,
                     failed_fallback_payload.clone(),
@@ -1367,13 +1210,9 @@ pub(in crate::tui::app) fn handle_server_event(
             if !is_failover_prompt && !app.schedule_pending_remote_retry("⚠ Remote request failed.")
             {
                 app.clear_pending_remote_retry();
-                // No automatic retry will resend this turn, so restore the prompt the
-                // user typed back into the input box instead of dropping it.
+                // No retry owns this turn; restore its prompt instead of dropping it.
                 app.restore_failed_input_to_box();
-                // Offer a one-keypress switch to the next best model/auth-method
-                // and resend (e.g. expired OpenAI OAuth session -> a provider
-                // that is known to work), instead of leaving the user to run
-                // /login or /model manually.
+                // Offer a working model/auth route with the failed payload staged.
                 app.offer_fallback_after_error_with_payload(&message, failed_fallback_payload);
                 return app.schedule_auto_poke_followup_if_needed()
                     || app.schedule_overnight_poke_followup_if_needed();
@@ -1436,11 +1275,8 @@ pub(in crate::tui::app) fn handle_server_event(
         }
         ServerEvent::Reloading { .. } => {
             app.append_reload_message("🔄 Server reload initiated...");
-            // In-process server reloads (self-dev build-reload) keep the same
-            // server PID and never disconnect this client, so the reconnect-time
-            // client re-exec never fires. If a newer client binary is on disk and
-            // we are idle, re-exec now so client-side (TUI) changes also take
-            // effect. No-op for non-selfdev sessions or when already current.
+            // In-process self-dev reloads do not reconnect; re-exec an idle stale
+            // client here so TUI changes take effect too.
             app.maybe_self_reload_after_server_reload()
         }
         ServerEvent::ReloadProgress {
@@ -1529,24 +1365,14 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.remote_server_icon = server_icon.clone();
                 app.remote_server_has_update = server_has_update;
                 app.pending_server_reload = true;
-                // Remember the session the server told us about *before* bailing
-                // out. We deliberately return below without assigning
-                // `app.remote_session_id` (history stays deferred until after the
-                // server reloads), but the client reload handoff still needs a
-                // real session id to resume. Without this, the handoff falls back
-                // to a freshly fabricated `ses_<ts>_<rand>` id that no store can
-                // ever resolve, leaving the user at a "No session found matching
-                // ..." shell prompt after a client reload or Nix generation switch (issue #328).
+                // History remains deferred, but reload handoff still needs the server's
+                // real session id; fabricating one would make resume unresolvable.
                 if !session_id.is_empty() {
                     app.pending_reload_session_id = Some(session_id.clone());
                 }
                 app.clear_remote_startup_phase();
                 if client_detected_stale {
-                    // The client independently measured the server's release
-                    // as older than its own. F20c removed the shared-server
-                    // channel that used to need client-side repair here: with a
-                    // single fixed publish target the forced reload below
-                    // already execs into the newest published binary.
+                    // The fixed publish target makes forced reload sufficient repair.
                     app.set_status_notice(
                         "Connected server is an older release; reloading it before attach",
                     );
@@ -1575,6 +1401,8 @@ pub(in crate::tui::app) fn handle_server_event(
             let session_changed = prev_session_id.as_deref() != Some(session_id.as_str());
 
             if session_changed {
+                // Switch diagram scope before the next draw can expose stale content.
+                crate::tui::mermaid::bind_diagram_scope(Some(session_id.as_str()));
                 app.rate_limit_pending_message = None;
                 app.rate_limit_reset = None;
                 app.connection_type = None;
@@ -1663,9 +1491,7 @@ pub(in crate::tui::app) fn handle_server_event(
             app.remote_compaction_mode = Some(compaction_mode);
             app.set_side_panel_snapshot(side_panel);
             if history_images_match_retained(&images, &app.remote_side_pane_images) {
-                // The already-retained image set is identical (count + per-image
-                // byte length + metadata). Drop the incoming copy immediately so
-                // two full base64 payloads are never alive side by side.
+                // Drop metadata-identical images before two base64 copies coexist.
                 if !images.is_empty() {
                     crate::logging::info(&format!(
                         "History images identical to retained set ({} images); dropping incoming copy",
@@ -1703,10 +1529,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
-                // Token totals are restored from history above, but the dollar
-                // cost was never reconstructed, so resumed sessions showed `$0`
-                // in the cost widget until a new call happened. Price the
-                // restored totals once to seed the displayed cost.
+                // Price restored token totals once so resumed cost is not `$0`.
                 app.seed_cost_from_history_totals(&totals);
             }
             if let Some(totals) = token_usage_totals {
@@ -1781,8 +1604,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     history_model.as_deref().unwrap_or("<none>")
                 ));
                 remote.mark_history_loaded();
-                // History arrived: cancel the "stuck on loading session…"
-                // recovery watchdog so it doesn't re-request on a later tick.
+                // Successful history cancels the loading-recovery watchdog.
                 app.clear_remote_history_wait();
                 if messages.is_empty() && !session_changed && !app.display_messages().is_empty() {
                     crate::logging::info(
@@ -1799,11 +1621,7 @@ pub(in crate::tui::app) fn handle_server_event(
                         &session_id,
                         fingerprint,
                     ) {
-                        // Watchdog re-requests and reconnect re-bootstraps can
-                        // redeliver a byte-identical full payload seconds apart.
-                        // Rebuilding the transcript would stack multi-megabyte
-                        // transient arenas for zero visible change, so drop the
-                        // payload here instead of re-applying it.
+                        // Drop repeated bootstraps before rebuilding large transient arenas.
                         crate::logging::info(&format!(
                             "Skipping re-apply of identical History payload (session={}, messages={}, fingerprint={:x})",
                             session_id, history_message_count, fingerprint
@@ -1822,38 +1640,14 @@ pub(in crate::tui::app) fn handle_server_event(
                             })
                             .collect();
                         app.replace_display_messages(restored_messages);
-                        // A same-session forced re-apply (rewind / rewind-undo
-                        // truncation, or a deferred bootstrap) rebuilds the
-                        // transcript without running the session_changed
-                        // clears above. Drop any streaming preview diagram so
-                        // it cannot keep rendering a mermaid block from a
-                        // message that was just truncated away. This is safe
-                        // for a genuinely live stream: every streaming render
-                        // frame re-registers the preview
-                        // (markdown_render_full.rs set_streaming_preview_diagram).
+                        // Same-session reapply bypasses session-change cleanup. Drop the
+                        // preview diagram; a legitimate live stream re-registers each frame.
                         if !session_changed {
                             crate::tui::mermaid::clear_streaming_preview_diagram();
-                            // A rewind (or rewind-undo) re-apply can race a
-                            // stale `Done` from the just-finished turn: the
-                            // History payload is written directly to the
-                            // socket by handle_get_history while the Done is
-                            // still queued in the per-client event forwarder
-                            // (server/client_lifecycle.rs), so the client can
-                            // apply the truncated transcript FIRST and process
-                            // the Done SECOND. The Done handler flushes
-                            // stream_buffer and commits any non-empty
-                            // streaming_text as an assistant message plus a
-                            // turn footer, resurrecting content that was just
-                            // rewound away. Drop all stale streaming state
-                            // here so the late Done settles the turn without
-                            // appending anything. This is gated on the pending
-                            // rewind notice (armed by the client /rewind path
-                            // before the redelivery) because other same-session
-                            // re-applies, like a reconnect bootstrap during a
-                            // live turn, may hold legitimately buffered stream
-                            // chunks. The server rejects rewinds while a turn
-                            // is processing, so streaming state present at this
-                            // point is stale by construction.
+                            // Rewind history can overtake an already-queued `Done`; clear
+                            // buffered output so that late event cannot resurrect truncated
+                            // content. Gate this on the rewind notice because reconnect
+                            // bootstraps may carry legitimate live chunks.
                             if app.pending_remote_rewind_notice.is_some() {
                                 app.stream_buffer.clear();
                                 app.clear_streaming_render_state();
@@ -1915,10 +1709,7 @@ pub(in crate::tui::app) fn handle_server_event(
 
             app.maybe_show_catchup_after_history(&session_id);
 
-            // The bootstrap above may have cleared/replaced the transcript for a
-            // brand-new session, wiping the startup notice card (launch-hotkeys /
-            // welcome tip). Re-apply it so it stays visible on the idle screen
-            // instead of flashing for a moment and disappearing.
+            // Reapply startup notices erased by a brand-new session bootstrap.
             app.reapply_pending_startup_notice_if_cleared();
 
             let should_consume_pending_reload_status = match app
@@ -1993,9 +1784,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.push_display_message(DisplayMessage::system(message.to_string()));
             }
 
-            // History is the completion signal for a session attach/resume and
-            // can replace the entire visible transcript. Request a frame now so
-            // the new session does not appear stuck until another event arrives.
+            // History completes attach/resume; redraw its replacement transcript now.
             true
         }
         ServerEvent::CompactedHistory {
@@ -2048,9 +1837,7 @@ pub(in crate::tui::app) fn handle_server_event(
             if images.is_empty() {
                 return false;
             }
-            // Append the freshly-produced images so the inline transcript
-            // updates immediately, without waiting for the next full History
-            // reload. A later History payload replaces this list wholesale.
+            // Show new images immediately; the next History replaces the list.
             let added = images.len();
             app.append_live_inline_images(images);
             crate::logging::info(&format!(
@@ -2068,11 +1855,7 @@ pub(in crate::tui::app) fn handle_server_event(
         ServerEvent::SwarmStatus { members } => {
             let members_changed = app.remote_swarm_members != members;
             if app.swarm_enabled {
-                // Surface member lifecycle transitions (done/failed/blocked/
-                // stopped) as a status notice, the same way plan syncs are
-                // surfaced. Diff within the subtree this session manages (the
-                // same scoping the inline strip uses), so agents belonging to
-                // other sessions in a shared swarm stay silent.
+                // Surface terminal transitions only within this session's managed subtree.
                 let self_id = if app.is_remote {
                     app.remote_session_id.clone()
                 } else {
@@ -2094,14 +1877,10 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.remote_swarm_members.clear();
             }
             if members_changed {
-                // The transcript body embeds live cards beneath spawn tool rows.
-                // Treat member data like a visible message mutation so both the
-                // full-frame and body caches rebuild immediately.
+                // Embedded member cards require both transcript caches to rebuild.
                 app.bump_display_messages_version();
             }
-            // Swarm cards are embedded in the transcript. A member snapshot can
-            // arrive after the spawn tool result, so request a frame immediately
-            // rather than waiting for unrelated model or input activity.
+            // Member snapshots can follow tool results; redraw embedded cards immediately.
             true
         }
         ServerEvent::SwarmPlan {
@@ -2113,13 +1892,8 @@ pub(in crate::tui::app) fn handle_server_event(
             summary,
             ..
         } => {
-            // Drop stale out-of-order broadcasts. Server-side plan mutations
-            // snapshot under the lock but send after releasing it, so two
-            // racing mutations can deliver an older version after a newer
-            // one; applying it would regress both the snapshot state and the
-            // inline diagram. Same-swarm version regressions are ignored,
-            // except near v1 (a deleted-and-recreated plan restarts its
-            // version counter and must still render).
+            // Racing sends can arrive out of order. Reject same-swarm regressions,
+            // except a near-v1 restart from a deleted and recreated plan.
             let stale_regression = app.swarm_plan_swarm_id.as_deref() == Some(swarm_id.as_str())
                 && app
                     .swarm_plan_version
@@ -2182,10 +1956,7 @@ pub(in crate::tui::app) fn handle_server_event(
                     Some((name.to_string(), count))
                 })
                 .collect();
-            // Keep MCP readiness non-intrusive. The footer/tool indicator reads
-            // `mcp_server_names` directly, so avoid a transient status notice here:
-            // status notices render near the prompt and can cover text while the
-            // user is typing during startup.
+            // The footer already exposes MCP readiness; avoid covering startup input.
             false
         }
         ServerEvent::ModelChanged {
@@ -2199,8 +1970,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 if let Some(prepared) = app.pending_prompt_after_model_switch.take() {
                     super::input_dispatch::restore_prepared_remote_input(app, prepared);
                 }
-                // A fallback-offer resend cannot go out on the failed switch;
-                // drop it and put the prompt back in the input box instead.
+                // A failed fallback switch returns its staged prompt to input.
                 if let Some(payload) = app.pending_fallback_resend.take()
                     && let Some(raw_input) = payload.raw_input
                     && !raw_input.trim().is_empty()
@@ -2267,10 +2037,7 @@ pub(in crate::tui::app) fn handle_server_event(
             if provider_meta_changed {
                 app.update_terminal_title();
             }
-            // The catalog event can arrive while the client is otherwise idle.
-            // Returning false here leaves the updated picker, refresh summary,
-            // and status notice invisible until an unrelated input or periodic
-            // redraw happens.
+            // Catalog updates may arrive while idle, so request their redraw directly.
             true
         }
         ServerEvent::ReasoningEffortChanged { effort, error, .. } => {
@@ -2525,10 +2292,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 &message,
                 crate::config::config().display.compact_notifications,
             );
-            // Plan bookkeeping churn (assignments, version bumps, approvals)
-            // arrives constantly while a plan runs. It only needs to pass by
-            // on the status line; the inline plan graph message already shows
-            // the resulting DAG state in the transcript.
+            // Keep plan bookkeeping transient; the inline graph owns durable state.
             let plan_scope = matches!(
                 &notification_type,
                 crate::protocol::NotificationType::Message {
@@ -2548,9 +2312,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 } if scope == "swarm"
             );
             if swarm_report_scope {
-                // A report is the terminal snapshot of an agent, not another
-                // prose message to read. Keep the live card under the spawn call
-                // and insert a duplicate snapshot where the report arrived.
+                // Keep terminal reports as card snapshots, not duplicate prose.
                 if let Some(mut member) = app
                     .remote_swarm_members
                     .iter()
@@ -2763,7 +2525,7 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_status_notice("⌨ Interactive terminal detected (command will timeout)");
             false
         }
-        // Responses to /swarm drive verbs (comm_* requests from the TUI).
+        // Responses to TUI-issued `comm_*` swarm verbs.
         ServerEvent::CommPlanStatusResponse { summary, .. } => {
             let rendered = crate::tui::app::commands_swarm::render_plan_status(
                 &summary,

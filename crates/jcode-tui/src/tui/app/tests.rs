@@ -35,6 +35,7 @@ include!("tests/remote_events_reload_04.rs");
 include!("tests/remote_rate_limit.rs");
 include!("tests/remote_events_reload_05.rs");
 include!("tests/swarm_plan_no_inline_graph.rs");
+include!("tests/diagram_registry_cleanup.rs");
 include!("tests/remote_model_picker_hotkeys.rs");
 include!("tests/scroll_copy_01/part_01.rs");
 include!("tests/scroll_copy_01/part_02.rs");
