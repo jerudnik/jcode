@@ -1688,3 +1688,36 @@ were fixed by re-recording `EXPECTED_FILE_COUNTS` (lifecycle 66 -> 69,
 provider_infrastructure 20 -> 21, digest `249e7ab1...` -> `aae1ad95...`); the
 other two were stale assertions about `fork-ci.yml` and about panic headroom,
 and were corrected without weakening what they test. All 33 cases pass.
+
+## The decision log rule now measures loss instead of forbidding edits
+
+**2026-08-27.** `governance-root.yml` failed any pull request that removed a
+single line from this file. The intent, stated in the comment above the rule, is
+that losing the log is the failure PR #155 nearly caused. The implementation was
+stricter than that intent, and the gap was not free.
+
+Moving `scripts/test_critical_path_budget.py` to `tests/` left three citations in
+this file pointing at a path that no longer exists.
+`scripts/check_docs_references.py` holds this file at a zero baseline for
+stale code paths and says to update the citation to where the code moved, and
+refuses to have its baseline raised. This rule said the edit that would do so was
+forbidden. Both controls are individually sound and they gave opposite orders, so
+no honest version of that change could pass. Both were run to confirm it rather
+than argued from: updating the citations lost four lines and failed here, and
+leaving them and appending a correction instead reported three findings there.
+
+The rule now checks three things. The file must exist, so deleting or moving it
+still fails and moving the log stays a governance event. Its `##` entry count must
+not fall, so no decision can be dropped. Its total length must not fall, so an
+entry cannot be gutted while its heading is left in place to satisfy the count.
+Correcting a citation inside an entry passes, because it removes lines without
+losing anything.
+
+This does not license rewriting history. The log's convention is unchanged and
+the digest supersession above is still the pattern to follow when a recorded fact
+goes stale: append the correction, leave the original. The rule simply no longer
+treats every in-place edit as an attempt to destroy the record.
+
+**Reopen trigger:** a change that drops a decision while adding enough lines and
+headings elsewhere to keep both counts up. The guard would not see it. If that
+happens, compare entry headings by name rather than by count.
