@@ -1299,6 +1299,23 @@ form is the writable keys only, and its baseline digest is:
 99823fdb7ab60b4b4ab9592f414dc1cdbb494beb1cc4bf4464b1a26650aef374
 ```
 
+**Superseded 2026-08-22; the current baseline is:**
+
+```
+71b7f6bab2265b6c4f490aee8901d49418165ed15a5ef2395eff6dc97ee0baa9
+```
+
+The digest above it is the pre-rollout value, left in place because this log
+does not rewrite history. GitHub added
+`require_extra_approval_for_unattributed_changes` to `pull_request` rules
+between the 08-20 and 08-21 fork-health runs and set it true on the live
+ruleset; `2006984dd` declared it in `scripts/required-checks.json` and recorded
+both hashes, leaving the constant here for the operator to rotate. The canonical
+diff between the two is exactly that one parameter line. Compare against the
+lower value; a mismatch with it is the incident this step is for, and
+`governance_compare.py --manifest scripts/required-checks.json --live` is the
+second opinion that says whether the contract itself still holds.
+
 Compute it with:
 
 ```sh
