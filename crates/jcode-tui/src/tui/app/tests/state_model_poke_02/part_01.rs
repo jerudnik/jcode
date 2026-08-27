@@ -7,6 +7,7 @@ fn test_side_diagram_uses_left_splitter_instead_of_rounded_box() {
     app.diagram_pane_position = crate::config::DiagramPanePosition::Side;
 
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(Some(app.current_session_id().as_deref().unwrap_or("test")));
     crate::tui::mermaid::register_active_diagram(0x444, 900, 450, Some("side".to_string()));
 
     let backend = ratatui::backend::TestBackend::new(120, 40);
@@ -23,6 +24,7 @@ fn test_side_diagram_uses_left_splitter_instead_of_rounded_box() {
     assert!(text.contains("pinned 1/1"), "rendered text: {text}");
 
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(None);
 }
 
 #[test]

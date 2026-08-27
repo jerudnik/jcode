@@ -824,6 +824,7 @@ fn test_pinned_side_diagram_layout_allocates_right_pane() {
     app.diagram_pane_ratio = 40;
 
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(Some(app.current_session_id().as_deref().unwrap_or("test")));
     crate::tui::mermaid::register_active_diagram(0x111, 900, 450, Some("side".to_string()));
 
     crate::tui::visual_debug::enable();
@@ -858,6 +859,7 @@ fn test_pinned_side_diagram_layout_allocates_right_pane() {
 
     crate::tui::visual_debug::disable();
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(None);
 }
 
 #[test]
@@ -870,6 +872,7 @@ fn test_pinned_top_diagram_layout_allocates_top_pane() {
     app.diagram_pane_ratio = 35;
 
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(Some(app.current_session_id().as_deref().unwrap_or("test")));
     crate::tui::mermaid::register_active_diagram(0x222, 500, 900, Some("top".to_string()));
 
     crate::tui::visual_debug::enable();
@@ -900,6 +903,7 @@ fn test_pinned_top_diagram_layout_allocates_top_pane() {
 
     crate::tui::visual_debug::disable();
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(None);
 }
 
 #[test]
@@ -951,6 +955,7 @@ fn test_pinned_tall_diagram_does_not_crush_transcript() {
     app.diagram_pane_ratio = 40;
 
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(Some(app.current_session_id().as_deref().unwrap_or("test")));
     // Tall portrait diagram like the flowchart that triggered the bug.
     crate::tui::mermaid::register_active_diagram(0x444, 1320, 1800, Some("tall".to_string()));
 
@@ -986,6 +991,7 @@ fn test_pinned_tall_diagram_does_not_crush_transcript() {
 
     crate::tui::visual_debug::disable();
     crate::tui::mermaid::clear_active_diagrams();
+    crate::tui::mermaid::bind_diagram_scope(None);
 }
 
 #[test]

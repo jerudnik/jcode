@@ -1,7 +1,7 @@
 {
   "threshold_loc": 1200,
   "tracked_files": {
-    "crates/jcode-app-core/src/agent_tests.rs": 2811,
+    "crates/jcode-app-core/src/agent_tests.rs": 2810,
     "crates/jcode-app-core/src/server/client_comm_tests.rs": 1355,
     "crates/jcode-app-core/src/server/client_lifecycle_tests.rs": 1415,
     "crates/jcode-app-core/src/server/comm_control_tests/dag_e2e.rs": 1314,
@@ -30,7 +30,7 @@
     "crates/jcode-tui/src/tui/app/tests/remote_startup_input_02/part_01.rs": 1283,
     "crates/jcode-tui/src/tui/app/tests/scroll_copy_02/part_01.rs": 1414,
     "crates/jcode-tui/src/tui/app/tests/scroll_copy_03.rs": 1575,
-    "crates/jcode-tui/src/tui/app/tests/state_model_poke_02/part_01.rs": 1308,
+    "crates/jcode-tui/src/tui/app/tests/state_model_poke_02/part_01.rs": 1310,
     "crates/jcode-tui/src/tui/app/tests/state_model_poke_03.rs": 2549,
     "crates/jcode-tui/src/tui/info_widget_tests.rs": 1775,
     "crates/jcode-tui/src/tui/session_picker_tests.rs": 2271,
