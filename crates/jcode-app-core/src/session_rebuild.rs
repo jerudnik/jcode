@@ -127,7 +127,10 @@ mod tests {
         let nested = repo.path().join("crates").join("jcode-app-core");
         std::fs::create_dir_all(&nested).expect("nested working directory");
 
-        assert_eq!(resolve_repo_dir(Some(&nested)), Some(repo.path().to_path_buf()));
+        assert_eq!(
+            resolve_repo_dir(Some(&nested)),
+            Some(repo.path().to_path_buf())
+        );
     }
 }
 

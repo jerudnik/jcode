@@ -167,7 +167,10 @@ pub fn debug_memory_profile() -> MermaidMemoryProfile {
         }
     }
 
-    out.active_diagrams = active_diagram_count();
+    // The limit this is reported against (`ACTIVE_DIAGRAMS_MAX`) bounds every
+    // scope together, so this counts across scopes rather than just the bound
+    // session's diagrams.
+    out.active_diagrams = total_active_diagram_count();
 
     let (layout_entries, layout_bytes) = layout_cache_usage();
     out.layout_cache_entries = layout_entries;

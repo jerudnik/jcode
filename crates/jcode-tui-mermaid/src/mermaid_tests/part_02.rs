@@ -561,6 +561,11 @@ fn streaming_preview_then_final_registration_does_not_double_count() {
     // Pin the dedupe behavior between STREAMING_PREVIEW_DIAGRAM and
     // ACTIVE_DIAGRAMS when the same content hash finishes streaming and is
     // registered as a final diagram (mermaid_active.rs).
+    //
+    // Shares the process-global registry with the scope tests below, so it
+    // takes the same lock rather than relying on snapshot/restore to survive
+    // a concurrent clear.
+    let _serialized = scope_test_lock();
     let saved = super::snapshot_active_diagrams();
     super::clear_active_diagrams(); // also clears the streaming preview
 
@@ -656,4 +661,195 @@ fn aspect_profile_cache_entry_is_visible_to_profile_agnostic_probes() {
 
     super::cache_render::evict_render_cache_for_test(HASH);
     assert!(!super::inline_image_is_materialized(HASH));
+}
+
+// ---------------------------------------------------------------------------
+// Session scoping of the process-global ACTIVE_DIAGRAMS registry.
+//
+// The registry is process-global, so without a session stamp a diagram
+// rendered in one session stayed visible after switching to another: it kept
+// counting in the pinned pane, stayed reachable by Ctrl+arrow cycling, and was
+// still returned by `get_active_diagrams` (the Margin info widget source) with
+// no transcript message behind it.
+//
+// Entries are hidden by scope rather than dropped, because switching back must
+// re-reveal them without a re-render: body-cache prefix reuse skips
+// re-rendering retained messages, so a cleared entry would never re-register.
+// ---------------------------------------------------------------------------
+
+/// Serializes the tests below: they mutate the process-global registry and
+/// scope, so running them concurrently would have them clear each other's
+/// entries.
+static SCOPE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn scope_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    SCOPE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Restores the scope a test found, so a bound scope cannot leak into the next
+/// test in this process.
+struct ScopeGuard(u64);
+
+impl ScopeGuard {
+    fn bind(scope: u64) -> Self {
+        let previous = super::current_diagram_scope();
+        super::set_diagram_scope(scope);
+        Self(previous)
+    }
+}
+
+impl Drop for ScopeGuard {
+    fn drop(&mut self) {
+        super::set_diagram_scope(self.0);
+    }
+}
+
+#[test]
+fn active_diagrams_are_scoped_to_the_bound_session() {
+    let _serialized = scope_test_lock();
+    let saved = super::snapshot_active_diagrams();
+    let _scope = ScopeGuard::bind(super::UNSCOPED);
+    super::clear_active_diagrams();
+
+    const SESSION_A: u64 = 0xA000;
+    const SESSION_B: u64 = 0xB000;
+    const HASH_A: u64 = 0xDEAD_BEEF_5C0E_0001;
+
+    super::set_diagram_scope(SESSION_A);
+    super::register_active_diagram(HASH_A, 100, 80, None);
+    assert_eq!(
+        super::get_active_diagrams().len(),
+        1,
+        "session A sees the diagram it registered"
+    );
+
+    // Switching sessions hides it.
+    super::set_diagram_scope(SESSION_B);
+    assert!(
+        super::get_active_diagrams().is_empty(),
+        "session B must not see session A's diagram"
+    );
+    assert_eq!(
+        super::active_diagram_count(),
+        0,
+        "the pinned pane counter must not include another session's diagram"
+    );
+
+    // ...but does not drop it: switching back restores it with no re-render.
+    assert_eq!(
+        super::total_active_diagram_count(),
+        1,
+        "the entry is retained across scopes, only filtered out"
+    );
+    super::set_diagram_scope(SESSION_A);
+    let restored = super::get_active_diagrams();
+    assert_eq!(
+        restored.len(),
+        1,
+        "switching back must restore session A's diagram without a re-render"
+    );
+    assert_eq!(restored[0].hash, HASH_A);
+
+    super::clear_active_diagrams();
+    super::restore_active_diagrams(saved);
+}
+
+#[test]
+fn identical_content_in_two_sessions_registers_two_entries() {
+    let _serialized = scope_test_lock();
+    // Dedup is per (scope, hash). Were it per hash alone, session B's render
+    // would move session A's entry into B's scope, and switching back to A
+    // would show an empty pane.
+    let saved = super::snapshot_active_diagrams();
+    let _scope = ScopeGuard::bind(super::UNSCOPED);
+    super::clear_active_diagrams();
+
+    const SESSION_A: u64 = 0xA001;
+    const SESSION_B: u64 = 0xB001;
+    const SHARED_HASH: u64 = 0xDEAD_BEEF_5C0E_0002;
+
+    super::set_diagram_scope(SESSION_A);
+    super::register_active_diagram(SHARED_HASH, 100, 80, None);
+    super::set_diagram_scope(SESSION_B);
+    super::register_active_diagram(SHARED_HASH, 100, 80, None);
+
+    assert_eq!(
+        super::total_active_diagram_count(),
+        2,
+        "identical content in two sessions is two entries, not one moved entry"
+    );
+    assert_eq!(
+        super::active_diagram_count(),
+        1,
+        "session B sees only its own copy"
+    );
+    super::set_diagram_scope(SESSION_A);
+    assert_eq!(
+        super::active_diagram_count(),
+        1,
+        "session A still sees its own copy after B registered the same content"
+    );
+
+    super::clear_active_diagrams();
+    super::restore_active_diagrams(saved);
+}
+
+#[test]
+fn a_render_queued_before_a_switch_registers_under_the_session_that_queued_it() {
+    let _serialized = scope_test_lock();
+    // The deferred worker renders off-thread and can finish after a session
+    // switch. It registers under the scope captured when the render was
+    // queued, so a late render does not surface in whichever session happens
+    // to be on screen when it lands.
+    let saved = super::snapshot_active_diagrams();
+    let _scope = ScopeGuard::bind(super::UNSCOPED);
+    super::clear_active_diagrams();
+
+    const SESSION_A: u64 = 0xA002;
+    const SESSION_B: u64 = 0xB002;
+    const LATE_HASH: u64 = 0xDEAD_BEEF_5C0E_0003;
+
+    // Queued while A was bound, lands while B is bound.
+    super::set_diagram_scope(SESSION_B);
+    super::register_active_diagram_in_scope(LATE_HASH, 100, 80, None, SESSION_A);
+
+    assert!(
+        super::get_active_diagrams().is_empty(),
+        "a render queued by session A must not appear in session B"
+    );
+    super::set_diagram_scope(SESSION_A);
+    assert_eq!(
+        super::get_active_diagrams().len(),
+        1,
+        "the late render belongs to the session that queued it"
+    );
+
+    super::clear_active_diagrams();
+    super::restore_active_diagrams(saved);
+}
+
+#[test]
+fn an_unbound_reader_still_sees_every_diagram() {
+    let _serialized = scope_test_lock();
+    // Debug, bench and unit-test paths never bind a session. They must keep
+    // seeing everything, which is what makes the scope stamp additive rather
+    // than a behavior change for those callers.
+    let saved = super::snapshot_active_diagrams();
+    let _scope = ScopeGuard::bind(super::UNSCOPED);
+    super::clear_active_diagrams();
+
+    super::set_diagram_scope(0xA003);
+    super::register_active_diagram(0xDEAD_BEEF_5C0E_0004, 100, 80, None);
+    super::set_diagram_scope(super::UNSCOPED);
+
+    assert_eq!(
+        super::get_active_diagrams().len(),
+        1,
+        "an unbound reader sees diagrams from every scope"
+    );
+
+    super::clear_active_diagrams();
+    super::restore_active_diagrams(saved);
 }

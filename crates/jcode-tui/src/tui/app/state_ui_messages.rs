@@ -363,6 +363,14 @@ impl App {
         // block started so a stale offset can't slice the new stream.
         self.reasoning_block_start = None;
         self.turn_reasoning_traces.clear();
+        // The swarm plan snapshot describes a transcript message that is about
+        // to be gone. Reset it here so every transcript-clear path converges:
+        // previously only the remote session-change handler did this, leaving
+        // /rewind, session recovery, disconnected Ctrl+L, and the compacted
+        // history window rendering plan state with no message behind it.
+        self.swarm_plan_items.clear();
+        self.swarm_plan_version = None;
+        self.swarm_plan_swarm_id = None;
         if !self.display_messages.is_empty() {
             self.display_messages.clear();
             self.bump_display_messages_version();

@@ -123,9 +123,9 @@ impl SelfDevTool {
             .map(std::path::Path::new)
             .filter(|path| build::is_jcode_repo(path))
             .map(std::path::Path::to_path_buf);
-        let mut repo_dir = explicit_repo.clone().or_else(|| {
-            SelfDevTool::resolve_repo_dir(ctx.working_dir.as_deref())
-        });
+        let mut repo_dir = explicit_repo
+            .clone()
+            .or_else(|| SelfDevTool::resolve_repo_dir(ctx.working_dir.as_deref()));
         let mut clone_note: Option<String> = explicit_repo.as_deref().map(|path| {
             format!(
                 "Bound jcode repository {} at commit {}.",

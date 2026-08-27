@@ -143,10 +143,15 @@ landed.
 ## Design direction: immutable session identity and observation boundaries
 
 Carried from a proposal that is otherwise retired. Its name-ambiguity item
-already shipped: direct messages fail closed on an ambiguous name. What
-remains unbuilt is the render-cache half, and a current regression test
-confirms it — a session switch leaves the prior session's diagram in a
-process-global registry and still displays it in the pinned pane.
+already shipped: direct messages fail closed on an ambiguous name. The
+diagram-registry half is now session-scoped (`bind_diagram_scope` /
+`diagram_scope_for_session` in `crates/jcode-tui/src/tui/mermaid.rs`):
+registrations are stamped with the session id that produced them and reads are
+filtered to the bound session, so a session switch hides the prior session's
+diagrams without dropping them. Switching back re-reveals them without a
+re-render, because body-cache prefix reuse skips re-rendering retained
+messages. Other session-derived render caches (status snapshots, focus state)
+still need the same treatment.
 
 Every operator-facing view must bind to one immutable `session_id`. A viewer
 may show a friendly name as a convenience, but it must never select, retarget,

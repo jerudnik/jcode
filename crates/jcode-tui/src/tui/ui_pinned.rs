@@ -136,6 +136,9 @@ fn image_source_badge(source: &crate::session::RenderedImageSource) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PinnedCacheKey {
+    /// Session whose transcript produced this entry. Without it two sessions
+    /// with the same `messages_version` could share cached pinned content.
+    session_id: String,
     messages_version: u64,
 }
 
@@ -709,8 +712,12 @@ pub(crate) fn prewarm_focused_side_panel(
 pub(super) fn collect_pinned_diffs_cached(
     messages: &[DisplayMessage],
     messages_version: u64,
+    session_id: Option<&str>,
 ) -> bool {
-    let key = PinnedCacheKey { messages_version };
+    let key = PinnedCacheKey {
+        session_id: session_id.unwrap_or_default().to_string(),
+        messages_version,
+    };
 
     let mut cache = match pinned_cache().lock() {
         Ok(c) => c,

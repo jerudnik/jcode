@@ -1,7 +1,6 @@
 //! Stress probe: build the mermaid source that `jcode_plan::mermaid::
-//! swarm_plan_mermaid` (the production swarm plan-graph generator, re-exported
-//! to the TUI via `crate::tui::swarm_plan_graph`) emits for realistic +
-//! hostile plan data, then render through the real pipeline
+//! swarm_plan_mermaid` (the production swarm plan-graph generator) emits for
+//! realistic + hostile plan data, then render through the real pipeline
 //! (`render_mermaid_untracked`).
 //!
 //!   scripts/dev_cargo.sh run -p jcode-tui-mermaid --features renderer \

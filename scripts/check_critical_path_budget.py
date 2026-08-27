@@ -229,12 +229,18 @@ TARGETS: dict[str, dict[str, Any]] = {
 # bounded by the ceilings. Legitimate removals (a genuine deletion, or a
 # refactor that moves code out of scope) are recorded here inside a maintenance
 # window, which is exactly the review such a scope change deserves.
+#
+# tui moved 197 -> 196 when two unreferenced TUI production files were deleted:
+# crates/jcode-tui/src/tui/info_widget_timeline.rs and
+# crates/jcode-tui/src/tui/swarm_plan_graph.rs. Neither had a `mod` declaration
+# anywhere in the workspace, so no debt moved out of the critical set; it was
+# removed with the dead code.
 EXPECTED_FILE_COUNTS: dict[str, int] = {
     "lifecycle": 66,
     "persistence": 10,
     "updater": 8,
     "provider_infrastructure": 20,
-    "tui": 197,
+    "tui": 196,
 }
 
 # Repository-wide high-water marks: hardcoded here ON PURPOSE, and deliberately

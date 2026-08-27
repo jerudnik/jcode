@@ -36,6 +36,34 @@ pub use jcode_tui_mermaid::{ImageScrollBenchmark, cache_stat_syscalls};
 #[cfg(feature = "mmdr-size-api")]
 pub use jcode_tui_mermaid::terminal_theme;
 
+/// Derive the diagram registry scope for a bound session.
+///
+/// The registry is process-global, so every entry is stamped with the session
+/// that registered it and reads are filtered to the bound session. Binding is
+/// on the immutable session id only, never a friendly name.
+///
+/// `UNSCOPED` (0) means "no session bound", where reads return everything, so
+/// a real session must never hash to it.
+pub fn diagram_scope_for_session(session_id: Option<&str>) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let Some(session_id) = session_id else {
+        return jcode_tui_mermaid::UNSCOPED;
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    match hasher.finish() {
+        jcode_tui_mermaid::UNSCOPED => 1,
+        scope => scope,
+    }
+}
+
+/// Bind the diagram registry to `session_id`, so registrations are attributed
+/// to it and the pinned pane shows only its diagrams.
+pub fn bind_diagram_scope(session_id: Option<&str>) {
+    jcode_tui_mermaid::set_diagram_scope(diagram_scope_for_session(session_id));
+}
+
 pub fn install_jcode_mermaid_hooks() {
     jcode_tui_mermaid::set_log_hooks(crate::logging::info, crate::logging::warn);
     jcode_tui_mermaid::set_render_completed_hook(|| {

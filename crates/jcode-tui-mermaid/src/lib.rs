@@ -201,9 +201,11 @@ pub(crate) fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> S
 }
 
 pub use active::{
-    active_diagram_count, clear_active_diagrams, clear_streaming_preview_diagram,
-    get_active_diagrams, register_active_diagram, restore_active_diagrams,
-    set_streaming_preview_diagram, snapshot_active_diagrams,
+    RegistrationScopeGuard, UNSCOPED, active_diagram_count, clear_active_diagrams,
+    clear_streaming_preview_diagram, current_diagram_scope, get_active_diagrams,
+    register_active_diagram, register_active_diagram_in_scope, restore_active_diagrams,
+    set_diagram_scope, set_streaming_preview_diagram, snapshot_active_diagrams,
+    total_active_diagram_count, with_registration_scope,
 };
 
 #[path = "mermaid_model.rs"]
@@ -867,6 +869,10 @@ struct PendingDeferredRender {
     terminal_width: Option<u16>,
     content: String,
     stream_scope: Option<u64>,
+    /// Session scope bound when this render was queued, so a render that
+    /// lands after a session switch is attributed to the session that asked
+    /// for it rather than the one now on screen.
+    diagram_scope: u64,
 }
 
 #[derive(Debug, Clone)]

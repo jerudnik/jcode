@@ -896,6 +896,7 @@ fn prepare_body_cached(app: &dyn TuiState, width: u16) -> Arc<PreparedMessages> 
     super::note_body_request();
 
     let key = BodyCacheKey {
+        session_id: app.current_session_id().unwrap_or_default(),
         width,
         diff_mode: app.diff_mode(),
         messages_version: app.display_messages_version(),

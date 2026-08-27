@@ -1299,6 +1299,23 @@ form is the writable keys only, and its baseline digest is:
 99823fdb7ab60b4b4ab9592f414dc1cdbb494beb1cc4bf4464b1a26650aef374
 ```
 
+**Superseded 2026-08-22; the current baseline is:**
+
+```
+71b7f6bab2265b6c4f490aee8901d49418165ed15a5ef2395eff6dc97ee0baa9
+```
+
+The digest above it is the pre-rollout value, left in place because this log
+does not rewrite history. GitHub added
+`require_extra_approval_for_unattributed_changes` to `pull_request` rules
+between the 08-20 and 08-21 fork-health runs and set it true on the live
+ruleset; `2006984dd` declared it in `scripts/required-checks.json` and recorded
+both hashes, leaving the constant here for the operator to rotate. The canonical
+diff between the two is exactly that one parameter line. Compare against the
+lower value; a mismatch with it is the incident this step is for, and
+`governance_compare.py --manifest scripts/required-checks.json --live` is the
+second opinion that says whether the contract itself still holds.
+
 Compute it with:
 
 ```sh
@@ -1618,3 +1635,44 @@ reproduction of the defect this workstream started from.
 show up as the merge in arm three being refused; or a required context being
 added by a path that does not read `scripts/required-checks.json`, which
 `_check_required_contexts_have_plants` would not see.
+
+## D042. Deleting dead code shrank a critical domain, which the budget gate refuses by design
+
+Date: 2026-08-27. Status: closed.
+
+PR #209 removed two TUI production files that nothing referenced,
+info_widget_timeline.rs and swarm_plan_graph.rs, both directly under
+`crates/jcode-tui/src/tui/`. Neither had a `mod` declaration anywhere in the
+workspace. `Checks / Fork CI / Rust checks` then failed on
+`scripts/check_critical_path_budget.py`: `tui lost in-scope production files:
+197 -> 196`.
+
+That is the gate working. `scope_shrink_regressions` exists because a count-only
+ceiling has a shrinking denominator, so moving a file out of a critical
+directory would read as cleanup. The check cannot distinguish debt that left the
+scope from debt that was fixed, so it refuses both and asks for a recorded
+decision. Here the debt was removed with the dead code: no ceiling moved, and
+the domain's measured counts fell (tui swallowed_error 596 -> 594, oversize 33
+-> 32) rather than relocating.
+
+**What changed.** `EXPECTED_FILE_COUNTS["tui"]` 197 -> 196, and the `just check`
+digest pin `5ed12e31...` -> `249e7ab1...`. The pin lives in `justfile`, a
+protected path, so this merged through the ruleset maintenance window above.
+
+**Observed while diagnosing, not fixed here.** `scripts/test_critical_path_budget.py`
+is not wired into any recipe: `test-python` iterates `tests/test_*.py`, and this
+file sits in `scripts/`. It has four failing tests on `main` at `45b96548d`,
+unchanged by this PR. Two of them,
+`test_expected_counts_match_the_current_tree` and
+`test_expected_counts_sum_to_the_scanned_total`, assert the expected counts equal
+the measured tree exactly; the tree has drifted upward (lifecycle 69 vs 66,
+provider_infrastructure 21 vs 20) because growth is permitted and never
+re-recorded. A third, `test_pr_gate_runs_the_pinned_check_recipe`, still expects
+`nix shell nixpkgs#just -c just check` after fork-ci.yml added `nixpkgs#python3`
+to that command. An unwired test that would have caught the drift it was written
+for is the same shape as D037.
+
+**Reopen trigger:** a further decrease in any domain's file count, which will
+fail the same way and should be recorded the same way; or wiring
+`scripts/test_critical_path_budget.py` into `test-python`, which requires
+resolving the four pre-existing failures first.

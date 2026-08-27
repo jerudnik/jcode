@@ -2120,8 +2120,7 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
                 // them, so clearing the registry would orphan the pinned
                 // pane / margin widget for diagrams that are still in the
                 // transcript. Diagrams from rewound-away messages leak until
-                // eviction (ACTIVE_DIAGRAMS_MAX) - a pinned, known tradeoff
-                // (tests/swarm_plan_graph_inline.rs).
+                // eviction (ACTIVE_DIAGRAMS_MAX) - a pinned, known tradeoff.
                 app.clear_streaming_render_state();
                 for rendered in crate::session::render_messages(&app.session) {
                     app.push_display_message(DisplayMessage {
