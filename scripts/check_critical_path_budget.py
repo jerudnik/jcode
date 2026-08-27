@@ -236,10 +236,10 @@ TARGETS: dict[str, dict[str, Any]] = {
 # anywhere in the workspace, so no debt moved out of the critical set; it was
 # removed with the dead code.
 EXPECTED_FILE_COUNTS: dict[str, int] = {
-    "lifecycle": 66,
+    "lifecycle": 69,
     "persistence": 10,
     "updater": 8,
-    "provider_infrastructure": 20,
+    "provider_infrastructure": 21,
     "tui": 196,
 }
 
