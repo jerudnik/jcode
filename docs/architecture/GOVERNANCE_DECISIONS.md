@@ -1641,11 +1641,11 @@ added by a path that does not read `scripts/required-checks.json`, which
 Date: 2026-08-27. Status: closed.
 
 PR #209 removed two TUI production files that nothing referenced,
-`crates/jcode-tui/src/tui/info_widget_timeline.rs` and
-`crates/jcode-tui/src/tui/swarm_plan_graph.rs`. Neither had a `mod` declaration
-anywhere in the workspace. `Checks / Fork CI / Rust checks` then failed on
-`check_critical_path_budget.py`: `tui lost in-scope production files: 197 ->
-196`.
+info_widget_timeline.rs and swarm_plan_graph.rs, both directly under
+`crates/jcode-tui/src/tui/`. Neither had a `mod` declaration anywhere in the
+workspace. `Checks / Fork CI / Rust checks` then failed on
+`scripts/check_critical_path_budget.py`: `tui lost in-scope production files:
+197 -> 196`.
 
 That is the gate working. `scope_shrink_regressions` exists because a count-only
 ceiling has a shrinking denominator, so moving a file out of a critical
