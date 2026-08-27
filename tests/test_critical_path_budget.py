@@ -15,11 +15,21 @@ import sys
 import unittest
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPTS_DIR.parent
-sys.path.insert(0, str(SCRIPTS_DIR))
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
-import check_critical_path_budget as budget  # noqa: E402
+# Borrowed, not donated. Leaving scripts/ on sys.path re-creates the shadowing
+# hazard the guards are hardened against, and it leaks into every module that
+# runs after this one. Append rather than insert so the standard library keeps
+# precedence even inside the window.
+_SCRIPTS_DIR = str(REPO_ROOT / "scripts")
+_BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
+if _BORROWED_PATH_ENTRY:
+    sys.path.append(_SCRIPTS_DIR)
+try:
+    import check_critical_path_budget as budget
+finally:
+    if _BORROWED_PATH_ENTRY:
+        sys.path.remove(_SCRIPTS_DIR)
 
 
 class DomainAttributionTests(unittest.TestCase):
@@ -124,7 +134,7 @@ class PinnedBlockTests(unittest.TestCase):
         self.assertIn("name: PR Gate", pr_workflow)
         self.assertIn("uses: ./.github/workflows/ci.yml", pr_workflow)
         self.assertIn("uses: ./.github/workflows/fork-ci.yml", ci_workflow)
-        self.assertIn("nix shell nixpkgs#just -c just check", fork_workflow)
+        self.assertIn("nix shell nixpkgs#just nixpkgs#python3 -c just check", fork_workflow)
 
 
 class CeilingAndTargetCoherenceTests(unittest.TestCase):
@@ -168,7 +178,7 @@ class RepositoryTrendTests(unittest.TestCase):
 
     def test_a_raised_baseline_is_reported_as_a_regression(self) -> None:
         raised = dict(budget.repository_totals())
-        raised["panic"] += 1
+        raised["panic"] = budget.REPOSITORY_CEILINGS["panic"] + 1
         regressions = budget.repository_trend_regressions(raised)
         self.assertEqual(len(regressions), 1)
         self.assertIn("panic", regressions[0])

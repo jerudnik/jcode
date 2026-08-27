@@ -1047,8 +1047,10 @@ increasing order of severity.
 
 *It would pin bytes that nothing executes.* Of the guards this repository
 describes as load-bearing, five gate a pull request. Three budget guards exit 1
-against a clean, green `main`, and `scripts/test_critical_path_budget.py` is
-invoked by no workflow, recipe, or script in the tree. A manifest over the
+against a clean, green `main`, and the budget checker's test suite, now
+`tests/test_critical_path_budget.py`, was invoked by no workflow, recipe, or
+script in the tree; it sat in `scripts/` at the time, where the wiring rule does
+not reach. A manifest over the
 pre-G10A set would spend the ceremony of a ruleset transaction on files whose
 behaviour no gate observes.
 
@@ -1659,7 +1661,8 @@ the domain's measured counts fell (tui swallowed_error 596 -> 594, oversize 33
 digest pin `5ed12e31...` -> `249e7ab1...`. The pin lives in `justfile`, a
 protected path, so this merged through the ruleset maintenance window above.
 
-**Observed while diagnosing, not fixed here.** `scripts/test_critical_path_budget.py`
+**Observed while diagnosing, not fixed here.** The budget checker's test suite,
+now `tests/test_critical_path_budget.py` and at the time still under `scripts/`,
 is not wired into any recipe: `test-python` iterates `tests/test_*.py`, and this
 file sits in `scripts/`. It has four failing tests on `main` at `45b96548d`,
 unchanged by this PR. Two of them,
@@ -1674,5 +1677,14 @@ for is the same shape as D037.
 
 **Reopen trigger:** a further decrease in any domain's file count, which will
 fail the same way and should be recorded the same way; or wiring
-`scripts/test_critical_path_budget.py` into `test-python`, which requires
+that suite into `test-python`, which requires
 resolving the four pre-existing failures first.
+
+**Resolved 2026-08-27.** The second trigger fired. The suite moved to
+`tests/test_critical_path_budget.py`, which the `test-python` glob already
+covers and which `check_test_wiring.py` polices, so it cannot be orphaned
+again. Of the four failures, the two count assertions were the drift itself and
+were fixed by re-recording `EXPECTED_FILE_COUNTS` (lifecycle 66 -> 69,
+provider_infrastructure 20 -> 21, digest `249e7ab1...` -> `aae1ad95...`); the
+other two were stale assertions about `fork-ci.yml` and about panic headroom,
+and were corrected without weakening what they test. All 33 cases pass.

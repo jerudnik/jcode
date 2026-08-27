@@ -32,6 +32,7 @@ SCRIPTS_IMPORTING_TEST_MODULES = (
     "test_ci_metrics.py",
     "test_ci_workflow_commands.py",
     "test_classify_pr_paths.py",
+    "test_critical_path_budget.py",
     "test_guard_nonvacuity.py",
     "test_nix_distribution_policy.py",
     "test_reusable_workflow_calls.py",
