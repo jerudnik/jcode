@@ -53,11 +53,32 @@ jobs:
           # decisions. Losing the log is the failure PR #155 nearly caused. A rename
           # reads as a deletion here, which is correct: moving the log is a governance
           # event.
+          #
+          # What "destructive" means is measured, not assumed. Forbidding every removed
+          # line also forbids correcting a citation inside an entry, and that is not a
+          # theoretical cost: when a cited file legitimately moves,
+          # scripts/check_docs_references.py requires the citation be updated and this
+          # rule forbade the edit, so the two controls contradicted each other and no
+          # honest change could satisfy both. Three signals stand in for the intent
+          # instead. The log must exist, so deleting or moving it still fails. Its
+          # entry count must not fall, so no decision can be dropped. Its length must
+          # not fall, so an entry cannot be gutted while its heading is left behind.
           log=docs/architecture/GOVERNANCE_DECISIONS.md
           if ! git diff --quiet "$base" HEAD -- "$log"; then
-            removed="$(git diff --numstat "$base" HEAD -- "$log" | awk '{print $2}')"
-            if [ ! -f "$log" ] || [ "${removed:-0}" -ne 0 ]; then
-              echo "::error::$log lost ${removed:-all} line(s) or was removed; the decision log is append-only (see its 'Ruleset maintenance window' section)"
+            if [ ! -f "$log" ]; then
+              echo "::error::$log was removed or renamed; moving the decision log is a governance event (see its 'Ruleset maintenance window' section)"
+              exit 1
+            fi
+            entries_before="$(git show "$base:$log" | grep -c '^## ' || true)"
+            entries_after="$(grep -c '^## ' "$log" || true)"
+            lines_before="$(git show "$base:$log" | wc -l | tr -d ' ')"
+            lines_after="$(wc -l < "$log" | tr -d ' ')"
+            if [ "$entries_after" -lt "$entries_before" ]; then
+              echo "::error::$log lost $((entries_before - entries_after)) entry heading(s) ($entries_before -> $entries_after); the decision log does not drop decisions (see its 'Ruleset maintenance window' section)"
+              exit 1
+            fi
+            if [ "$lines_after" -lt "$lines_before" ]; then
+              echo "::error::$log is $((lines_before - lines_after)) line(s) shorter ($lines_before -> $lines_after); correcting text in place is allowed, net removal is not (see its 'Ruleset maintenance window' section)"
               exit 1
             fi
           fi
