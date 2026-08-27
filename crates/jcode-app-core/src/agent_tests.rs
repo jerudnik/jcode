@@ -2479,9 +2479,7 @@ fn two_tool_batch_provider() -> Arc<dyn Provider> {
                 }),
             ]),
             ScriptedProviderAttempt::Stream(vec![
-                ScriptedProviderEvent::Event(StreamEvent::TextDelta(
-                    "batch finished".to_string(),
-                )),
+                ScriptedProviderEvent::Event(StreamEvent::TextDelta("batch finished".to_string())),
                 ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
                     stop_reason: Some("end_turn".to_string()),
                 }),
@@ -2725,7 +2723,10 @@ async fn urgent_interrupt_lands_at_injection_point_c_with_the_skip_count() {
         "one queued interrupt must be announced exactly once, got: {injected:?}"
     );
     let (point, tools_skipped, content) = &injected[0];
-    assert_eq!(point, "C", "an urgent interrupt announces from the skip path");
+    assert_eq!(
+        point, "C",
+        "an urgent interrupt announces from the skip path"
+    );
     assert_eq!(
         *tools_skipped,
         Some(1),
@@ -2739,9 +2740,7 @@ async fn urgent_interrupt_lands_at_injection_point_c_with_the_skip_count() {
 
 /// The ordered event stream for a turn, reduced to the two kinds this test
 /// cares about: `done:<tool_use_id>` and `injected:<point>`.
-fn ordered_event_tags(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ServerEvent>,
-) -> Vec<String> {
+fn ordered_event_tags(rx: &mut tokio::sync::mpsc::UnboundedReceiver<ServerEvent>) -> Vec<String> {
     let mut tags = Vec::new();
     while let Ok(event) = rx.try_recv() {
         match event {

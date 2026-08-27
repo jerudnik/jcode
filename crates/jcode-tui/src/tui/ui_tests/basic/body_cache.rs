@@ -1,6 +1,7 @@
 #[test]
 fn test_body_cache_state_keeps_multiple_width_entries() {
     let key_a = BodyCacheKey {
+        session_id: "session-a".to_string(),
         width: 40,
         diff_mode: crate::config::DiffDisplayMode::Off,
         messages_version: 1,
@@ -72,6 +73,7 @@ fn test_body_cache_state_evicts_oldest_entries() {
 
     for idx in 0..(BODY_CACHE_MAX_ENTRIES + 2) {
         let key = BodyCacheKey {
+            session_id: "session-evict".to_string(),
             width: 40 + idx as u16,
             diff_mode: crate::config::DiffDisplayMode::Off,
             messages_version: 1,
@@ -112,6 +114,7 @@ fn test_body_cache_state_evicts_oldest_entries() {
 #[test]
 fn test_body_cache_state_accepts_large_single_entry_within_total_budget() {
     let key = BodyCacheKey {
+        session_id: "session-large".to_string(),
         width: 120,
         diff_mode: crate::config::DiffDisplayMode::Off,
         messages_version: 99,
@@ -140,6 +143,7 @@ fn test_body_cache_state_accepts_large_single_entry_within_total_budget() {
 #[test]
 fn test_body_cache_state_retains_oversized_hot_entry() {
     let key = BodyCacheKey {
+        session_id: "session-oversized".to_string(),
         width: 140,
         diff_mode: crate::config::DiffDisplayMode::Off,
         messages_version: 120,
@@ -169,6 +173,7 @@ fn test_body_cache_state_retains_oversized_hot_entry() {
 #[test]
 fn test_body_cache_state_keeps_two_oversized_width_entries_hot() {
     let key_a = BodyCacheKey {
+        session_id: "session-oversized-a".to_string(),
         width: 140,
         diff_mode: crate::config::DiffDisplayMode::Off,
         messages_version: 120,

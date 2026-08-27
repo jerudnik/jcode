@@ -28,9 +28,9 @@ mod reload;
 mod setup;
 mod status;
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod status_output_tests;
+#[cfg(test)]
+mod tests;
 
 pub use launch::{enter_selfdev_session, schedule_selfdev_prompt_delivery};
 pub use reload::{ReloadRecoveryDirective, persisted_background_tasks_note};

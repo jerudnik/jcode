@@ -792,6 +792,10 @@ fn update_prompt_entry_animation(
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BodyCacheKey {
+    /// Session whose transcript produced this entry. Without it two sessions
+    /// with the same `messages_version` and display properties could share
+    /// cached content.
+    session_id: String,
     width: u16,
     diff_mode: crate::config::DiffDisplayMode,
     messages_version: u64,
@@ -2342,7 +2346,11 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     let collect_diffs = diff_mode.is_pinned();
     // Images render inline; pinned content here is file-diff content only.
     let has_pinned_content = if collect_diffs {
-        collect_pinned_diffs_cached(app.display_messages(), app.display_messages_version())
+        collect_pinned_diffs_cached(
+            app.display_messages(),
+            app.display_messages_version(),
+            app.current_session_id().as_deref(),
+        )
     } else {
         false
     };

@@ -795,7 +795,10 @@ async fn setup_binds_an_explicit_jcode_context() {
         .expect("setup should succeed");
 
     assert_eq!(
-        output.metadata.as_ref().and_then(|metadata| metadata["repo_dir"].as_str()),
+        output
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata["repo_dir"].as_str()),
         Some(repo.path().to_string_lossy().as_ref())
     );
     assert!(output.output.contains("Bound jcode repository"));
@@ -1105,4 +1108,3 @@ async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
     let first_status = wait_for_task_completion(first_meta["task_id"].as_str().unwrap()).await;
     assert_eq!(first_status.status, BackgroundTaskStatus::Completed);
 }
-

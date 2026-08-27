@@ -6,9 +6,9 @@ use super::control_log_sync::{
     current_control_log_offset, scan_swarm_control_log, subscribe_control_log,
 };
 use super::{AwaitMembersRuntime, SwarmEvent, SwarmMember, VersionedPlan};
-use chrono::{DateTime, SecondsFormat, Utc};
 use crate::bus::{Bus, BusEvent, SwarmAwaitCompleted, UiActivity};
 use crate::protocol::{AwaitedMemberStatus, ServerEvent, format_comm_awaited_members_with_reports};
+use chrono::{DateTime, SecondsFormat, Utc};
 use jcode_swarm_core::control_log::{ScanOutcome, SwarmControlEnvelope, SwarmControlEvent};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
