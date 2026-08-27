@@ -4,7 +4,7 @@
 
 # Throttled check loop - type-checks + tests, skips codegen. Fast feedback.
 check: test-python
-    python3 -I scripts/check_critical_path_budget.py --expect-digest 5ed12e310519a1258ddd0cf9b67674b8aa3198a863f1712771c36b10c5d052ed --report target/critical-path-budget.json
+    python3 -I scripts/check_critical_path_budget.py --expect-digest 249e7ab15579aed123915032972ee0bbdf4d1a787b83e62e148271e1c7a65587 --report target/critical-path-budget.json
     python3 -I scripts/check_guard_nonvacuity.py
     python3 -I scripts/check_test_wiring.py
     scripts/cargo_exec.sh check --locked --workspace --all-targets --all-features
