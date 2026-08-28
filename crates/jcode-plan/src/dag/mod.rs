@@ -31,6 +31,9 @@ pub use schedule::{
 /// auto-generated gate ids derive deterministically from their parent.
 pub type NodeId = String;
 
+/// Reserved plan metadata projected to scheduler status for durable safety data.
+pub const PLAN_SAFETY_STATUS_META_ID: &str = "__jcode_plan_safety_v1";
+
 /// Engine mode. One engine, two presets (see doc section 1a). The data model,
 /// scheduler, and dataflow are identical; the mode only controls whether the
 /// rigor machinery (mandatory gates + strict artifact validation) is engaged.

@@ -1,6 +1,29 @@
 use super::run_plan_errors::*;
 use super::*;
 
+fn unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn graph_wall_clock(summary: &PlanGraphStatus) -> Result<(u64, u64)> {
+    let raw = summary
+        .phases_by_id
+        .get(jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "run_plan refused to schedule a graph without a persisted safety ledger"
+            )
+        })?;
+    let (started, limit) = raw.split_once(':').ok_or_else(|| {
+        anyhow::anyhow!("run_plan refused a graph with an invalid persisted safety ledger")
+    })?;
+    Ok((started.parse()?, limit.parse()?))
+}
+
 /// Decide how many swarm workers `run_plan` keeps active at once.
 ///
 /// Policy:
@@ -581,12 +604,7 @@ pub(super) async fn run_swarm_plan_loop(
     reporter: &RunPlanReporter,
 ) -> Result<ToolOutput> {
     let initial_summary = fetch_plan_status(&ctx.session_id).await?;
-    let graph_wall_clock_started = std::time::Instant::now();
-    let graph_wall_clock_limit = std::time::Duration::from_secs(
-        crate::config::config()
-            .agents
-            .swarm_max_graph_wall_clock_secs,
-    );
+    let (graph_started_at_unix_ms, graph_wall_clock_limit_ms) = graph_wall_clock(&initial_summary)?;
     let is_deep = initial_summary.mode.eq_ignore_ascii_case("deep");
     let initial_seed_count = if initial_summary.seeded_count > 0 {
         initial_summary.seeded_count
@@ -629,12 +647,12 @@ pub(super) async fn run_swarm_plan_loop(
             ));
         }
 
-        if graph_wall_clock_started.elapsed() > graph_wall_clock_limit {
-            let elapsed = graph_wall_clock_started.elapsed();
+        let elapsed_ms = unix_now_ms().saturating_sub(graph_started_at_unix_ms);
+        if elapsed_ms > graph_wall_clock_limit_ms {
             let message = format!(
                 "Task graph paused: hard wall-clock budget exceeded (limit {}s, observed {}s). The scheduler rejected further coordination and froze graph growth. Inspect the plan and start a smaller replacement graph; ordinary unfreeze cannot bypass the exhausted budget.",
-                graph_wall_clock_limit.as_secs(),
-                elapsed.as_secs()
+                graph_wall_clock_limit_ms / 1_000,
+                elapsed_ms / 1_000
             );
             let response = send_request(Request::CommTaskControl {
                 id: REQUEST_ID,
@@ -1009,5 +1027,21 @@ pub(super) async fn assign_task_to_session(
             target_session,
             e
         )),
+    }
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn graph_start_comes_from_persisted_status_and_missing_data_fails_closed() {
+        let mut summary = PlanGraphStatus::empty_for_swarm("durable-clock");
+        assert!(graph_wall_clock(&summary).is_err());
+        summary.phases_by_id.insert(
+            jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID.to_string(),
+            "1234:5678".to_string(),
+        );
+        assert_eq!(graph_wall_clock(&summary).unwrap(), (1234, 5678));
     }
 }

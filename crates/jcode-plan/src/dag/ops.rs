@@ -67,6 +67,20 @@ pub fn seed(graph: &mut TaskGraph, specs: Vec<NodeSpec>) -> Result<(), DagError>
     if staged.mode.requires_gates() {
         ensure_root_gate(&mut staged);
     }
+    let observed_depth = staged
+        .nodes()
+        .iter()
+        .map(|node| node_depth(&staged, &node.id))
+        .max()
+        .unwrap_or(0);
+    if observed_depth > staged.max_lineage_depth {
+        return Err(DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::LineageDepth,
+            limit: staged.max_lineage_depth as u64,
+            observed: observed_depth as u64,
+            operation: "seeding the task graph".to_string(),
+        }));
+    }
     ensure_node_budget(
         graph,
         staged.len().saturating_sub(graph.len()),
@@ -111,7 +125,7 @@ fn seed_spec_matches_existing(graph: &TaskGraph, node: &TaskNode, spec: &NodeSpe
         .filter(|dependency| {
             graph
                 .get(dependency)
-                .is_none_or(|candidate| candidate.parent.as_deref() != Some(node.id.as_str()))
+                .is_none_or(|candidate| matches!(candidate.origin, None | Some(NodeOrigin::Seed)))
         })
         .map(String::as_str)
         .collect();
@@ -271,13 +285,23 @@ fn ensure_node_budget(graph: &TaskGraph, incoming: usize, operation: &str) -> Re
 
 fn node_depth(graph: &TaskGraph, node_id: &str) -> usize {
     let mut depth = 0;
-    let mut current = graph.get(node_id).and_then(|node| node.parent.clone());
-    while let Some(parent_id) = current {
-        depth += 1;
-        if depth > 16 {
-            break; // defensive: corrupt parent cycle
+    let mut current = graph.get(node_id);
+    let mut visited = std::collections::HashSet::new();
+    while let Some(node) = current {
+        if !visited.insert(node.id.as_str()) {
+            return usize::MAX;
         }
-        current = graph.get(&parent_id).and_then(|node| node.parent.clone());
+        let Some(parent_id) = node.parent.as_deref() else {
+            // A deep root gate is generated from the seed set but has no semantic
+            // parent. Count that generation so gaps injected from it start at
+            // depth two rather than masquerading as seed-level work.
+            if node.is_gate && node.origin == Some(NodeOrigin::Gate) {
+                depth += 1;
+            }
+            break;
+        };
+        depth += 1;
+        current = graph.get(parent_id);
     }
     depth
 }
@@ -550,7 +574,7 @@ pub fn inject_from_gate(
     actor: &str,
     new_nodes: Vec<NodeSpec>,
 ) -> Result<Vec<String>, DagError> {
-    let parent = {
+    let composite_parent = {
         let gate = graph
             .get(gate_id)
             .ok_or_else(|| DagError::UnknownNode(gate_id.to_string()))?;
@@ -595,6 +619,15 @@ pub fn inject_from_gate(
                 operation: format!("injecting gap children from gate '{gate_id}'"),
             }));
         }
+        let generated_depth = node_depth(graph, gate_id).saturating_add(1);
+        if generated_depth > graph.max_lineage_depth {
+            return Err(DagError::BudgetExceeded(BudgetViolation {
+                budget: GraphBudget::LineageDepth,
+                limit: graph.max_lineage_depth as u64,
+                observed: generated_depth as u64,
+                operation: format!("injecting gap children from gate '{gate_id}'"),
+            }));
+        }
         ensure_node_budget(
             graph,
             new_nodes.len(),
@@ -629,7 +662,11 @@ pub fn inject_from_gate(
 
     let mut staged = graph.clone();
     for spec in new_nodes {
-        staged.push(spec_to_node(spec, parent.clone(), NodeOrigin::Gap));
+        staged.push(spec_to_node(
+            spec,
+            Some(gate_id.to_string()),
+            NodeOrigin::Gap,
+        ));
     }
     // Re-queue the gate, now depending on the new nodes (re-critique/re-verify).
     {
@@ -649,7 +686,7 @@ pub fn inject_from_gate(
     // dataflow hydration reads only a node's *direct* dependencies, so without
     // these edges the synthesis re-wake would never receive the gap nodes'
     // artifacts — the same reason expand_node keeps child edges (doc section 5).
-    if let Some(parent_id) = &parent
+    if let Some(parent_id) = &composite_parent
         && let Some(parent_node) = staged.get_mut(parent_id)
     {
         for id in &new_ids {

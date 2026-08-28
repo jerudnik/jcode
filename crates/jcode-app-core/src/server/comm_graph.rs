@@ -1,23 +1,16 @@
 //! Server handlers for the task-DAG mutation ops (seed/expand/complete/inject).
-//!
-//! These are the live counterparts of the validated engine ops in
-//! `jcode_plan::dag`. Each handler lifts the swarm's current `VersionedPlan` into
-//! a `TaskGraph` (via `jcode_plan::bridge`), applies the engine op (which enforces
-//! acyclicity, ownership, gate insertion, and artifact validation), lowers the
-//! result back into the plan, then persists and broadcasts using the existing
-//! swarm machinery. This keeps a single source of truth and reuses the scheduler,
-//! persistence, and TUI broadcast paths.
+//! Mutations run through `jcode_plan::dag`, then persist and broadcast.
 
 use super::{
     SwarmEvent, SwarmEventType, SwarmMember, SwarmState, VersionedPlan, broadcast_swarm_plan,
     fanout_session_event, persist_swarm_state_for, record_swarm_event,
 };
 use crate::protocol::{NotificationType, ServerEvent, TaskGraphNodeSpec};
-use jcode_plan::SwarmTaskProgress;
 use jcode_plan::bridge::{apply_task_graph, parse_kind, to_task_graph};
 use jcode_plan::dag::{
     self, BudgetViolation, DagError, GraphBudget, HandoffArtifact, NodeSpec, NodeStatus, TaskGraph,
 };
+use jcode_plan::{NodeMeta, SwarmTaskProgress};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -25,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::sync::{RwLock, broadcast};
 
-const PLAN_SAFETY_PROGRESS_KEY: &str = "__jcode_plan_safety_v1";
+const PLAN_SAFETY_PROGRESS_KEY: &str = dag::PLAN_SAFETY_STATUS_META_ID;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct PlanSafetyPolicy {
@@ -111,6 +104,16 @@ fn store_safety_ledger(plan: &mut VersionedPlan, ledger: &PlanSafetyLedger) {
             ..SwarmTaskProgress::default()
         },
     );
+    plan.node_meta.insert(
+        dag::PLAN_SAFETY_STATUS_META_ID.to_string(),
+        NodeMeta {
+            kind: Some(format!(
+                "{}:{}",
+                ledger.started_at_unix_ms, ledger.policy.max_wall_clock_ms
+            )),
+            ..NodeMeta::default()
+        },
+    );
 }
 
 fn wall_clock_violation(ledger: &PlanSafetyLedger, now_unix_ms: u64) -> Option<BudgetViolation> {
@@ -182,6 +185,32 @@ fn mutate_plan_with_budget<T>(
     }
 }
 
+fn seed_replacement_with_budget(
+    plan: &mut VersionedPlan,
+    mut replacement: VersionedPlan,
+    specs: Vec<NodeSpec>,
+    ledger: PlanSafetyLedger,
+) -> GraphMutationResult<u64> {
+    let mut graph = to_task_graph(&replacement);
+    ledger.policy.apply_to(&mut graph);
+    match dag::seed(&mut graph, specs) {
+        Ok(()) => {
+            apply_task_graph(&mut replacement, &graph);
+            store_safety_ledger(&mut replacement, &ledger);
+            replacement.version = replacement.version.saturating_add(1);
+            *plan = replacement;
+            GraphMutationResult::Applied(ledger.started_at_unix_ms)
+        }
+        Err(DagError::BudgetExceeded(violation)) => {
+            match pause_for_budget(plan, ledger, violation) {
+                GraphMutationResult::Paused(violation) => GraphMutationResult::Paused(violation),
+                _ => unreachable!("pause_for_budget always pauses"),
+            }
+        }
+        Err(error) => GraphMutationResult::Rejected(error.to_string()),
+    }
+}
+
 fn budget_pause_message(violation: &BudgetViolation) -> String {
     let budget = match violation.budget {
         GraphBudget::Nodes => "node count",
@@ -227,32 +256,19 @@ async fn swarm_id_for(
         .and_then(|member| member.swarm_id.clone())
 }
 
-/// Ensure the seeding session can actually drive the graph it just created.
-///
-/// Deep-mode sessions are frequently solo `agent`s with no coordinator elected,
-/// yet `assign_task` / `assign_next` / `run_plan` are coordinator-gated. Without
-/// this, a fresh deep-mode agent can seed a task graph but then cannot dispatch
-/// any of it. We elect the seeder as coordinator when the swarm has no *live*
-/// coordinator, mirroring the self-promote rule used by `assign_role`. A live,
-/// non-headless coordinator is left untouched so a real coordinator is never
-/// displaced by a worker that happens to seed.
-///
-/// Returns true when the seeder was (or already is) the coordinator afterwards.
+/// Elect a solo seeder without displacing a live coordinator.
 async fn ensure_seeder_can_coordinate(
     swarm_id: &str,
     seeder_session_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
 ) -> bool {
-    // 1. Read the current coordinator id without holding the lock across the
-    //    liveness check (matches the non-nested lock pattern used elsewhere).
     let current = swarm_coordinators.read().await.get(swarm_id).cloned();
     match &current {
         Some(coord) if coord == seeder_session_id => return true,
         _ => {}
     }
 
-    // 2. Decide whether the existing coordinator is still a live driver.
     let coordinator_is_live = match &current {
         Some(coord) => {
             let members = swarm_members.read().await;
@@ -267,14 +283,10 @@ async fn ensure_seeder_can_coordinate(
         return false;
     }
 
-    // 3. Promote the seeder; demote any prior (stale) coordinator member. Re-check
-    //    under the write lock that the coordinator is still the one we inspected
-    //    (compare-and-swap): two concurrent seeders race here, and the loser must
-    //    not silently displace the winner it never liveness-checked.
+    // Re-check under the write lock so concurrent seeders cannot displace a winner.
     let prior = {
         let mut coordinators = swarm_coordinators.write().await;
         if coordinators.get(swarm_id) != current.as_ref() {
-            // Someone else changed the coordinator between our read and write.
             return coordinators.get(swarm_id).map(String::as_str) == Some(seeder_session_id);
         }
         coordinators.insert(swarm_id.to_string(), seeder_session_id.to_string())
@@ -294,30 +306,13 @@ async fn ensure_seeder_can_coordinate(
     true
 }
 
-/// Auto-claim a queued node for the participant that is trying to mutate it.
-///
-/// Seeded nodes are unowned until dispatch, but the deep-mode contract tells the
-/// seeding agent to `expand_node`/`complete_node` its own nodes, and the assign
-/// path refuses self-assignment — so without this a solo deep seeder could never
-/// legally touch any node it seeded (observed live as "Complete rejected: actor
-/// does not own node"). Similarly, assignment to a client-attached worker leaves
-/// the item `queued` (the server-run flip to `running` is skipped when a live
-/// client owns the turn), so the assignee's own complete/expand would bounce with
-/// "invalid state Queued".
-///
-/// Claiming is safe only when the node is genuinely available to this actor:
-/// queued, with every dependency done (enforced by `dispatch`), and either
-/// unowned or already assigned to this same actor. A node owned by someone else
-/// is never touched — the engine's `NotOwner` check still applies.
+/// Claim an available queued node before its actor mutates it.
 fn claim_queued_node_for_actor(graph: &mut TaskGraph, node_id: &str, actor: &str) {
     let claimable = graph.get(node_id).is_some_and(|node| {
         node.status == NodeStatus::Queued
             && node.owner.as_deref().is_none_or(|owner| owner == actor)
     });
     if claimable {
-        // `dispatch` re-validates queued status and dependency satisfaction; if
-        // deps are not done the claim is skipped and the engine op reports the
-        // real error.
         let _ = dag::dispatch(graph, node_id, actor);
     }
 }
@@ -441,22 +436,36 @@ async fn publish_budget_pause(
     )
     .await;
 
-    if let Some(coordinator_id) = swarm_coordinators.read().await.get(swarm_id).cloned() {
-        let _ = fanout_session_event(
-            swarm_members,
-            &coordinator_id,
-            ServerEvent::Notification {
-                from_session: "task-graph-scheduler".to_string(),
-                from_name: Some("Task graph scheduler".to_string()),
-                notification_type: NotificationType::Message {
-                    scope: Some("dm".to_string()),
-                    tldr: Some("task graph paused after a hard budget was exceeded".to_string()),
-                },
-                message: message.clone(),
+    let coordinator_id = swarm_coordinators
+        .read()
+        .await
+        .get(swarm_id)
+        .cloned()
+        .unwrap_or_else(|| req_session_id.to_string());
+    let _ = fanout_session_event(
+        swarm_members,
+        &coordinator_id,
+        ServerEvent::Notification {
+            from_session: "task-graph-scheduler".to_string(),
+            from_name: Some("Task graph scheduler".to_string()),
+            notification_type: NotificationType::Message {
+                scope: Some("dm".to_string()),
+                tldr: Some("task graph paused after a hard budget was exceeded".to_string()),
             },
-        )
-        .await;
-    }
+            message: message.clone(),
+        },
+    )
+    .await;
+    crate::bus::Bus::global().publish(crate::bus::BusEvent::SwarmAwaitCompleted(
+        crate::bus::SwarmAwaitCompleted {
+            session_id: coordinator_id,
+            completed: false,
+            summary: "Task graph paused after a hard budget was exceeded".to_string(),
+            notification: message.clone(),
+            notify: false,
+            wake: true,
+        },
+    ));
     err(client_event_tx, id, message);
 }
 
@@ -495,12 +504,7 @@ pub(super) async fn handle_comm_seed_graph(
         .unwrap_or_else(HashSet::new);
     replacement_participants.insert(req_session_id.clone());
 
-    // Resolve the plan mode. The model is *asked* to pass `mode:"deep"` when it is
-    // running at `swarm-deep` effort, but it frequently forgets. Rather than
-    // silently downgrading a deep-effort session to light (which disables the
-    // gates + artifact validation that define deep mode), default the mode from
-    // the seeder's recorded reasoning effort when the caller did not specify one.
-    // An explicit `mode` always wins so a caller can still opt into light.
+    // Infer deep mode from effort when omitted; an explicit mode still wins.
     let resolved_mode = mode.or_else(|| {
         crate::session_effort::session_effort(&req_session_id)
             .filter(|effort| crate::prompt::is_deep_swarm_effort(effort))
@@ -557,10 +561,7 @@ pub(super) async fn handle_comm_seed_graph(
             return;
         }
 
-        // Seed into a fresh plan rather than lifting the persisted graph. This is
-        // the lifecycle boundary that prevents old nodes, node_meta, progress, or
-        // participants from leaking into a new workflow. Preserve only the
-        // monotonic version so clients cannot mistake replacement for stale data.
+        // Replace the workflow without leaking old graph state; keep version monotonic.
         let mut replacement = VersionedPlan::new();
         replacement.version = plan.version;
         replacement.max_nodes = Some(crate::config::config().agents.swarm_max_graph_nodes);
@@ -569,23 +570,12 @@ pub(super) async fn handle_comm_seed_graph(
         }
         replacement.participants = replacement_participants;
         let ledger = initialize_safety_ledger(&mut replacement, unix_now_ms());
-        let mut graph = to_task_graph(&replacement);
-        ledger.policy.apply_to(&mut graph);
-        match dag::seed(&mut graph, specs) {
-            Ok(()) => {
-                apply_task_graph(&mut replacement, &graph);
-                replacement.version = replacement.version.saturating_add(1);
-                *plan = replacement;
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
+        seed_replacement_with_budget(plan, replacement, specs, ledger)
     };
 
     match result {
-        Ok(()) => {
-            // A deep-mode seeder is usually a solo agent. Elect it coordinator
-            // only after the seed succeeds so rejected calls cannot mutate roles.
+        GraphMutationResult::Applied(_) => {
+            // Elect only after success so rejected seeds cannot mutate roles.
             ensure_seeder_can_coordinate(
                 &swarm_id,
                 &req_session_id,
@@ -610,7 +600,26 @@ pub(super) async fn handle_comm_seed_graph(
             )
             .await;
         }
-        Err(e) => err(client_event_tx, id, format!("Seed rejected: {e}")),
+        GraphMutationResult::Paused(violation) => {
+            publish_budget_pause(
+                id,
+                &swarm_id,
+                &req_session_id,
+                &violation,
+                client_event_tx,
+                swarm_members,
+                swarms_by_id,
+                swarm_plans,
+                swarm_coordinators,
+                event_history,
+                event_counter,
+                swarm_event_tx,
+            )
+            .await;
+        }
+        GraphMutationResult::Rejected(message) => {
+            err(client_event_tx, id, format!("Seed rejected: {message}"));
+        }
     }
 }
 
@@ -647,7 +656,7 @@ pub(super) async fn handle_comm_expand_node(
             return;
         };
         mutate_plan_with_budget(plan, unix_now_ms(), |graph| {
-            claim_queued_node_for_actor(&mut graph, &node_id, &req_session_id);
+            claim_queued_node_for_actor(graph, &node_id, &req_session_id);
             dag::expand_node(graph, &node_id, &req_session_id, specs)
         })
     };
@@ -725,16 +734,10 @@ pub(super) async fn handle_comm_complete_node(
             return;
         }
     };
-    // W2: capture the evidence summary for the control log before the
-    // artifact is consumed by the engine op.
+    // Capture evidence before the engine consumes the artifact.
     let artifact_confidence = artifact.confidence.clone();
 
-    // F3 salvage policy: a coordinator may complete a node whose recorded
-    // owner is no longer a live swarm member. Without this, a crashed or
-    // evicted worker wedges its running node forever (complete/fail are
-    // owner-only, requeue requires Failed). The engine op (take_over_node)
-    // enforces only mechanics; being the coordinator + the owner being gone is
-    // the policy, decided here where membership is visible.
+    // A coordinator may salvage a node whose owner is no longer live.
     let salvage_takeover_allowed = {
         let coordinators = swarm_coordinators.read().await;
         let is_coordinator = coordinators
@@ -781,9 +784,7 @@ pub(super) async fn handle_comm_complete_node(
 
     match result {
         Ok(()) => {
-            // W2: file the completion evidence in the control log BEFORE the
-            // finalize sync, so awaiters see ArtifactFiled ordered ahead of
-            // the derived TaskStatusChanged("done") for the same completion.
+            // File evidence before finalize publishes the derived done state.
             super::control_log_sync::append_control_event(
                 &swarm_id,
                 jcode_swarm_core::control_log::SwarmControlEvent::ArtifactFiled {
@@ -846,7 +847,7 @@ pub(super) async fn handle_comm_inject_gap(
             return;
         };
         mutate_plan_with_budget(plan, unix_now_ms(), |graph| {
-            claim_queued_node_for_actor(&mut graph, &gate_id, &req_session_id);
+            claim_queued_node_for_actor(graph, &gate_id, &req_session_id);
             dag::inject_from_gate(graph, &gate_id, &req_session_id, specs)
         })
     };
@@ -893,11 +894,7 @@ pub(super) async fn handle_comm_inject_gap(
     }
 }
 
-/// Freeze or unfreeze graph growth without stopping work already in flight.
-///
-/// The DAG engine owns graph mechanics, but coordinator authority is a live
-/// swarm policy: membership and the elected coordinator are only visible here.
-/// Keep that policy at the server boundary, matching coordinator salvage.
+/// Freeze or unfreeze graph growth at the coordinator-controlled server boundary.
 #[expect(
     clippy::too_many_arguments,
     reason = "graph control threads runtime handles for persistence and broadcast"
@@ -1001,46 +998,39 @@ pub(super) async fn handle_comm_graph_freeze(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{NotificationType, SwarmMemberRuntime};
+    use crate::protocol::SwarmMemberRuntime;
     use jcode_plan::bridge::apply_task_graph;
-    use jcode_plan::dag::{Mode, NodeKind};
+    use jcode_plan::dag::{Mode, NodeKind, NodeOrigin, TaskNode};
     use std::collections::VecDeque;
     use std::sync::atomic::AtomicU64;
     use std::time::Instant;
 
-    fn member(
-        session_id: &str,
-        swarm_id: &str,
-        role: &str,
-    ) -> (SwarmMember, mpsc::UnboundedReceiver<ServerEvent>) {
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        (
-            SwarmMember {
-                session_id: session_id.to_string(),
-                event_tx,
-                event_txs: HashMap::new(),
-                working_dir: None,
-                swarm_id: Some(swarm_id.to_string()),
-                swarm_enabled: true,
-                status: "ready".to_string(),
-                detail: None,
-                task_label: None,
-                subagent_type: None,
-                friendly_name: Some(session_id.to_string()),
-                report_back_to_session_id: None,
-                initial_prompt_delivered: None,
-                latest_completion_report: None,
-                role: role.to_string(),
-                joined_at: Instant::now(),
-                last_status_change: Instant::now(),
-                is_headless: false,
-                output_tail: None,
-                todo_progress: None,
-                todo_items: Vec::new(),
-                runtime: SwarmMemberRuntime::default(),
-            },
-            event_rx,
-        )
+    fn member(session_id: &str, swarm_id: &str, role: &str) -> SwarmMember {
+        let (event_tx, _) = mpsc::unbounded_channel();
+        SwarmMember {
+            session_id: session_id.to_string(),
+            event_tx,
+            event_txs: HashMap::new(),
+            working_dir: None,
+            swarm_id: Some(swarm_id.to_string()),
+            swarm_enabled: true,
+            status: "ready".to_string(),
+            detail: None,
+            task_label: None,
+            subagent_type: None,
+            friendly_name: Some(session_id.to_string()),
+            report_back_to_session_id: None,
+            initial_prompt_delivered: None,
+            latest_completion_report: None,
+            role: role.to_string(),
+            joined_at: Instant::now(),
+            last_status_change: Instant::now(),
+            is_headless: false,
+            output_tail: None,
+            todo_progress: None,
+            todo_items: Vec::new(),
+            runtime: SwarmMemberRuntime::default(),
+        }
     }
 
     fn spec(id: &str) -> TaskGraphNodeSpec {
@@ -1053,13 +1043,55 @@ mod tests {
         }
     }
 
+    async fn budget_wake_for(
+        events: &mut broadcast::Receiver<crate::bus::BusEvent>,
+        target: &str,
+    ) -> bool {
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if let Ok(crate::bus::BusEvent::SwarmAwaitCompleted(event)) = events.recv().await
+                    && event.session_id == target
+                    && event.wake
+                    && event.notification.contains("budget")
+                {
+                    return true;
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    #[test]
+    fn seed_budget_overrun_pauses_without_replacing_the_graph() {
+        let mut plan = VersionedPlan::new();
+        let mut replacement = VersionedPlan::new();
+        replacement.max_nodes = Some(1);
+        let ledger = PlanSafetyLedger::new(&replacement, 100);
+        let specs = vec![
+            NodeSpec::new("one", "one", NodeKind::Explore),
+            NodeSpec::new("two", "two", NodeKind::Explore),
+        ];
+        let result = seed_replacement_with_budget(&mut plan, replacement, specs, ledger);
+        assert!(matches!(result, GraphMutationResult::Paused(_)));
+        assert!(plan.frozen);
+        assert!(plan.items.is_empty(), "rejected seed must not land");
+        assert_eq!(
+            load_safety_ledger(&plan, 999).status,
+            PlanSafetyStatus::PausedBudgetExceeded
+        );
+        let status =
+            crate::protocol::PlanGraphStatus::from_versioned_plan("seed", &plan, None, vec![]);
+        assert!(status.phases_by_id[dag::PLAN_SAFETY_STATUS_META_ID].starts_with("100:"));
+    }
+
     #[tokio::test]
     async fn node_budget_overrun_pauses_plan_and_wakes_coordinator_without_growth() {
         let swarm_id = "swarm-budget".to_string();
         let coordinator_id = "coord-budget".to_string();
         let worker_id = "worker-budget".to_string();
-        let (coordinator, mut coordinator_rx) = member(&coordinator_id, &swarm_id, "coordinator");
-        let (worker, _worker_event_rx) = member(&worker_id, &swarm_id, "agent");
+        let coordinator = member(&coordinator_id, &swarm_id, "coordinator");
+        let worker = member(&worker_id, &swarm_id, "agent");
         let swarm_members = Arc::new(RwLock::new(HashMap::from([
             (coordinator_id.clone(), coordinator),
             (worker_id.clone(), worker),
@@ -1090,7 +1122,8 @@ mod tests {
         let event_history = Arc::new(RwLock::new(VecDeque::new()));
         let event_counter = Arc::new(AtomicU64::new(1));
         let swarm_event_tx = broadcast::channel(16).0;
-        let (client_tx, mut client_rx) = mpsc::unbounded_channel();
+        let (client_tx, _) = mpsc::unbounded_channel();
+        let mut bus_events = crate::bus::Bus::global().subscribe();
 
         handle_comm_expand_node(
             1,
@@ -1119,26 +1152,43 @@ mod tests {
             "budget exhaustion must pause the plan"
         );
         drop(plan);
+        assert!(budget_wake_for(&mut bus_events, &coordinator_id).await);
+    }
 
+    #[test]
+    fn force_completion_blocks_sibling_gate_replacement_injection() {
+        let mut graph = TaskGraph::new(Mode::Light);
+        graph.push_node(TaskNode {
+            id: "sibling-gate".to_string(),
+            content: "inject replacements".to_string(),
+            kind: NodeKind::Critique,
+            status: NodeStatus::Running,
+            owner: Some("gate-worker".to_string()),
+            parent: None,
+            depends_on: Vec::new(),
+            expanded: false,
+            is_gate: true,
+            planner: None,
+            priority: 0,
+            output: None,
+            origin: Some(NodeOrigin::Gate),
+        });
+        let mut plan = VersionedPlan::new();
+        apply_task_graph(&mut plan, &graph);
+        force_completion_closes_graph_growth(&mut plan);
+        let replacement = NodeSpec::new("replacement", "replacement", NodeKind::Explore);
+        let result = mutate_plan_with_budget(&mut plan, unix_now_ms(), |graph| {
+            dag::inject_from_gate(graph, "sibling-gate", "gate-worker", vec![replacement])
+        });
         assert!(matches!(
-            client_rx.recv().await,
-            Some(ServerEvent::Error { .. })
+            result,
+            GraphMutationResult::Rejected(message) if message.contains("frozen")
         ));
-        let mut woke_coordinator = false;
-        while let Ok(event) = coordinator_rx.try_recv() {
-            if matches!(
-                event,
-                ServerEvent::Notification {
-                    notification_type: NotificationType::Message { .. },
-                    ..
-                }
-            ) {
-                woke_coordinator = true;
-            }
-        }
-        assert!(
-            woke_coordinator,
-            "budget exhaustion must wake the coordinator"
+        assert_eq!(
+            plan.items.len(),
+            1,
+            "force completion must block replacement"
         );
+        assert!(!plan.items.iter().any(|item| item.id == "replacement"));
     }
 }
