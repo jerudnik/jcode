@@ -7,8 +7,8 @@
 //! without surviving its gate (doc sections 2, 3, 6).
 
 use super::{
-    DagError, HandoffArtifact, Mode, NodeKind, NodeOrigin, NodeSpec, NodeStatus, TaskGraph,
-    TaskNode,
+    BudgetViolation, DagError, GraphBudget, HandoffArtifact, Mode, NodeKind, NodeOrigin, NodeSpec,
+    NodeStatus, TaskGraph, TaskNode,
 };
 
 /// Seed the initial DAG from a batch of specs (the first agent's draft). All
@@ -67,6 +67,11 @@ pub fn seed(graph: &mut TaskGraph, specs: Vec<NodeSpec>) -> Result<(), DagError>
     if staged.mode.requires_gates() {
         ensure_root_gate(&mut staged);
     }
+    ensure_node_budget(
+        graph,
+        staged.len().saturating_sub(graph.len()),
+        "seeding the task graph",
+    )?;
     let cycle = staged.cycle_nodes();
     if !cycle.is_empty() {
         return Err(DagError::WouldCreateCycle(cycle));
@@ -231,7 +236,7 @@ pub struct ExpandOutcome {
 /// whose value was below one model pass). Two levels - seed nodes plus one
 /// round of decomposition - covers legitimate fan-out; anything deeper is
 /// almost always context-duplicating shrapnel.
-pub const MAX_EXPANSION_DEPTH: usize = 2;
+pub const MAX_EXPANSION_DEPTH: usize = super::DEFAULT_MAX_LINEAGE_DEPTH;
 
 /// Maximum children a single expansion may propose. Fan-out beyond this is
 /// almost always decomposition below the value of one model pass (subtasks
@@ -246,22 +251,20 @@ pub const MAX_EXPANSION_CHILDREN: usize = 24;
 /// [`NodeOrigin::Gap`], so the quota survives plan round-trips without separate
 /// mutable accounting. Once exhausted, the gate must pass with its remaining
 /// doubts recorded or escalate them to the coordinator.
-pub const MAX_GATE_INJECTIONS: usize = 3;
+pub const MAX_GATE_INJECTIONS: usize = super::DEFAULT_MAX_GATE_INJECTIONS_PER_GATE;
 
-fn ensure_node_budget(
-    graph: &TaskGraph,
-    incoming: usize,
-    operation: &str,
-    alternative: &str,
-) -> Result<(), DagError> {
+fn ensure_node_budget(graph: &TaskGraph, incoming: usize, operation: &str) -> Result<(), DagError> {
     let Some(max_nodes) = graph.max_nodes else {
         return Ok(());
     };
     let remaining = max_nodes.saturating_sub(graph.len());
     if incoming > remaining {
-        return Err(DagError::GateMisuse(format!(
-            "graph node budget is {max_nodes}, with {remaining} nodes remaining; {operation} would add {incoming}. {alternative}"
-        )));
+        return Err(DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::Nodes,
+            limit: max_nodes as u64,
+            observed: graph.len().saturating_add(incoming) as u64,
+            operation: operation.to_string(),
+        }));
     }
     Ok(())
 }
@@ -290,11 +293,14 @@ pub fn expand_node(
             .get(node_id)
             .ok_or_else(|| DagError::UnknownNode(node_id.to_string()))?;
         let depth = node_depth(graph, node_id);
-        if depth >= MAX_EXPANSION_DEPTH {
-            return Err(DagError::GateMisuse(format!(
-                "node '{node_id}' is at decomposition depth {depth} (cap {MAX_EXPANSION_DEPTH}); \
-                 do the work directly instead of decomposing further"
-            )));
+        let generated_depth = depth.saturating_add(1);
+        if generated_depth > graph.max_lineage_depth {
+            return Err(DagError::BudgetExceeded(BudgetViolation {
+                budget: GraphBudget::LineageDepth,
+                limit: graph.max_lineage_depth as u64,
+                observed: generated_depth as u64,
+                operation: format!("expanding '{node_id}'"),
+            }));
         }
         if node.owner.as_deref() != Some(actor) {
             return Err(DagError::NotOwner {
@@ -327,12 +333,7 @@ pub fn expand_node(
             )));
         }
         let incoming = children.len() + usize::from(graph.mode.requires_gates());
-        ensure_node_budget(
-            graph,
-            incoming,
-            &format!("expanding '{node_id}'"),
-            "Do the work directly or ask the coordinator to raise the graph budget.",
-        )?;
+        ensure_node_budget(graph, incoming, &format!("expanding '{node_id}'"))?;
     }
 
     // Validate child ids and dependency references. Collect the validated ids
@@ -584,18 +585,20 @@ pub fn inject_from_gate(
                     .is_some_and(|node| node.origin == Some(NodeOrigin::Gap))
             })
             .count();
-        let remaining = MAX_GATE_INJECTIONS.saturating_sub(existing_injections);
+        let quota = graph.max_gate_injections_per_gate;
+        let remaining = quota.saturating_sub(existing_injections);
         if new_nodes.len() > remaining {
-            return Err(DagError::GateMisuse(format!(
-                "gate '{gate_id}' has {remaining} injection slots remaining (quota {MAX_GATE_INJECTIONS}) but proposed {} nodes; pass the gate recording remaining doubts in open_questions, or escalate to the coordinator",
-                new_nodes.len()
-            )));
+            return Err(DagError::BudgetExceeded(BudgetViolation {
+                budget: GraphBudget::GateInjections,
+                limit: quota as u64,
+                observed: existing_injections.saturating_add(new_nodes.len()) as u64,
+                operation: format!("injecting gap children from gate '{gate_id}'"),
+            }));
         }
         ensure_node_budget(
             graph,
             new_nodes.len(),
             &format!("gate '{gate_id}' injection"),
-            "Pass the gate recording remaining doubts in open_questions, or escalate to the coordinator.",
         )?;
         gate.parent.clone()
     };

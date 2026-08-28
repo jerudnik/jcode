@@ -581,6 +581,12 @@ pub(super) async fn run_swarm_plan_loop(
     reporter: &RunPlanReporter,
 ) -> Result<ToolOutput> {
     let initial_summary = fetch_plan_status(&ctx.session_id).await?;
+    let graph_wall_clock_started = std::time::Instant::now();
+    let graph_wall_clock_limit = std::time::Duration::from_secs(
+        crate::config::config()
+            .agents
+            .swarm_max_graph_wall_clock_secs,
+    );
     let is_deep = initial_summary.mode.eq_ignore_ascii_case("deep");
     let initial_seed_count = if initial_summary.seeded_count > 0 {
         initial_summary.seeded_count
@@ -621,6 +627,37 @@ pub(super) async fn run_swarm_plan_loop(
                 "run_plan exceeded {} coordination loops; leaving workers untouched for inspection",
                 max_loops
             ));
+        }
+
+        if graph_wall_clock_started.elapsed() > graph_wall_clock_limit {
+            let elapsed = graph_wall_clock_started.elapsed();
+            let message = format!(
+                "Task graph paused: hard wall-clock budget exceeded (limit {}s, observed {}s). The scheduler rejected further coordination and froze graph growth. Inspect the plan and start a smaller replacement graph; ordinary unfreeze cannot bypass the exhausted budget.",
+                graph_wall_clock_limit.as_secs(),
+                elapsed.as_secs()
+            );
+            let response = send_request(Request::CommTaskControl {
+                id: REQUEST_ID,
+                session_id: ctx.session_id.clone(),
+                action: "freeze".to_string(),
+                task_id: String::new(),
+                target_session: None,
+                message: Some(message.clone()),
+            })
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Failed to pause wall-clock-exhausted plan: {error}")
+            })?;
+            ensure_success(&response)?;
+            reporter.checkpoint(&message).await;
+            if let Err(error) = broadcast_plan_alert(ctx, &message).await {
+                reporter
+                    .log(&format!(
+                        "failed to broadcast wall-clock budget pause to the swarm: {error}"
+                    ))
+                    .await;
+            }
+            return Err(anyhow::anyhow!(message));
         }
 
         let summary = fetch_plan_status(&ctx.session_id).await?;

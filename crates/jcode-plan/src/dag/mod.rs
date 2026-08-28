@@ -416,6 +416,27 @@ pub struct NodeSpec {
     pub priority: u8,
 }
 
+/// A hard graph-growth budget enforced by the DAG engine before mutation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphBudget {
+    Nodes,
+    LineageDepth,
+    GateInjections,
+    WallClock,
+}
+
+/// Typed evidence for a rejected graph-growth admission. The live scheduler uses
+/// this to pause the persisted plan and wake its coordinator instead of treating
+/// a hard budget like an ordinary model-correctable validation error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BudgetViolation {
+    pub budget: GraphBudget,
+    pub limit: u64,
+    pub observed: u64,
+    pub operation: String,
+}
+
 impl NodeSpec {
     pub fn new(id: impl Into<String>, content: impl Into<String>, kind: NodeKind) -> Self {
         Self {
@@ -469,6 +490,8 @@ pub enum DagError {
     StaleGateScope { gate: NodeId, pending: Vec<NodeId> },
     /// A gate kind was supplied as user work, or vice versa.
     GateMisuse(String),
+    /// A hard graph budget denied the mutation before any node was stored.
+    BudgetExceeded(BudgetViolation),
 }
 
 impl std::fmt::Display for DagError {
@@ -528,6 +551,11 @@ impl std::fmt::Display for DagError {
                 )
             }
             DagError::GateMisuse(msg) => write!(f, "gate misuse: {msg}"),
+            DagError::BudgetExceeded(violation) => write!(
+                f,
+                "graph {:?} budget exceeded: limit {}, observed {} while {}",
+                violation.budget, violation.limit, violation.observed, violation.operation
+            ),
         }
     }
 }
@@ -537,9 +565,19 @@ impl std::error::Error for DagError {}
 /// The task DAG: a mode plus a set of nodes. Insertion order is preserved for
 /// deterministic iteration; lookups are by id.
 pub const DEFAULT_MAX_GRAPH_NODES: usize = 64;
+pub const DEFAULT_MAX_LINEAGE_DEPTH: usize = 2;
+pub const DEFAULT_MAX_GATE_INJECTIONS_PER_GATE: usize = 3;
 
 fn default_graph_node_budget() -> Option<usize> {
     Some(DEFAULT_MAX_GRAPH_NODES)
+}
+
+fn default_lineage_depth_budget() -> usize {
+    DEFAULT_MAX_LINEAGE_DEPTH
+}
+
+fn default_gate_injection_budget() -> usize {
+    DEFAULT_MAX_GATE_INJECTIONS_PER_GATE
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,6 +585,10 @@ pub struct TaskGraph {
     pub mode: Mode,
     #[serde(default = "default_graph_node_budget")]
     pub max_nodes: Option<usize>,
+    #[serde(default = "default_lineage_depth_budget")]
+    pub max_lineage_depth: usize,
+    #[serde(default = "default_gate_injection_budget")]
+    pub max_gate_injections_per_gate: usize,
     nodes: Vec<TaskNode>,
 }
 
@@ -555,6 +597,8 @@ impl TaskGraph {
         Self {
             mode,
             max_nodes: default_graph_node_budget(),
+            max_lineage_depth: default_lineage_depth_budget(),
+            max_gate_injections_per_gate: default_gate_injection_budget(),
             nodes: Vec::new(),
         }
     }
