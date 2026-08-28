@@ -23,20 +23,19 @@ so each item gets an explicit wire-or-retire decision instead of ambient rot.
 
 25 WIRED, 32 INDIRECT, 88 UNWIRED. The load-bearing findings:
 
-- `scripts/preflight.sh` is UNWIRED. `flake.nix:289,297` only syntax-check
-  it, docs recommend it, but no workflow, just recipe, or flake check runs
-  it. It is in turn the only caller of several guards below, so its dormancy
-  cascades.
+- `scripts/preflight.sh`: **WIRE** through the required `just pre-pr` local
+  gate. The recipe uses the PR path classifier to run docs-only checks alone
+  or add preflight plus the broader local checks for non-docs changes.
 - Red dormant checks (fail today, nothing notices):
   `check_ambient_roots.sh` (seven moved call sites plus stale allowlist),
   `check_web_mobile.sh` (machine-local path baked in),
   `check_branch_handoff.py`, `count_blank_user_turns.py`,
   `test_oauth_usage.py`, and `check_warning_budget.sh` outside a Nix shell.
-- Green orphan guards (pass today, nothing runs them):
-  `check_env_lease_drop_order.py` (1197 files clean),
-  `check_tui_render_lock.py` (31 locked, 0 unlocked),
-  `check_wildcard_reexport_budget.py` (13 vs baseline 16),
-  `check_config_env_lease.py` (preflight-only, 148 keys clean).
+- Green orphan guards: **WIRE** all four through `scripts/preflight.sh`, which
+  is executed by `just pre-pr`: `check_env_lease_drop_order.py` (1197 files
+  clean), `check_tui_render_lock.py` (31 locked, 0 unlocked),
+  `check_wildcard_reexport_budget.py` (13 vs baseline 16), and
+  `check_config_env_lease.py` (148 keys clean).
 - WIRE: `tests/test_docs_references.py`, `tests/test_warning_budget.py`,
   `tests/test_pipeline.py`, and `tests/test_benchmark_discovery.py` now live
   under `tests/`, where `just test-python` runs them through the existing

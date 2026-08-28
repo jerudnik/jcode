@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Headed compositor smoke for Alt+Shift+E expand badge.
 
+Verdict: KEEP-MANUAL. TUI maintainers run this after changing expand-badge
+input or compositor handling. It requires a live jcode debug daemon plus a
+Wayland/Niri session with kitty and wtype, so CI does not collect it. Run:
+  python3 tests/e2e/expand_badge_headed_wtype.py
+
 Uses kitty remote control to launch a real jcode TUI window, prepares the same
 fixture, focuses the window, presses Alt+Shift+E with wtype, and checks state.
 This complements the headless PTY E2E by covering Wayland/compositor mapping.
