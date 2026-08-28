@@ -1285,7 +1285,6 @@ fn cheap_extra_model_options() -> &'static [&'static str] {
         "gemini-3-flash",
         "gpt-5.2-codex",
         "composer-2.5",
-        "anthropic/claude-sonnet-4",
     ]
 }
 
@@ -1423,7 +1422,9 @@ fn provider_default_model(provider: ProviderChoice) -> Option<&'static str> {
         ProviderChoice::Claude => Some("claude-opus-4-6"),
         ProviderChoice::AnthropicApi => Some("claude-opus-4-8"),
         ProviderChoice::Openai | ProviderChoice::OpenaiApi => Some("gpt-5.5"),
-        ProviderChoice::Openrouter => Some("anthropic/claude-sonnet-4"),
+        // The OpenRouter passthrough is retired; there is no implicit default
+        // model on that route.
+        ProviderChoice::Openrouter => None,
         ProviderChoice::Copilot => Some("gpt-5.2-codex"),
         ProviderChoice::Gemini | ProviderChoice::GeminiApi | ProviderChoice::Google => {
             Some("gemini-2.5-pro")

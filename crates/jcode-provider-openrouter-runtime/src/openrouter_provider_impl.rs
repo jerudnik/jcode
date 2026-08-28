@@ -43,6 +43,15 @@ impl Provider for OpenRouterProvider {
     ) -> Result<EventStream> {
         jcode_base::logging::info("PRESTREAM: profile complete() enter");
         let model = self.model.read().await.clone();
+        if model.trim().is_empty() {
+            // Constructed without a model (the retired passthrough default is
+            // gone). Failing the request here keeps the error at the identity
+            // boundary instead of sending a phantom model over the wire.
+            anyhow::bail!(
+                "No model selected for {}: this runtime has no implicit default model; switch to an explicit model first",
+                self.runtime_display_name()
+            );
+        }
         jcode_base::logging::info("PRESTREAM: profile complete() model read");
         let reasoning_effort = self.reasoning_effort();
         let thinking_override = Self::thinking_override();
@@ -384,10 +393,13 @@ impl Provider for OpenRouterProvider {
     }
 
     fn model(&self) -> String {
+        // A contended/poisoned lock yields an empty string: "unknown" is
+        // honest, a phantom default model is not (it once masqueraded as the
+        // live model across every identity surface).
         self.model
             .try_read()
             .map(|m| m.clone())
-            .unwrap_or_else(|_| DEFAULT_MODEL.to_string())
+            .unwrap_or_default()
     }
 
     fn supports_image_input(&self) -> bool {

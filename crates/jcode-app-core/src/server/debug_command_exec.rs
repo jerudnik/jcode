@@ -576,7 +576,8 @@ pub(super) async fn execute_debug_command(
                 }
             }
             "openai" | "codex" => "gpt-5.5",
-            "openrouter" => "anthropic/claude-sonnet-4",
+            // "openrouter" deliberately has no default model: the OpenRouter
+            // passthrough is retired, so a debug switch must name one.
             "cursor" => "gpt-5",
             "copilot" => "copilot:claude-sonnet-4",
             "gemini" => "gemini-2.5-pro",

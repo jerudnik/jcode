@@ -586,7 +586,10 @@ fn prepare_visible_spawn_session_cleans_session_when_launch_errors() {
 }
 
 #[test]
-fn prepare_visible_spawn_session_persists_and_launches_provider_key_for_openrouter_model() {
+fn prepare_visible_spawn_session_no_longer_guesses_openrouter_from_model_shape() {
+    // `model@Provider` / `vendor/model` shapes used to persist
+    // provider_key=openrouter purely from their spelling; the passthrough is
+    // retired, so an uncataloged shape persists no provider key at all.
     let _guard = crate::storage::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     crate::env::set_var("JCODE_HOME", temp_home.path());
@@ -601,7 +604,7 @@ fn prepare_visible_spawn_session_persists_and_launches_provider_key_for_openrout
         false,
         None,
         |_session_id, _cwd: &std::path::Path, _selfdev, provider_key| {
-            assert_eq!(provider_key, Some("openrouter"));
+            assert_eq!(provider_key, None);
             Ok(true)
         },
     )
@@ -610,7 +613,7 @@ fn prepare_visible_spawn_session_persists_and_launches_provider_key_for_openrout
     assert!(launched);
     let session = crate::session::Session::load(&session_id).expect("prepared session should save");
     assert_eq!(session.model.as_deref(), Some("openai/gpt-5.4@OpenAI"));
-    assert_eq!(session.provider_key.as_deref(), Some("openrouter"));
+    assert_eq!(session.provider_key, None);
 
     crate::env::remove_var("JCODE_HOME");
 }
