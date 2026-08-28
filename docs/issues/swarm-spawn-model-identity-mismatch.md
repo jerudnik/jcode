@@ -105,3 +105,35 @@ Supporting detail:
 - Coordinator journal: `~/.jcode/sessions/session_peacock_1787861778353_a0d0e76b48e5f975.journal.jsonl`
 - Worker session + journal + evidence: `~/.jcode/sessions/session_shark_1787862031120_2330b8c39a007acb.{json,journal.jsonl,evidence.jsonl}`
 - Provider activity: `~/.jcode/provider_activity.json` (`openai-compatible:kimi` entry)
+
+## Addendum (2026-08-27/28): live reproductions and root cause confirmed
+
+Fresh reproductions while setting up the follow-up audit:
+
+- `spawn model=k3`, `grok-4.5`, `kimi-for-coding`, `grok-4.6` all failed
+  resolution despite appearing in `list_models` (the resolver never consulted
+  the catalog); `bridge/gemini-3-flash-agent` — equally absent from the
+  resolver's vocabulary — passed via the '/'-implies-OpenRouter heuristic.
+- `spawn model=openai-compatible:kimi:k3` spawned but sent wire requests as
+  model `kimi:k3` (first-colon misparse) and died with a transport error.
+- Evidence logs labeled every openai-compatible request `OpenRouter`
+  regardless of endpoint.
+
+Root cause chain (full trace in the provider audit): spawn stamps session meta
+before applying the model override; the override failed warn-only after
+clearing the active kimi profile; execution fell to the OpenRouter slot's
+hardcoded `DEFAULT_MODEL = "anthropic/claude-sonnet-4"` pointed at Kimi's
+endpoint.
+
+Fixes on this branch:
+
+1. Catalog-based spawn resolution, fail closed (`fca321c34`).
+2. Spawn fails on model-override failure; profile cleared only after a
+   successful rebind (`4a9a21e89`).
+3. Phantom default model and OpenRouter shape-passthrough removed
+   (`95fdfff46`).
+
+Remaining (tracked separately): single identity source for session meta /
+evidence / UI chip / provider_activity, and de-multiplexing the OpenRouter
+slot — the stage-3 refactor. Observability defects seen during the audit are
+docs/issues/swarm-observability-status-and-wake-gaps.md.

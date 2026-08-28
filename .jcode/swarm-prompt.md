@@ -1,17 +1,18 @@
 ## Routing
 
-- Human model choices win. Run `swarm list_models` and use an exact live route.
-  On failure use the fallback below; never guess or inherit a policy violation.
+- Human model choices win. `swarm list_models` is the authority: pass names
+  exactly as printed (resolution is catalog-based and fail-closed). On failure
+  use the fallback below; never guess.
 - Never use an OpenAI model below GPT-5.6. Prefer `gpt-5.6-sol` at high effort
   for capable/general work and `gpt-5.6-luna` at high for trivial or mechanical
   work. Prefer fast variants.
 - `claude-fable-5` is not a default worker. Use it only by human request, as the
   human-facing orchestrator, or when an explicit swarm/workflow condition names
   it.
-- Use `xai/grok-4.5` at xhigh as the Sol fallback. Use `k3` (Kimi K3) at xhigh
+- Use `grok-4.5` at xhigh as the Sol fallback. Use `k3` (Kimi K3) at xhigh
   where Opus or Fable would otherwise be used; prefer fast routes when applicable.
-- When work is not complicated or mechanical, spread provider load by rotating model assignments across `deepseek-v4-pro`, `MiniMax-M3`,
-  and `glm-5.2`
+- When work is not complicated or mechanical, spread provider load by rotating
+  model assignments across `deepseek-v4-pro`, `MiniMax-M3`, and `glm-5.2`.
 - One `run_plan` applies one model/effort to all workers it creates. Keep such
   runs profile-homogeneous; otherwise use explicit spawns.
 
