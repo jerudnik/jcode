@@ -176,6 +176,30 @@ compiles, anything networked, and `scripts/classify_pr_paths.py`, which
 classifies a pull request's changed paths and has no meaning for a single
 commit.
 
+## Checks considered and rejected
+
+Three other repository checks were examined as hook candidates and all three
+were rejected. Measured 2026-08-28 on a clean worktree, exit codes captured
+directly rather than through a pipe.
+
+| check | exit | time | verdict |
+|---|---|---|---|
+| `scripts/check_agent_instructions.py` | 0 | 0.37s | already in the dispatcher |
+| `scripts/check_branch_handoff.py` | 1 | 1.62s | fails by design on local work |
+| `scripts/check_ambient_roots.sh` | 1 | 5.81s | too slow, and currently failing |
+
+`check_branch_handoff.py` reports that a branch is not on a path to `main`.
+That is the normal state of a branch someone is still committing to, so as a
+hook it would fail nearly every commit until the branch was pushed. It belongs
+where it already is, at the point where work is handed off.
+
+`check_ambient_roots.sh` costs 5.81s on its own, roughly three times the entire
+hook budget, and currently reports two failures on a clean tree. Neither
+property suits a commit-time check.
+
+The remaining pull request checks are excluded on cost, as described above.
+This issue therefore proposes adding exactly two invocations and nothing else.
+
 ## Known limitation
 
 The hook sees one commit. A branch can still arrive at a broken state across
