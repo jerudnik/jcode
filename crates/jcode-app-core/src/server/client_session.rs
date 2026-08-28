@@ -244,8 +244,13 @@ pub(super) async fn handle_clear_session(
         let mut members = swarm_members.write().await;
         if let Some(mut member) = members.remove(client_session_id) {
             let swarm_id = member.swarm_id.clone();
+            super::state::remove_swarm_member_lifecycle(client_session_id);
             member.session_id = new_id.clone();
             member.status = "ready".to_string();
+            super::state::store_swarm_member_lifecycle(
+                &new_id,
+                jcode_swarm_core::SwarmLifecycleStatus::Ready,
+            );
             member.detail = None;
             members.insert(new_id.clone(), member);
             swarm_id
@@ -711,7 +716,7 @@ async fn subscribe_should_mark_ready(
     let members = swarm_members.read().await;
     members
         .get(client_session_id)
-        .is_none_or(|member| member.status != "running")
+        .is_none_or(|member| member.lifecycle_status() != "running")
 }
 
 pub(super) async fn handle_reload(
@@ -1345,8 +1350,13 @@ pub(super) async fn handle_resume_session(
                             swarm.insert(session_id.clone());
                         }
                     }
+                    super::state::rename_swarm_member_lifecycle(
+                        &old_session_id,
+                        &session_id,
+                        &member.status,
+                    );
                     member.session_id = session_id.clone();
-                    member.status = "ready".to_string();
+                    member.status = member.lifecycle_status().to_string();
                     member.detail = None;
                     members.insert(session_id.clone(), member);
                 }

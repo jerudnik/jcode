@@ -1,7 +1,7 @@
 pub mod control_log;
 
 use jcode_plan::PlanItem;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::borrow::Cow;
 use std::path::PathBuf;
 
@@ -184,73 +184,87 @@ impl<'de> Deserialize<'de> for SwarmRole {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum SwarmLifecycleStatus {
-    Spawned,
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberLifecycleState {
+    #[default]
+    Starting,
     Ready,
+    Assigned,
     Running,
-    RunningStale,
-    Completed,
-    Done,
+    Succeeded,
     Failed,
     Stopped,
-    Crashed,
-    Queued,
-    Blocked,
-    Pending,
-    Todo,
-    Other(String),
+    Lost,
 }
 
-impl SwarmLifecycleStatus {
-    pub fn as_str(&self) -> Cow<'_, str> {
+impl MemberLifecycleState {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Spawned => Cow::Borrowed("spawned"),
-            Self::Ready => Cow::Borrowed("ready"),
-            Self::Running => Cow::Borrowed("running"),
-            Self::RunningStale => Cow::Borrowed("running_stale"),
-            Self::Completed => Cow::Borrowed("completed"),
-            Self::Done => Cow::Borrowed("done"),
-            Self::Failed => Cow::Borrowed("failed"),
-            Self::Stopped => Cow::Borrowed("stopped"),
-            Self::Crashed => Cow::Borrowed("crashed"),
-            Self::Queued => Cow::Borrowed("queued"),
-            Self::Blocked => Cow::Borrowed("blocked"),
-            Self::Pending => Cow::Borrowed("pending"),
-            Self::Todo => Cow::Borrowed("todo"),
-            Self::Other(value) => Cow::Borrowed(value.as_str()),
+            Self::Starting => "starting",
+            Self::Ready => "ready",
+            Self::Assigned => "assigned",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+            Self::Lost => "lost",
         }
     }
-}
 
-impl From<String> for SwarmLifecycleStatus {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "spawned" => Self::Spawned,
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Stopped | Self::Lost
+        )
+    }
+
+    /// Parse both the canonical vocabulary and the temporary compatibility
+    /// inputs accepted while older clients and control logs are migrated.
+    pub fn from_compatibility_status(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "starting" | "spawned" => Self::Starting,
             "ready" => Self::Ready,
-            "running" => Self::Running,
-            "running_stale" => Self::RunningStale,
-            "completed" => Self::Completed,
-            "done" => Self::Done,
-            "failed" => Self::Failed,
-            "stopped" => Self::Stopped,
-            "crashed" => Self::Crashed,
-            "queued" => Self::Queued,
-            "blocked" => Self::Blocked,
-            "pending" => Self::Pending,
-            "todo" => Self::Todo,
-            _ => Self::Other(value),
+            "assigned" | "queued" => Self::Assigned,
+            "running" | "running_stale" | "streaming" | "thinking" | "blocked"
+            | "waiting_network" => Self::Running,
+            "succeeded" | "completed" | "done" => Self::Succeeded,
+            "failed" | "error" => Self::Failed,
+            "stopped" | "closed" | "cancelled" => Self::Stopped,
+            "lost" | "crashed" | "disconnected" | "unknown" => Self::Lost,
+            _ => Self::Starting,
         }
     }
 }
 
-impl Serialize for SwarmLifecycleStatus {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str().as_ref())
-    }
+#[derive(Clone, Debug, Serialize, PartialEq, Eq, Hash)]
+pub struct SwarmLifecycleStatus {
+    pub state: MemberLifecycleState,
+    #[serde(default)]
+    pub assignment_epoch: u64,
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub updated_at_unix_ms: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredSwarmLifecycleStatus {
+    Snapshot {
+        state: MemberLifecycleState,
+        #[serde(default)]
+        assignment_epoch: u64,
+        #[serde(default)]
+        revision: u64,
+        #[serde(default)]
+        reason: Option<String>,
+        #[serde(default)]
+        updated_at_unix_ms: u64,
+    },
+    Legacy(String),
 }
 
 impl<'de> Deserialize<'de> for SwarmLifecycleStatus {
@@ -258,8 +272,169 @@ impl<'de> Deserialize<'de> for SwarmLifecycleStatus {
     where
         D: Deserializer<'de>,
     {
-        Ok(Self::from(String::deserialize(deserializer)?))
+        Ok(match StoredSwarmLifecycleStatus::deserialize(deserializer)? {
+            StoredSwarmLifecycleStatus::Snapshot {
+                state,
+                assignment_epoch,
+                revision,
+                reason,
+                updated_at_unix_ms,
+            } => Self {
+                state,
+                assignment_epoch,
+                revision,
+                reason,
+                updated_at_unix_ms,
+            },
+            StoredSwarmLifecycleStatus::Legacy(status) => Self::from(status),
+        })
     }
+}
+
+impl Default for SwarmLifecycleStatus {
+    fn default() -> Self {
+        Self::starting(0)
+    }
+}
+
+#[allow(non_upper_case_globals)]
+impl SwarmLifecycleStatus {
+    pub const Spawned: Self = Self::constant(MemberLifecycleState::Starting);
+    pub const Ready: Self = Self::constant(MemberLifecycleState::Ready);
+    pub const Running: Self = Self::constant(MemberLifecycleState::Running);
+    pub const RunningStale: Self = Self::constant(MemberLifecycleState::Running);
+    pub const Completed: Self = Self::constant(MemberLifecycleState::Succeeded);
+    pub const Done: Self = Self::constant(MemberLifecycleState::Succeeded);
+    pub const Failed: Self = Self::constant(MemberLifecycleState::Failed);
+    pub const Stopped: Self = Self::constant(MemberLifecycleState::Stopped);
+    pub const Crashed: Self = Self::constant(MemberLifecycleState::Lost);
+    pub const Queued: Self = Self::constant(MemberLifecycleState::Assigned);
+    pub const Blocked: Self = Self::constant(MemberLifecycleState::Running);
+    pub const Pending: Self = Self::constant(MemberLifecycleState::Starting);
+    pub const Todo: Self = Self::constant(MemberLifecycleState::Starting);
+
+    const fn constant(state: MemberLifecycleState) -> Self {
+        Self {
+            state,
+            assignment_epoch: 0,
+            revision: 0,
+            reason: None,
+            updated_at_unix_ms: 0,
+        }
+    }
+
+    pub const fn starting(updated_at_unix_ms: u64) -> Self {
+        Self {
+            state: MemberLifecycleState::Starting,
+            assignment_epoch: 0,
+            revision: 0,
+            reason: None,
+            updated_at_unix_ms,
+        }
+    }
+
+    pub fn as_str(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.state.as_str())
+    }
+
+    pub const fn is_terminal(&self) -> bool {
+        self.state.is_terminal()
+    }
+
+    pub const fn next_assignment_epoch(&self) -> u64 {
+        self.assignment_epoch.saturating_add(1)
+    }
+
+    pub fn reduce(&mut self, event: MemberLifecycleEvent, updated_at_unix_ms: u64) -> bool {
+        let previous = self.clone();
+        match event {
+            MemberLifecycleEvent::SpawnRequested => {
+                if self.revision == 0 {
+                    self.state = MemberLifecycleState::Starting;
+                    self.reason = None;
+                }
+            }
+            MemberLifecycleEvent::WorkerReady => {
+                if matches!(
+                    self.state,
+                    MemberLifecycleState::Starting | MemberLifecycleState::Ready
+                ) {
+                    self.state = MemberLifecycleState::Ready;
+                    self.reason = None;
+                }
+            }
+            MemberLifecycleEvent::AssignmentCreated { epoch } => {
+                if epoch > self.assignment_epoch {
+                    self.assignment_epoch = epoch;
+                    self.state = MemberLifecycleState::Assigned;
+                    self.reason = None;
+                }
+            }
+            MemberLifecycleEvent::TurnStarted { epoch } => {
+                if epoch == self.assignment_epoch
+                    && matches!(
+                        self.state,
+                        MemberLifecycleState::Assigned | MemberLifecycleState::Running
+                    )
+                {
+                    self.state = MemberLifecycleState::Running;
+                    self.reason = None;
+                }
+            }
+            MemberLifecycleEvent::TurnSucceeded { epoch } => {
+                if epoch == self.assignment_epoch && !self.state.is_terminal() {
+                    self.state = MemberLifecycleState::Succeeded;
+                    self.reason = None;
+                }
+            }
+            MemberLifecycleEvent::TurnFailed { epoch, reason } => {
+                if epoch == self.assignment_epoch && !self.state.is_terminal() {
+                    self.state = MemberLifecycleState::Failed;
+                    self.reason = reason;
+                }
+            }
+            MemberLifecycleEvent::StopConfirmed { epoch, reason } => {
+                if epoch == self.assignment_epoch && !self.state.is_terminal() {
+                    self.state = MemberLifecycleState::Stopped;
+                    self.reason = reason;
+                }
+            }
+            MemberLifecycleEvent::ProcessLost { reason } => {
+                if !self.state.is_terminal() {
+                    self.state = MemberLifecycleState::Lost;
+                    self.reason = reason;
+                }
+            }
+        }
+
+        if *self == previous {
+            return false;
+        }
+        self.revision = previous.revision.saturating_add(1);
+        self.updated_at_unix_ms = updated_at_unix_ms;
+        true
+    }
+}
+
+impl From<String> for SwarmLifecycleStatus {
+    fn from(value: String) -> Self {
+        Self {
+            state: MemberLifecycleState::from_compatibility_status(&value),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MemberLifecycleEvent {
+    SpawnRequested,
+    WorkerReady,
+    AssignmentCreated { epoch: u64 },
+    TurnStarted { epoch: u64 },
+    TurnSucceeded { epoch: u64 },
+    TurnFailed { epoch: u64, reason: Option<String> },
+    StopConfirmed { epoch: u64, reason: Option<String> },
+    ProcessLost { reason: Option<String> },
 }
 
 /// Durable, persistable portion of a swarm member.
@@ -521,20 +696,20 @@ pub fn normalize_completion_report(report: Option<String>) -> Option<String> {
 
 fn completion_status_intro(name: &str, status: &str) -> String {
     match status {
-        "ready" => format!("Agent {} finished their work and is ready for more.", name),
+        "succeeded" => format!("Agent {} finished their work successfully.", name),
         "failed" => format!("Agent {} finished with status failed.", name),
         "stopped" => format!("Agent {} stopped.", name),
-        "crashed" => format!("Agent {} crashed while working.", name),
+        "lost" => format!("Agent {} was lost while working.", name),
         _ => format!("Agent {} completed their work.", name),
     }
 }
 
 fn completion_followup(status: &str, has_report: bool) -> &'static str {
     match (status, has_report) {
-        ("ready", true) => {
+        ("succeeded", true) => {
             "Use assign_task to give them more work, stop to remove them, or summary/read_context for full context."
         }
-        ("ready", false) => {
+        ("succeeded", false) => {
             "Use summary/read_context to inspect results, assign_task for more work, or stop to remove them."
         }
         ("failed", true) => {
@@ -544,7 +719,7 @@ fn completion_followup(status: &str, has_report: bool) -> &'static str {
             "Use summary/read_context to inspect results, assign_task to retry with guidance, or stop to remove them."
         }
         ("stopped", _) => "Use summary/read_context to inspect results or stop to remove them.",
-        ("crashed", _) => {
+        ("lost", _) => {
             "Any swarm task assignments they held are requeued automatically where possible. \
              Check plan_status, and spawn a replacement or use retry/assign_task if work remains."
         }

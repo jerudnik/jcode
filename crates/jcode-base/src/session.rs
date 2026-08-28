@@ -137,6 +137,22 @@ fn is_visible_conversation_message(message: &StoredMessage) -> bool {
     message.display_role.is_none() && !is_internal_system_reminder_message(message)
 }
 
+/// Canonical swarm assignment outcome stored beside the generic process-level
+/// [`SessionStatus`]. Swarm surfaces use this snapshot and never reinterpret
+/// `SessionStatus::Active` as an assignment result.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoredSwarmLifecycleStatus {
+    pub state: String,
+    #[serde(default)]
+    pub assignment_epoch: u64,
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub updated_at_unix_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
@@ -201,6 +217,10 @@ pub struct Session {
     /// Session exit status - why it ended (if not active)
     #[serde(default)]
     pub status: SessionStatus,
+    /// Swarm assignment lifecycle. This is deliberately separate from
+    /// `status`, which remains the process/resume marker used by recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swarm_lifecycle: Option<StoredSwarmLifecycleStatus>,
     /// PID of the process that last owned this session (for crash detection)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_pid: Option<u32>,
@@ -795,6 +815,7 @@ impl Session {
             working_dir_set_at: Some(now),
             short_name,
             status: SessionStatus::Active,
+            swarm_lifecycle: None,
             last_pid: Some(std::process::id()),
             last_active_at: Some(now),
             is_debug,

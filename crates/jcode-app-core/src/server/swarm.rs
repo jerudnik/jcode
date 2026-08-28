@@ -38,6 +38,7 @@ pub(in crate::server) async fn remove_session_from_swarm(
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
 ) {
+    super::state::remove_swarm_member_lifecycle(session_id);
     let started = Instant::now();
     log_swarm_lifecycle(
         "member_remove_start",
@@ -444,39 +445,44 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
         member_changed,
         status_changed,
         old_status,
+        new_status,
+        lifecycle,
         _is_headless,
         report_back_to_session_id,
     ) = {
         let mut members = swarm_members.write().await;
         if let Some(member) = members.get_mut(session_id) {
-            let previous_status = member.status.clone();
-            let status_changed = member.status != status;
+            let previous_status = member.lifecycle_status().to_string();
+            let lifecycle_changed = member.apply_compatibility_lifecycle_status(
+                status,
+                detail.as_deref(),
+                completion_report.is_some(),
+                now_unix_ms(),
+            );
+            let new_status = member.lifecycle_status().to_string();
+            let status_changed = previous_status != new_status;
             let detail_changed = member.detail != detail;
             let report_changed =
                 completion_report.is_some() && member.latest_completion_report != completion_report;
-            let member_changed = status_changed || detail_changed || report_changed;
+            let member_changed = lifecycle_changed || detail_changed || report_changed;
             if status_changed {
                 member.last_status_change = Instant::now();
-                if matches!(status, "running" | "streaming" | "thinking") {
+                if new_status == "running" {
                     member.runtime.elapsed_secs = None;
-                } else if matches!(
-                    previous_status.as_str(),
-                    "running" | "streaming" | "thinking"
-                ) {
+                } else if previous_status == "running" {
                     member.runtime.elapsed_secs = Some(member.joined_at.elapsed().as_secs());
                 }
             }
             let name = member.friendly_name.clone();
             let is_headless = member.is_headless;
             let report_back_to_session_id = member.report_back_to_session_id.clone();
-            member.status = status.to_string();
             member.detail = detail;
             // Clear any live output tail when the worker reaches a terminal or
             // idle state so the inline gallery viewport doesn't keep showing
             // stale in-progress text after the turn finishes.
             if matches!(
-                status,
-                "ready" | "completed" | "done" | "failed" | "crashed" | "stopped"
+                new_status.as_str(),
+                "ready" | "succeeded" | "failed" | "lost" | "stopped"
             ) {
                 member.output_tail = None;
             }
@@ -489,16 +495,50 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
                 member_changed,
                 status_changed,
                 previous_status,
+                new_status,
+                member.lifecycle(),
                 is_headless,
                 report_back_to_session_id,
             )
         } else {
-            (None, None, false, false, String::new(), false, None)
+            (
+                None,
+                None,
+                false,
+                false,
+                String::new(),
+                String::new(),
+                jcode_swarm_core::SwarmLifecycleStatus::default(),
+                false,
+                None,
+            )
         }
     };
+    let status = new_status.as_str();
     if let Some(ref id) = swarm_id {
         if !member_changed {
             return;
+        }
+
+        let stored_lifecycle = crate::session::StoredSwarmLifecycleStatus {
+            state: lifecycle.state.as_str().to_string(),
+            assignment_epoch: lifecycle.assignment_epoch,
+            revision: lifecycle.revision,
+            reason: lifecycle.reason.clone(),
+            updated_at_unix_ms: lifecycle.updated_at_unix_ms,
+        };
+        if let Err(error) = crate::session::Session::persist_swarm_lifecycle(
+            session_id,
+            stored_lifecycle,
+        ) {
+            log_swarm_lifecycle(
+                "member_lifecycle_persist_failed",
+                vec![
+                    ("session_id", session_id.to_string()),
+                    ("swarm_id", id.clone()),
+                    ("error", error.to_string()),
+                ],
+            );
         }
 
         log_swarm_lifecycle(
@@ -545,19 +585,15 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
         broadcast_swarm_status(id, swarm_members, swarms_by_id).await;
 
         let should_notify_coordinator = status_changed
-            && ((status == "completed")
+            && ((status == "succeeded")
                 || (report_back_to_session_id.is_some()
                     && old_status == "running"
-                    && matches!(status, "ready" | "failed" | "stopped"))
-                // A crash is never routine: notify whoever is responsible
+                    && matches!(status, "succeeded" | "failed" | "stopped"))
+                // A lost worker is never routine: notify whoever is responsible
                 // (owner, else coordinator) whenever a member dies while it
                 // was doing or holding work, so worker deaths cannot pass
                 // silently.
-                || (status == "crashed"
-                    && matches!(
-                        old_status.as_str(),
-                        "running" | "running_stale" | "queued"
-                    )));
+                || (status == "lost" && matches!(old_status.as_str(), "running" | "assigned")));
         if should_notify_coordinator {
             let fallback_coordinator_id =
                 if report_back_to_session_id.as_deref() == Some(session_id) {

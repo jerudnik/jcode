@@ -10,34 +10,11 @@ use crate::bus::{Bus, BusEvent, SwarmAwaitCompleted, UiActivity};
 use crate::protocol::{AwaitedMemberStatus, ServerEvent, format_comm_awaited_members_with_reports};
 use chrono::{DateTime, SecondsFormat, Utc};
 use jcode_swarm_core::control_log::{ScanOutcome, SwarmControlEnvelope, SwarmControlEvent};
+use jcode_swarm_core::MemberLifecycleState;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, broadcast, mpsc};
-
-/// Sessions that still hold a non-terminal assigned task in the swarm plan.
-///
-/// F2 (premature wake): member status flips to "ready" at EVERY turn end
-/// (comm_session.rs), so status alone cannot distinguish "task complete" from
-/// "mid-task turn boundary". The plan is the source of truth for in-flight
-/// work; awaits must not treat a member as done while its assigned task is
-/// still active.
-async fn sessions_with_active_plan_tasks(
-    swarm_id: &str,
-    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
-) -> HashSet<String> {
-    let plans = swarm_plans.read().await;
-    plans
-        .get(swarm_id)
-        .map(|plan| {
-            plan.items
-                .iter()
-                .filter(|item| !crate::plan::is_terminal_status(&item.status))
-                .filter_map(|item| item.assigned_to.clone())
-                .collect()
-        })
-        .unwrap_or_default()
-}
 
 pub(super) async fn awaited_member_statuses(
     req_session_id: &str,
@@ -46,7 +23,7 @@ pub(super) async fn awaited_member_statuses(
     target_status: &[String],
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    _swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
 ) -> Vec<AwaitedMemberStatus> {
     let watch_ids: Vec<String> = if requested_ids.is_empty() {
         let mut watch_ids: Vec<String> = {
@@ -68,7 +45,10 @@ pub(super) async fn awaited_member_statuses(
         requested_ids.to_vec()
     };
 
-    let busy_sessions = sessions_with_active_plan_tasks(swarm_id, swarm_plans).await;
+    let target_status: HashSet<&'static str> = target_status
+        .iter()
+        .map(|status| MemberLifecycleState::from_compatibility_status(status).as_str())
+        .collect();
 
     let members = swarm_members.read().await;
     watch_ids
@@ -79,22 +59,12 @@ pub(super) async fn awaited_member_statuses(
                 .map(|member| {
                     (
                         member.friendly_name.clone(),
-                        member.status.clone(),
+                        member.lifecycle_status().to_string(),
                         member.latest_completion_report.clone(),
                     )
                 })
-                .unwrap_or((None, "unknown".to_string(), None));
-            // A success-shaped status ("ready"/"completed") is only honest
-            // when the member has no in-flight plan task: turn boundaries set
-            // "ready" mid-task (F2). Failure-shaped statuses still count as
-            // done, otherwise a crashed worker would hang the await forever.
-            let mid_task_success_status = matches!(status.as_str(), "ready" | "completed")
-                && busy_sessions.contains(session_id);
-            let done = !mid_task_success_status
-                && (target_status.contains(&status)
-                    || (status == "unknown"
-                        && (target_status.contains(&"stopped".to_string())
-                            || target_status.contains(&"completed".to_string()))));
+                .unwrap_or((None, "lost".to_string(), None));
+            let done = target_status.contains(status.as_str());
             AwaitedMemberStatus {
                 session_id: session_id.clone(),
                 friendly_name: name,
