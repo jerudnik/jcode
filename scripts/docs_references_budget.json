@@ -1,7 +1,5 @@
 {
-  "_comment": "Per-file ratchets over documentation references. machine_local_by_file is D01-F08; stale_code_paths_by_file is D01-F12, citations of source files that no longer exist. Both may only decrease. Refresh with scripts/check_docs_references.py --update; --update refuses to raise any file's count.",
+  "_comment": "Per-file ratchet over documentation references. machine_local_by_file is D01-F08 and may only decrease. Refresh with scripts/check_docs_references.py --update; --update refuses to raise any file's count.",
   "machine_local_by_file": {},
-  "machine_local_by_file_total": 0,
-  "stale_code_paths_by_file": {},
-  "stale_code_paths_by_file_total": 0
+  "machine_local_by_file_total": 0
 }
