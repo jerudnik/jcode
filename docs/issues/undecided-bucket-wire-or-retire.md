@@ -1,5 +1,5 @@
 ---
-title: Audit: 88 unwired scripts, 16 dormant guards, and 21 undischarged commitments have no decision attached
+title: "Audit: 88 unwired scripts, 16 dormant guards, and 21 undischarged commitments have no decision attached"
 status: open
 priority: high
 owner: maintainers
