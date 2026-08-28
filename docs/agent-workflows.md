@@ -77,6 +77,10 @@ add preflight plus the `check`/`test` recipes (~5-10 min warm); a
 product-impacting change adds the CI full-test mirror (`scripts/ci_local.sh`,
 ~5-20 min cache-dependent). Known constraints:
 
+Fork CI reruns `scripts/preflight.sh --ratchets-only --no-branch-handoff`
+before the Rust recipes. Guards wired through that preflight mode, including
+the ambient-roots check, therefore run both locally and in hosted CI.
+
 - This is the local reproducible subset, not a replacement for hosted CI's
   platform-specific Nix, security, and FreeBSD smoke jobs.
 

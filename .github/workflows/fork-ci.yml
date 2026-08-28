@@ -57,6 +57,9 @@ jobs:
           cache-all-crates: "true"
           key: fork-ci
 
+      - name: Run ratchet preflight
+        run: scripts/preflight.sh --ratchets-only --no-branch-handoff
+
       - name: Run check recipe
         run: nix shell nixpkgs#just nixpkgs#python3 -c just check
 

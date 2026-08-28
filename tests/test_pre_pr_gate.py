@@ -28,6 +28,17 @@ class PrePrGateWiringTests(unittest.TestCase):
             with self.subTest(guard=guard):
                 self.assertIn(guard, preflight)
 
+    def test_fork_ci_reaches_ambient_roots_through_preflight(self) -> None:
+        workflow = (ROOT / ".github/workflows/fork-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        preflight = (ROOT / "scripts/preflight.sh").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "scripts/preflight.sh --ratchets-only --no-branch-handoff", workflow
+        )
+        self.assertIn("scripts/check_ambient_roots.sh", preflight)
+
 
 if __name__ == "__main__":
     unittest.main()
