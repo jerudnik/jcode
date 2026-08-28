@@ -1,5 +1,5 @@
 ---
-title: Five-model council verdict: retire the stale-code-path prose regex, converge on link citations
+title: "Five-model council verdict: retire the stale-code-path prose regex, converge on link citations"
 status: open
 priority: medium
 owner: maintainers
