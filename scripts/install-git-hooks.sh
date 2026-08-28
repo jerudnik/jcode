@@ -52,15 +52,15 @@ write_hook_shim "$hook_path" pre-push
 
 echo "install-git-hooks: installed pre-push branch rail guard"
 
-# Pre-commit: surface-contract guard (PM/tracking must land in notes, not
-# repo docs/). Installed as a managed shim like pre-push.
+# Pre-commit: fast commit-time guards, including staged documentation checks.
+# Installed as a managed shim like pre-push.
 precommit_path="$(git rev-parse --git-path hooks/pre-commit)"
 if [ -e "$precommit_path" ] && [ ! -L "$precommit_path" ] \
    && ! grep -Fq "$managed_marker" "$precommit_path"; then
   echo "install-git-hooks: existing pre-commit hook left untouched: $precommit_path" >&2
-  echo "install-git-hooks: run scripts/git-hooks/pre-commit from that hook to enable the surface guard" >&2
+  echo "install-git-hooks: run scripts/git-hooks/pre-commit from that hook to enable commit-time guards" >&2
 else
   rm -f "$precommit_path"
   write_hook_shim "$precommit_path" pre-commit
-  echo "install-git-hooks: installed pre-commit surface-contract guard"
+  echo "install-git-hooks: installed pre-commit guards"
 fi
