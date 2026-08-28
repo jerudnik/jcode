@@ -129,10 +129,20 @@ A commit touching no documentation stays at 0.26s.
 `machine-local` and `stale-code-path`, are per-file ratchets measured against a
 recorded baseline rather than failed on first sight, because both were
 inherited at a nonzero count. A ratcheted count may only fall, so newly broken
-citations still fail even in a file that carries inherited debt. The `--update`
-flag rewrites that baseline. A hook that refreshed the baseline would accept
-every regression as the new normal and disarm the ratchet permanently, on every
-commit, silently. The hook reads; it must never record.
+citations still fail even in a file that carries inherited debt.
+
+The `--update` flag refreshes that baseline, and it is well defended against the
+obvious misuse: `write_baselines` refuses to raise any file's count and exits
+with an error naming the regression, and a companion total marks each rule as
+measured so that driving a rule to zero cannot be mistaken for never having
+measured it. Laundering a regression through `--update` is not possible.
+
+The hazard is elsewhere and is easy to miss. In `main`, the `--update` branch
+writes the baseline and returns 0 **before** the fatal rules are evaluated at
+all. Every rule outside the two ratchets is fatal on first occurrence, so a
+recipe that passes `--update` for convenience does not merely skip the ratchet:
+it skips enforcement of broken links, unresolvable references, and every other
+hard rule, and reports success. The hook reads; it must never record.
 
 **Missing vale.** With vale absent, `lint_docs.py` currently dies on an
 uncaught `FileNotFoundError` traceback. This was hit twice by two people in one
