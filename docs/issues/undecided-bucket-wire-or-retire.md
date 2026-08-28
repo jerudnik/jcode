@@ -37,10 +37,10 @@ so each item gets an explicit wire-or-retire decision instead of ambient rot.
   `check_tui_render_lock.py` (31 locked, 0 unlocked),
   `check_wildcard_reexport_budget.py` (13 vs baseline 16),
   `check_config_env_lease.py` (preflight-only, 148 keys clean).
-- Passing test modules stranded under `scripts/` where the wired
-  `tests/test_*.py` glob cannot collect them, including
-  `test_docs_references.py`, `test_warning_budget.py`,
-  `pipeline_tests.py`, and `test_benchmark_discovery.py`.
+- WIRE: `tests/test_docs_references.py`, `tests/test_warning_budget.py`,
+  `tests/test_pipeline.py`, and `tests/test_benchmark_discovery.py` now live
+  under `tests/`, where `just test-python` runs them through the existing
+  `tests/test_*.py` glob. No test coverage was retired.
 
 ## 2. Guard registry
 
