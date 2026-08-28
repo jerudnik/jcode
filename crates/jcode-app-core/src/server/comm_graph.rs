@@ -87,15 +87,47 @@ fn unix_now_ms() -> u64 {
 }
 
 fn load_safety_ledger(plan: &VersionedPlan, now_unix_ms: u64) -> PlanSafetyLedger {
-    plan.task_progress
+    let Some(json) = plan
+        .task_progress
         .get(PLAN_SAFETY_PROGRESS_KEY)
         .and_then(|progress| progress.checkpoint_summary.as_deref())
-        .and_then(|json| serde_json::from_str(json).ok())
-        .unwrap_or_else(|| PlanSafetyLedger::new(plan, now_unix_ms))
+    else {
+        return PlanSafetyLedger::new(plan, now_unix_ms);
+    };
+
+    match serde_json::from_str(json) {
+        Ok(ledger) => ledger,
+        Err(error) => {
+            // A ledger we cannot read is the one case where falling back is
+            // dangerous: starting fresh zeroes the spend the budget exists to
+            // cap, so a plan that already overran could quietly buy itself a
+            // second full allowance. Say so rather than letting the reset look
+            // like an ordinary first run.
+            eprintln!(
+                "swarm budget: plan safety ledger unreadable ({error}); restarting budget \
+                 accounting from zero, so prior spend is no longer counted"
+            );
+            PlanSafetyLedger::new(plan, now_unix_ms)
+        }
+    }
 }
 
 fn store_safety_ledger(plan: &mut VersionedPlan, ledger: &PlanSafetyLedger) {
-    let json = serde_json::to_string(ledger).expect("plan safety ledger must serialize");
+    let json = match serde_json::to_string(ledger) {
+        Ok(json) => json,
+        Err(error) => {
+            // Every field is a plain owned scalar, so this should be
+            // unreachable. Refuse to panic over it anyway: an unwritten ledger
+            // degrades to re-deriving the budget on the next tick, which is
+            // survivable, whereas a panic takes down the handler that enforces
+            // the budget in the first place.
+            eprintln!(
+                "swarm budget: could not serialize plan safety ledger ({error}); keeping the \
+                 previous ledger"
+            );
+            return;
+        }
+    };
     plan.task_progress.insert(
         PLAN_SAFETY_PROGRESS_KEY.to_string(),
         SwarmTaskProgress {
@@ -442,7 +474,7 @@ async fn publish_budget_pause(
         .get(swarm_id)
         .cloned()
         .unwrap_or_else(|| req_session_id.to_string());
-    let _ = fanout_session_event(
+    let delivered = fanout_session_event(
         swarm_members,
         &coordinator_id,
         ServerEvent::Notification {
@@ -456,6 +488,17 @@ async fn publish_budget_pause(
         },
     )
     .await;
+    if delivered == 0 {
+        // The pause is already applied; this alert is how the coordinator finds
+        // out. Zero recipients means the plan is stopped and nobody has been
+        // told, which looks exactly like a plan that simply went quiet. The bus
+        // event below is the remaining path, so record the gap instead of
+        // treating an undelivered alert as a successful one.
+        eprintln!(
+            "swarm budget: task graph paused for swarm {swarm_id}, but the alert reached no \
+             live receiver for coordinator {coordinator_id}"
+        );
+    }
     crate::bus::Bus::global().publish(crate::bus::BusEvent::SwarmAwaitCompleted(
         crate::bus::SwarmAwaitCompleted {
             session_id: coordinator_id,
