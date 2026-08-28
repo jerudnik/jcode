@@ -1471,7 +1471,7 @@ GUARDS: tuple[Guard, ...] = (
     Guard("scripts/check_tui_render_lock.py", DORMANT,
           reason="nothing in the repository references it"),
     Guard("scripts/check_warning_budget.sh", DORMANT,
-          reason="invoked only from scripts/preflight.sh, whose full run is still a developer entry point; its test tests/test_warning_budget.py now runs through the tests/test_*.py glob"),
+          reason="invoked only from scripts/preflight.sh, a developer entry point that no workflow and no justfile recipe runs; its test scripts/test_warning_budget.py is itself unrun"),
     Guard("scripts/check_web_mobile.sh", DORMANT,
           reason="nothing in the repository references it"),
     Guard("scripts/check_wildcard_reexport_budget.py", DORMANT,
