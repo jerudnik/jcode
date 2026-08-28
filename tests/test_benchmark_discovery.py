@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Unit tests wired through ``just test-python`` and ``tests/test_*.py``."""
+
 import importlib.util
 import json
 import sys
@@ -6,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).with_name("benchmark_discovery.py")
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "benchmark_discovery.py"
 SPEC = importlib.util.spec_from_file_location("benchmark_discovery", SCRIPT)
 assert SPEC and SPEC.loader
 benchmark = importlib.util.module_from_spec(SPEC)
