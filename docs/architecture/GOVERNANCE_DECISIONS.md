@@ -1760,3 +1760,20 @@ warnings needs a full compile, so the recorded number remains the input, and
 with the debt concentrating in files outside the critical domains. That is the
 migration the per-file ratchets would have caught, and it would justify wiring
 a successor rather than resurrecting the dead scripts.
+
+## Maintenance window: PR #213 merged under the recorded procedure
+
+**2026-08-28.** PR #213 changed protected paths: `governance-root.yml` itself
+(the decision-log loss rule from #212), the `justfile`, the guard non-vacuity
+checker, and the governance test files. `Governance Root` stayed red by design
+and every other check was green, so the window procedure above was executed.
+
+The live ruleset was captured and its canonical digest matched the recorded
+baseline (`71b7f6ba...`) before anything was touched. The window removed only
+the `Governance Root` context from the required status checks, the pull
+request was merged through the REST endpoint as merge commit `d8b1d95c5`, and
+the captured writable contract was put back verbatim. The digest was then
+recomputed from a fresh read and matched the baseline again, the ruleset is
+`active` with empty bypass actors and both required contexts restored, and the
+merge landed as exactly one first-parent commit. The window was open for
+roughly twenty seconds and nothing else merged inside it.
