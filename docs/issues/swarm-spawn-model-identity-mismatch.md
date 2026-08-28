@@ -13,13 +13,13 @@ related:
 
 Observed 2026-08-27 in the session titled `agent-config-audit` (coordinator
 `session_peacock_1787861778353_a0d0e76b48e5f975`, `gpt-5.6-sol` via
-`openai-oauth`, working dir `/Users/jrudnik`). A spawned swarm worker ended up
-making real provider requests as `anthropic/claude-sonnet-4`, a model the
+`openai-oauth`, working dir: the operator's home directory). A spawned swarm
+worker ended up making real provider requests as `anthropic/claude-sonnet-4`, a model the
 coordinator never asked for and one far below the routing policy floor. Four
 different surfaces reported four different identities for the same worker.
 
-Screenshot evidence: `/Users/jrudnik/media/screenshots/Screenshot 2026-08-27
-at 4.22.10 PM.png` (worker chip reads `claude-sonnet-4 · Kimi Code`).
+Screenshot evidence: operator screenshot of the coordinator TUI, 2026-08-27
+16:22 local (worker chip reads `claude-sonnet-4 · Kimi Code`).
 
 ## Timeline (from the coordinator journal)
 
