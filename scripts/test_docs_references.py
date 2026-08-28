@@ -69,6 +69,53 @@ class DocsReferencesTest(unittest.TestCase):
             finally:
                 mod._tracked_files.cache_clear()
 
+    def run_move_check(
+        self,
+        doc_before: str,
+        doc_after: str | None = None,
+        *,
+        delete: bool = False,
+    ) -> list[mod.Finding]:
+        """Create two real commits and run the reverse check across the move."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs").mkdir()
+            (root / "src").mkdir()
+            (root / "docs/a.md").write_text(doc_before, encoding="utf-8")
+            (root / "src/old.rs").write_text("fn old() {}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"], cwd=root, check=True
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+            if delete:
+                (root / "src/old.rs").unlink()
+            else:
+                (root / "src/new").mkdir()
+                subprocess.run(
+                    ["git", "mv", "src/old.rs", "src/new/old.rs"], cwd=root, check=True
+                )
+            if doc_after is not None:
+                (root / "docs/a.md").write_text(doc_after, encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "move"], cwd=root, check=True)
+
+            mod._tracked_files.cache_clear()
+            try:
+                return mod.check_moved_path_references(root, base)
+            finally:
+                mod._tracked_files.cache_clear()
+
     def test_link_to_generated_untracked_file_is_flagged(self):
         """CI caught this on a clean checkout when no local test could.
 
@@ -109,54 +156,32 @@ class DocsReferencesTest(unittest.TestCase):
         findings = self.run_on_git_tree({"docs/real.md": "[x](./gone.md)\n"}, {})
         self.assertIn("broken-link", self.rules(findings))
 
-    # --- stale-code-path (D01-F12) ---------------------------------------
+    # --- moved-path-reference ---------------------------------------------
 
-    def test_citation_of_a_missing_source_file_is_flagged(self):
-        """The F12 class: modularization moved files and the docs still cite
-        the old path, so the reader is sent somewhere that does not exist."""
+    def test_move_check_flags_the_old_repo_path_and_citing_line(self):
+        findings = self.run_move_check(
+            "See [src/old.rs](../src/old.rs) for the implementation.\n"
+        )
+        self.assertEqual(self.rules(findings), {"moved-path-reference"})
+        self.assertEqual(findings[0].location, "docs/a.md:1")
+        self.assertIn("[src/old.rs](../src/old.rs)", findings[0].detail)
+
+    def test_move_check_accepts_an_updated_path_with_the_same_basename(self):
+        findings = self.run_move_check(
+            "See [src/old.rs](../src/old.rs).\n",
+            "See [src/new/old.rs](../src/new/old.rs).\n",
+        )
+        self.assertEqual(findings, [])
+
+    def test_delete_check_flags_a_bare_basename(self):
+        findings = self.run_move_check("See old.rs for the implementation.\n", delete=True)
+        self.assertEqual(self.rules(findings), {"moved-path-reference"})
+        self.assertIn("matched 'old.rs'", findings[0].detail)
+
+    def test_default_scan_leaves_path_shaped_prose_unchecked(self):
         findings = self.run_on_git_tree(
-            {"docs/a.md": "see `src/platform.rs` for detail\n"}, {}
+            {"docs/a.md": "see `src/gone.rs` and src/also-gone.rs\n"}, {}
         )
-        self.assertIn("stale-code-path", self.rules(findings))
-
-    def test_citation_of_a_tracked_source_file_is_not_flagged(self):
-        """The control. Without this the rule could fire on everything."""
-        findings = self.run_on_git_tree(
-            {"docs/a.md": "see `src/real.rs`\n", "src/real.rs": "fn main() {}\n"}, {}
-        )
-        self.assertEqual(self.rules(findings), set())
-
-    def test_dated_audit_snapshots_are_ratcheted_not_exempt(self):
-        """A document titled with its date is a record of a tree that has since
-        moved, so its existing stale paths must not force an edit to evidence.
-        It is held by its per-file baseline rather than by an exemption, because
-        an exemption would also hide every citation added to it later."""
-        doc = "docs/DATED_AUDIT_2026-04-18.md"
-        findings = self.run_on_git_tree({doc: "see `src/gone.rs`\n"}, {})
-        # The finding IS raised; the per-file baseline is what forgives it.
-        self.assertEqual(self.rules(findings), {"stale-code-path"})
-        self.assertEqual(mod.ratchet_violations({doc: 1}, {doc: 1}), [])
-
-    def test_new_stale_citation_in_a_frozen_record_still_fails(self):
-        """The reason the exemption had to go. Under an exemption this file was
-        a blind spot forever, so a citation added later was invisible no matter
-        how wrong it was. Under the ratchet, going beyond the frozen count is
-        still a violation."""
-        doc = "docs/DATED_AUDIT_2026-04-18.md"
-        findings = self.run_on_git_tree(
-            {doc: "see `src/gone.rs`\nand `src/also_gone.rs`\n"}, {}
-        )
-        self.assertEqual(
-            sum(1 for f in findings if f.rule == "stale-code-path"), 2
-        )
-        problems = mod.ratchet_violations({doc: 2}, {doc: 1})
-        self.assertEqual(len(problems), 1)
-        self.assertIn("baseline allows 1", problems[0])
-
-    def test_prose_mentioning_a_path_without_backticks_is_not_flagged(self):
-        """The rule keys on a backticked citation. Bare prose is too noisy to
-        gate on, and widening it was measured at 847 and 3451 hits."""
-        findings = self.run_on_git_tree({"docs/a.md": "the old src/gone.rs file\n"}, {})
         self.assertEqual(self.rules(findings), set())
 
     def test_existing_link_is_not_flagged(self):
@@ -245,6 +270,10 @@ class DocsReferencesTest(unittest.TestCase):
     def test_issue_requires_yaml_frontmatter(self):
         findings = self.run_on({"docs/issues/a.md": "# Missing metadata\n"})
         self.assertIn("issue-frontmatter", self.rules(findings))
+
+    def test_generated_issue_instruction_file_is_not_an_issue(self):
+        findings = self.run_on({"docs/issues/AGENTS.md": "# Generated contract\n"})
+        self.assertEqual(self.rules(findings), set())
 
     def test_issue_requires_all_fields(self):
         findings = self.run_on(
@@ -358,14 +387,14 @@ class RatchetTest(unittest.TestCase):
             try:
                 # A rule that has been measured records a <key>_total, even at 0.
                 mod.write_baselines(
-                    {"machine-local": {}, "stale-code-path": {}},
-                    {"machine-local": {}, "stale-code-path": {}},
+                    {"machine-local": {}},
+                    {"machine-local": {}},
                 )
-                self.assertIn("stale_code_paths_by_file_total", target.read_text())
+                self.assertIn("machine_local_by_file_total", target.read_text())
                 with self.assertRaises(SystemExit) as caught:
                     mod.write_baselines(
-                        {"machine-local": {}, "stale-code-path": {"docs/a.md": 1}},
-                        {"machine-local": {}, "stale-code-path": {}},
+                        {"machine-local": {"docs/a.md": 1}},
+                        {"machine-local": {}},
                     )
                 self.assertIn("refuses to raise", str(caught.exception))
                 self.assertIn("0 -> 1", str(caught.exception))
@@ -382,8 +411,8 @@ class RatchetTest(unittest.TestCase):
             mod.BASELINE_FILE = target
             try:
                 mod.write_baselines(
-                    {"machine-local": {}, "stale-code-path": {"docs/a.md": 4}},
-                    {"machine-local": {}, "stale-code-path": {}},
+                    {"machine-local": {"docs/a.md": 4}},
+                    {"machine-local": {}},
                 )
                 self.assertTrue(target.exists())
             finally:

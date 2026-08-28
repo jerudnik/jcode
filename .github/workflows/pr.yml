@@ -40,6 +40,16 @@ jobs:
           # job fails PR Gate through needs.classify.result.
           python3 -I scripts/check_guard_nonvacuity.py
 
+      - name: Check citations to moved or deleted files
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 -I scripts/check_docs_references.py \
+            --moved-from "$BASE_SHA" --head "$HEAD_SHA"
+
       - id: route
         shell: bash
         env:

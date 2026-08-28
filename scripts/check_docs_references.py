@@ -14,9 +14,17 @@ Rules (each independently fatal):
   disallowed-path    tracked Markdown exists under a retired repository docs
                      surface: docs/archive/, docs/fork/, or docs/proposals/
   issue-frontmatter  docs/issues/*.md is missing its required YAML fields, or
-                     retains a solved status instead of being deleted
+                     retains a solved status instead of being deleted. The
+                     generated docs/issues/AGENTS.md instruction file is not an
+                     issue and is exempt.
   broken-link       a Markdown link to a repository-relative path that does
                     not exist on disk
+
+                    When a document needs a repository path kept current,
+                    write it as a Markdown link whose text is the repo-relative
+                    path. The link target remains relative to the document.
+                    For example, a document under docs/ cites a script as
+                    [scripts/example.py](../scripts/example.py).
   machine-local     a reference to `~/notes/...` or a `/Users/...` home path,
                     which no consumer of this repository can resolve. Matched
                     in ANY form, not only link syntax: `D01-F08`'s own recount
@@ -24,10 +32,7 @@ Rules (each independently fatal):
                     difference as growth, so counting only links would miss
                     four real cases.
 
-                    This rule is a RATCHET, not a wall. 25 such references
-                    exist today and `D01-F08` is still open, so failing the
-                    build on all of them would make CI red on a defect that
-                    has not been dispositioned yet. The baseline in
+                    This rule is a RATCHET, not a wall. The baseline in
                     `scripts/docs_references_budget.json` pins the current
                     count per file: a new one fails, and fixing one must be
                     followed by `--update`, which can only ratchet DOWN.
@@ -52,6 +57,8 @@ Usage:
   scripts/check_docs_references.py --root /path/to/tree
   scripts/check_docs_references.py --list        # print findings, exit 0
   scripts/check_docs_references.py --update      # ratchet the baseline down
+  scripts/check_docs_references.py --moved-from BASE --head HEAD
+                                                # check citations to moved files
 """
 
 from __future__ import annotations
@@ -77,34 +84,14 @@ EXCLUDED_PREFIXES = (
 
 DISALLOWED_DOC_PREFIXES = ("docs/archive/", "docs/fork/", "docs/proposals/")
 ISSUE_DIR = "docs/issues/"
+GENERATED_ISSUE_DOC = f"{ISSUE_DIR}AGENTS.md"
 REQUIRED_ISSUE_FIELDS = ("status", "priority", "owner", "opened")
 SOLVED_ISSUE_STATUSES = {"closed", "fixed", "wontfix"}
 
 LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
-# D01-F12. A backticked path into the source tree that no longer exists. The
-# modularization moved whole subsystems into crates/, so `src/platform.rs` now
-# lives at crates/jcode-base/src/platform.rs and every citation of the old path
-# silently sends the reader nowhere.
-CODE_PATH = re.compile(
-    r"`((?:crates|src|scripts|tests)/[A-Za-z0-9_./-]+\.(?:rs|py|sh|nix))(?::\d+)?`"
-)
-
-# There is no whole-file exemption, deliberately. Frozen records (dated audits,
-# the retired upstream-tracking model) do legitimately cite paths that no longer
-# exist, but exempting the FILE to protect those citations also blinds the rule
-# to every citation added to it later, including the ones that resolve today and
-# will rot the next time code moves. The per-file ratchet already says "this
-# debt is inherited and may not grow" without giving up the file: a frozen
-# record sits at its measured count forever, while a new stale citation in it
-# still fails. Measured when the exemption was removed: those 6 files carried
-# 359 backticked code citations, 42 resolving to live code and 317 stale; the
-# exemption hid all 359, and only the 317 stale ones became the seeded baseline.
 MACHINE_LOCAL = re.compile(r"~/(?:notes|Documents|Desktop)/|/Users/[A-Za-z0-9._-]+/")
 BASELINE_FILE = Path(__file__).resolve().parent / "docs_references_budget.json"
-BASELINE_KEYS = {
-    "machine-local": "machine_local_by_file",
-    "stale-code-path": "stale_code_paths_by_file",
-}
+BASELINE_KEYS = {"machine-local": "machine_local_by_file"}
 
 # A retired rail is only a finding when the prose tells someone to use it.
 RETIRED_RAILS = (
@@ -132,6 +119,12 @@ class Finding:
 
     def __str__(self) -> str:
         return f"{self.rule}: {self.location}: {self.detail}"
+
+
+@dataclass(frozen=True)
+class MovedPath:
+    old: str
+    new: str | None
 
 
 def in_scope(rel: str) -> bool:
@@ -237,6 +230,79 @@ def _is_untracked(root: Path, resolved: Path) -> bool:
     return rel not in tracked
 
 
+def moved_or_deleted_paths(root: Path, base: str, head: str) -> list[MovedPath]:
+    """Paths removed between two revisions, with rename destinations when known."""
+    try:
+        output = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "diff",
+                "--name-status",
+                "-z",
+                "--find-renames",
+                "--diff-filter=DR",
+                base,
+                head,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"error: could not read moved paths from git: {exc}") from exc
+
+    fields = output.split("\0")
+    if fields and not fields[-1]:
+        fields.pop()
+    paths: list[MovedPath] = []
+    index = 0
+    while index < len(fields):
+        status = fields[index]
+        if status == "D":
+            paths.append(MovedPath(fields[index + 1], None))
+            index += 2
+        elif status.startswith("R"):
+            paths.append(MovedPath(fields[index + 1], fields[index + 2]))
+            index += 3
+        else:  # The diff filter should make this unreachable.
+            raise SystemExit(f"error: unexpected git diff status: {status}")
+    return paths
+
+
+def check_moved_path_references(root: Path, base: str, head: str = "HEAD") -> list[Finding]:
+    """Find current tracked docs that still cite paths removed by this diff."""
+    moved = moved_or_deleted_paths(root, base, head)
+    findings: list[Finding] = []
+    for path in markdown_files(root):
+        rel = path.relative_to(root).as_posix()
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as exc:
+            findings.append(Finding("unreadable", rel, str(exc)))
+            continue
+        for lineno, line in enumerate(lines, 1):
+            for change in moved:
+                basename = Path(change.old).name
+                old_path_hit = change.old in line
+                basename_hit = basename in line
+                updated_path_hit = change.new is not None and change.new in line
+                if not old_path_hit and (not basename_hit or updated_path_hit):
+                    continue
+                matched = change.old if old_path_hit else basename
+                action = f"renamed to {change.new}" if change.new else "deleted"
+                findings.append(
+                    Finding(
+                        "moved-path-reference",
+                        f"{rel}:{lineno}",
+                        f"still cites {change.old!r}, which was {action}; "
+                        f"matched {matched!r}: {line.strip()}",
+                    )
+                )
+    return findings
+
+
 def check_machine_local(root: Path, path: Path, text: str) -> list[Finding]:
     rel = path.relative_to(root).as_posix()
     findings = []
@@ -285,6 +351,8 @@ def check_issue_frontmatter(root: Path, path: Path, text: str) -> list[Finding]:
     rel = path.relative_to(root).as_posix()
     if not rel.startswith(ISSUE_DIR) or "/" in rel[len(ISSUE_DIR) :]:
         return []
+    if rel == GENERATED_ISSUE_DOC:
+        return []
     fields = issue_frontmatter(text)
     if fields is None:
         return [Finding("issue-frontmatter", rel, "missing YAML frontmatter")]
@@ -308,26 +376,6 @@ def check_issue_frontmatter(root: Path, path: Path, text: str) -> list[Finding]:
     return []
 
 
-def check_code_paths(root: Path, path: Path, text: str, tracked: frozenset[str]) -> list[Finding]:
-    """Citations of source files that are not in the tree (D01-F12)."""
-    rel = path.relative_to(root).as_posix()
-    if not tracked:
-        return []
-    findings = []
-    for lineno, line in enumerate(text.splitlines(), 1):
-        for match in CODE_PATH.finditer(line):
-            cited = match.group(1)
-            if cited not in tracked:
-                findings.append(
-                    Finding(
-                        "stale-code-path",
-                        f"{rel}:{lineno}",
-                        f"cites a source path that does not exist: {cited}",
-                    )
-                )
-    return findings
-
-
 def check_retired_rails(root: Path, path: Path, text: str) -> list[Finding]:
     rel = path.relative_to(root).as_posix()
     findings = []
@@ -344,7 +392,6 @@ def check_retired_rails(root: Path, path: Path, text: str) -> list[Finding]:
 
 def run(root: Path) -> list[Finding]:
     findings: list[Finding] = []
-    tracked = _tracked_files(str(root))
     for path in markdown_files(root):
         try:
             text = path.read_text(encoding="utf-8")
@@ -355,15 +402,12 @@ def run(root: Path) -> list[Finding]:
         findings.extend(check_issue_frontmatter(root, path, text))
         findings.extend(check_links(root, path, text))
         findings.extend(check_machine_local(root, path, text))
-        findings.extend(check_code_paths(root, path, text, tracked))
         findings.extend(check_retired_rails(root, path, text))
     return findings
 
 
 # Rules measured as a per-file ratchet rather than failed on first sight.
-# Both are debts inherited at a nonzero count, so a fatal rule would just be
-# permanently red. Each may only fall.
-RATCHETED = ("machine-local", "stale-code-path")
+RATCHETED = ("machine-local",)
 
 
 def rule_counts(findings: list[Finding], rule: str) -> dict[str, int]:
@@ -386,8 +430,6 @@ def load_baseline(rule: str = "machine-local") -> dict[str, int]:
         return {}
     data = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
     counts = data.get(BASELINE_KEYS[rule])
-    if counts is None and rule == "stale-code-path":
-        return {}  # key predates this rule; treated as unmeasured, not as zero
     if not isinstance(counts, dict):
         raise SystemExit(f"error: invalid baseline file format: {BASELINE_FILE}")
     return {str(k): int(v) for k, v in counts.items()}
@@ -433,10 +475,9 @@ def write_baselines(
         )
     payload = {
         "_comment": (
-            "Per-file ratchets over documentation references. "
-            "machine_local_by_file is D01-F08; stale_code_paths_by_file is "
-            "D01-F12, citations of source files that no longer exist. Both may "
-            "only decrease. Refresh with scripts/check_docs_references.py "
+            "Per-file ratchet over documentation references. "
+            "machine_local_by_file is D01-F08 and may only decrease. "
+            "Refresh with scripts/check_docs_references.py "
             "--update; --update refuses to raise any file's count."
         ),
     }
@@ -449,7 +490,6 @@ def write_baselines(
 
 REMEDY = {
     "machine-local": "Import the content or drop the reference",
-    "stale-code-path": "Update the citation to where the code moved, or drop it",
 }
 
 
@@ -472,9 +512,31 @@ def main() -> int:
     parser.add_argument("--root", default=None, help="tree to check (default: repository root)")
     parser.add_argument("--list", action="store_true", help="print findings and exit 0")
     parser.add_argument("--update", action="store_true", help="ratchet the baseline down")
+    parser.add_argument(
+        "--moved-from",
+        metavar="REV",
+        help="check current tracked docs for citations to paths moved or deleted since REV",
+    )
+    parser.add_argument("--head", default="HEAD", help="head revision for --moved-from")
     args = parser.parse_args()
 
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parent.parent
+    if args.moved_from:
+        if args.update:
+            parser.error("--update cannot be combined with --moved-from")
+        findings = check_moved_path_references(root, args.moved_from, args.head)
+        if args.list:
+            for finding in findings:
+                print(finding)
+            return 0
+        if findings:
+            for finding in findings:
+                print(finding, file=sys.stderr)
+            return 1
+        changed = len(moved_or_deleted_paths(root, args.moved_from, args.head))
+        print(f"docs-references: OK ({changed} moved or deleted paths checked)")
+        return 0
+
     findings = run(root)
 
     if args.list:
