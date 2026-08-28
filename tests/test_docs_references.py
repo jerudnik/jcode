@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Tests for check_docs_references.py.
 
+WIRE verdict: ``just test-python`` collects this module through the
+``tests/test_*.py`` glob.
+
 Every rule gets a planted failure. A checker that cannot fail is worse than no
 checker, because it reports OK and nobody looks again. Two of these tests exist
 specifically because the rule they cover is easy to get backwards:
@@ -15,16 +18,19 @@ specifically because the rule they cover is easy to get backwards:
 
 from __future__ import annotations
 
-import sys
+import importlib.util
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPTS_DIR))
-
-import check_docs_references as mod  # noqa: E402
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_docs_references.py"
+SPEC = importlib.util.spec_from_file_location("check_docs_references", SCRIPT)
+assert SPEC and SPEC.loader
+mod = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = mod
+SPEC.loader.exec_module(mod)
 
 
 class DocsReferencesTest(unittest.TestCase):
