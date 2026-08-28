@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Verdict: WIRE
+# Gate: `scripts/preflight.sh --ratchets-only`; the preflight owner maintains
+# the invocation, and this script must stay green on the shared tree.
+#
 # Gate: no code outside `jcode-storage` may resolve an ambient filesystem root
 # directly through `dirs::`.
 #
