@@ -278,6 +278,38 @@ fn write_profile_login_material(
     if resolved.requires_api_key {
         write_profile_api_key_file(env, profile, &format!("sk-{label}-{}", resolved.id))?;
     }
+    seed_profile_live_model_cache(env, profile)?;
+    Ok(())
+}
+
+/// Seed the profile's namespaced live-catalog disk cache the way a completed
+/// post-login `/models` fetch would. Profiles with neither a `default_model`
+/// nor a static model list (e.g. chutes) construct without a model and list
+/// models only from the live catalog; the retired implicit
+/// `anthropic/claude-sonnet-4` default used to mask that by fabricating a
+/// picker route for them.
+fn seed_profile_live_model_cache(env: &TestEnv, profile: OpenAiCompatibleProfile) -> Result<()> {
+    let resolved = resolve_openai_compatible_profile(profile);
+    let cache_dir = env.temp.path().join("cache");
+    std::fs::create_dir_all(&cache_dir)?;
+    let cache = serde_json::json!({
+        "cached_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        "source_api_base": resolved.api_base,
+        "models": [{
+            "id": format!("{}/live-catalog-model", resolved.id),
+            "name": "",
+            "context_length": null,
+            "pricing": {},
+            "created": null,
+        }],
+    });
+    std::fs::write(
+        cache_dir.join(format!("{}_models.json", resolved.id)),
+        serde_json::to_vec(&cache)?,
+    )?;
     Ok(())
 }
 
