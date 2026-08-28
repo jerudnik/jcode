@@ -21,6 +21,8 @@ same defect existed independently in `isolated_launcher_env`.
 The rule is simple and mechanical: in a returned tuple, every lease must come
 after every environment guard, so it is dropped last.
 
+Status: WIRE. `scripts/preflight.sh` runs this guard through `just pre-pr`.
+
 Exit status is non-zero on violation. Pure text scan, costs no compilation.
 """
 

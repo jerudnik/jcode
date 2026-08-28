@@ -21,6 +21,8 @@ directly or through a helper.
 
 Exit status is non-zero when a violation is found, so it can run as a blocking
 preflight/CI gate. It is a pure text scan and costs no compilation.
+
+Status: WIRE. `scripts/preflight.sh` runs this guard through `just pre-pr`.
 """
 
 from __future__ import annotations
