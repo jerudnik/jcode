@@ -359,7 +359,10 @@ fn catalog_selection_for_model(
     model: &str,
     routes: &[ModelRoute],
 ) -> Option<anyhow::Result<SwarmSpawnSelection>> {
-    let mut matched = routes.iter().filter(|route| route.model == model).peekable();
+    let mut matched = routes
+        .iter()
+        .filter(|route| route.model == model)
+        .peekable();
     matched.peek()?;
     let Some(route) = matched.clone().find(|route| route.available) else {
         let detail = matched
@@ -378,8 +381,8 @@ fn catalog_selection_for_model(
         None,
         Some(&route.api_method),
     );
-    let provider_key = crate::provider::resolve_model_spec(&request, crate::config::config())
-        .provider_key;
+    let provider_key =
+        crate::provider::resolve_model_spec(&request, crate::config::config()).provider_key;
     Some(Ok(SwarmSpawnSelection {
         model: Some(model.to_string()),
         provider_key,

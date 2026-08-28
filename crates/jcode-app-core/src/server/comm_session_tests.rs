@@ -10,10 +10,10 @@ use super::{
 };
 use crate::agent::Agent;
 use crate::config::SwarmSpawnMode;
-use crate::provider::ModelRoute;
 use crate::message::{Message, ToolDefinition};
 use crate::plan::{NodeMeta, PlanItem};
 use crate::protocol::{NotificationType, ServerEvent};
+use crate::provider::ModelRoute;
 use crate::provider::{EventStream, Provider};
 use crate::server::swarm_mutation_state::SwarmMutationRuntime;
 use crate::server::{SwarmEventType, SwarmMember, VersionedPlan};
@@ -771,7 +771,12 @@ fn resolve_swarm_spawn_model_accepts_any_listed_catalog_model() {
     // route it was listed under (the list/resolve asymmetry incident).
     let routes = [
         catalog_route("k3", "Kimi Code", "openai-compatible:kimi", true),
-        catalog_route("grok-4.5", "Grok Direct", "openai-compatible:grok-direct", true),
+        catalog_route(
+            "grok-4.5",
+            "Grok Direct",
+            "openai-compatible:grok-direct",
+            true,
+        ),
         catalog_route(
             "bridge/gemini-3-flash-agent",
             "OpenAI-compatible",
@@ -786,13 +791,9 @@ fn resolve_swarm_spawn_model_accepts_any_listed_catalog_model() {
     );
 
     for route in &routes {
-        let selection = resolve_swarm_spawn_selection(
-            Some(route.model.clone()),
-            None,
-            &coordinator,
-            &routes,
-        )
-        .expect("listed model must resolve");
+        let selection =
+            resolve_swarm_spawn_selection(Some(route.model.clone()), None, &coordinator, &routes)
+                .expect("listed model must resolve");
         assert_eq!(selection.model.as_deref(), Some(route.model.as_str()));
         assert_eq!(
             selection.route_api_method.as_deref(),

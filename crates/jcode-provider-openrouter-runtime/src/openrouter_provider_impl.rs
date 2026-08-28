@@ -396,10 +396,7 @@ impl Provider for OpenRouterProvider {
         // A contended/poisoned lock yields an empty string: "unknown" is
         // honest, a phantom default model is not (it once masqueraded as the
         // live model across every identity surface).
-        self.model
-            .try_read()
-            .map(|m| m.clone())
-            .unwrap_or_default()
+        self.model.try_read().map(|m| m.clone()).unwrap_or_default()
     }
 
     fn supports_image_input(&self) -> bool {

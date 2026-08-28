@@ -22,9 +22,7 @@ impl App {
             "clear" => {
                 "/clear\nClear current conversation, queue, and display; starts a fresh session."
             }
-            "model" => {
-                "/model\nOpen model picker.\n\n/model <name>\nSwitch model."
-            }
+            "model" => "/model\nOpen model picker.\n\n/model <name>\nSwitch model.",
             "provider-test-coverage"
             | "provider test coverage"
             | "model-status"
