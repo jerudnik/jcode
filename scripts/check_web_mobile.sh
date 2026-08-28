@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Verdict: KEEP-MANUAL
+# Operator: the `web/jcode-mobile` maintainer runs this on the workstation that
+# owns `$HOME/notes/projects/jcode/proposals/mobile-interface/web-mobile-mvp.md`
+# before accepting mobile-surface changes. The private proposal dependency makes
+# this an operator check, not a shared repository gate.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

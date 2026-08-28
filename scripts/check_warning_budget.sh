@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Verdict: WIRE
+# Gate: `scripts/preflight.sh` runs this as `warning budget`.
+# Route Cargo through the repository wrapper so the gate works both inside and
+# outside the Nix development shell. Suppress Nix's dirty-tree notice because it
+# starts with `warning:` but is not a Rust compiler warning.
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -43,7 +48,13 @@ fi
 # exits 101; it printed current=0 and exited 0.
 cd "$repo_root"
 set +e
-cargo_output=$(CARGO_TERM_COLOR=never cargo check -q 2>&1)
+nix_config="${NIX_CONFIG:-}"
+[[ -z "$nix_config" ]] || nix_config+=$'\n'
+nix_config+='warn-dirty = false'
+cargo_output=$(
+  NIX_CONFIG="$nix_config" JCODE_REMOTE_CARGO=0 CARGO_TERM_COLOR=never \
+    "$repo_root/scripts/dev_cargo.sh" check -q 2>&1
+)
 cargo_status=$?
 set -e
 if (( cargo_status != 0 )); then
