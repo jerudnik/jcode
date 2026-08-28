@@ -1,3 +1,15 @@
+---
+title: "A parked PR fails when a workflow on main outgrows the script on the branch"
+status: open
+priority: medium
+owner: maintainers
+opened: 2026-08-28
+related:
+  - .github/workflows/pr.yml
+  - scripts/check_docs_references.py
+  - docs/issues/preflight-ci-guard-registry-stale.md
+---
+
 # A parked PR fails when a workflow on main outgrows the script on the branch
 
 ## What happened
