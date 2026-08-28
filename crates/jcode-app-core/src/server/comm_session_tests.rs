@@ -746,8 +746,14 @@ fn resolved_spawn_selection(
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
 ) -> SwarmSpawnSelection {
-    resolve_swarm_spawn_selection(requested_model, configured_swarm_model, coordinator, &[])
-        .expect("spawn model should resolve")
+    resolve_swarm_spawn_selection(
+        requested_model,
+        configured_swarm_model,
+        coordinator,
+        &[],
+        &[],
+    )
+    .expect("spawn model should resolve")
 }
 
 fn catalog_route(model: &str, provider: &str, api_method: &str, available: bool) -> ModelRoute {
@@ -791,9 +797,14 @@ fn resolve_swarm_spawn_model_accepts_any_listed_catalog_model() {
     );
 
     for route in &routes {
-        let selection =
-            resolve_swarm_spawn_selection(Some(route.model.clone()), None, &coordinator, &routes)
-                .expect("listed model must resolve");
+        let selection = resolve_swarm_spawn_selection(
+            Some(route.model.clone()),
+            None,
+            &coordinator,
+            &routes,
+            &[],
+        )
+        .expect("listed model must resolve");
         assert_eq!(selection.model.as_deref(), Some(route.model.as_str()));
         assert_eq!(
             selection.route_api_method.as_deref(),
@@ -816,6 +827,7 @@ fn resolve_swarm_spawn_model_reports_unavailable_catalog_routes() {
         None,
         &coordinator_identity(None, None, None),
         &routes,
+        &[],
     )
     .expect_err("unavailable-only catalog model must fail");
     let message = error.to_string();
@@ -838,6 +850,7 @@ fn resolve_swarm_spawn_model_rejects_uncataloged_slash_names() {
             Some("claude-oauth"),
         ),
         &[],
+        &[],
     )
     .expect_err("uncataloged slash-form model must fail closed");
     assert!(error.to_string().contains("swarm list_models"));
@@ -856,6 +869,7 @@ fn resolve_swarm_spawn_model_rejects_unknown_per_spawn_model() {
             Some("claude-oauth"),
             Some("claude-oauth"),
         ),
+        &[],
         &[],
     )
     .expect_err("unknown per-spawn model must fail closed");
@@ -877,6 +891,7 @@ fn resolve_swarm_spawn_model_rejects_unknown_configured_model() {
             Some("claude-oauth"),
             Some("claude-oauth"),
         ),
+        &[],
         &[],
     )
     .expect_err("unknown agents.swarm_model must fail closed");
@@ -947,6 +962,7 @@ fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
             Some("openai-compatible:nvidia-nim"),
         ),
         &routes,
+        &[],
     )
     .expect("configured catalog model should resolve");
 
@@ -956,6 +972,61 @@ fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
         selection.route_api_method.as_deref(),
         Some("openai-compatible:minimax")
     );
+}
+
+#[test]
+fn resolve_swarm_spawn_model_empty_policy_preserves_existing_resolution() {
+    let coordinator = coordinator_identity(
+        Some("claude-opus-4-8"),
+        Some("claude-oauth"),
+        Some("claude-oauth"),
+    );
+    let selection = resolve_swarm_spawn_selection(
+        Some("openai-api:gpt-5.5".to_string()),
+        None,
+        &coordinator,
+        &[],
+        &[],
+    )
+    .expect("an empty policy must preserve existing resolution");
+
+    assert_eq!(selection.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(selection.provider_key.as_deref(), Some("openai-api-key"));
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("openai-api-key")
+    );
+}
+
+#[test]
+fn resolve_swarm_spawn_model_denied_identity_returns_policy_error() {
+    let denied = vec!["cursor:gpt-5.6-sol-high".to_string()];
+    let coordinator = coordinator_identity(
+        Some("claude-opus-4-8"),
+        Some("claude-oauth"),
+        Some("claude-oauth"),
+    );
+    let error = resolve_swarm_spawn_selection(
+        Some("cursor:gpt-5.6-sol-high".to_string()),
+        None,
+        &coordinator,
+        &[],
+        &denied,
+    )
+    .expect_err("a denied model must be refused even when it resolves");
+    let message = error.to_string();
+    assert!(message.contains("denied by policy"));
+    assert!(message.contains("agents.swarm_denied_models"));
+    assert!(!message.contains("could not be resolved"));
+
+    resolve_swarm_spawn_selection(
+        Some("gpt-5.6-sol".to_string()),
+        None,
+        &coordinator,
+        &[],
+        &denied,
+    )
+    .expect("a route-prefixed deny entry must not deny a distinct bare model");
 }
 
 #[test]

@@ -44,6 +44,23 @@ fn swarm_spawn_mode_defaults_to_inline() {
 }
 
 #[test]
+fn swarm_denied_models_default_empty_and_preserve_route_prefixes() {
+    assert!(Config::default().agents.swarm_denied_models.is_empty());
+
+    let cfg: Config = toml::from_str(
+        "[agents]\nswarm_denied_models = [\"cursor:gpt-5.6-sol-high\", \"gpt-5.6-sol\"]\n",
+    )
+    .expect("swarm_denied_models should parse");
+    assert_eq!(
+        cfg.agents.swarm_denied_models,
+        vec![
+            "cursor:gpt-5.6-sol-high".to_string(),
+            "gpt-5.6-sol".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn swarm_max_concurrent_agents_defaults_high_for_deep_fanout() {
     // Deep mode is meant to fan out wide; the default must be high (not the old
     // hardcoded run_plan default of 3).
