@@ -4,10 +4,9 @@ on:
   workflow_call:
     inputs:
       strict:
-        description: Run the strict PR security checks.
-        required: false
+        description: Must be true; the reusable workflow has no non-strict mode.
+        required: true
         type: boolean
-        default: true
       weekly:
         description: Include the scheduled advisory report.
         required: false
@@ -32,13 +31,14 @@ jobs:
           nix build nixpkgs#cargo-audit --out-link "$RUNNER_TEMP/cargo-audit"
           echo "$RUNNER_TEMP/cargo-audit/bin" >> "$GITHUB_PATH"
 
-      - name: Run security preflight
-        if: ${{ inputs.strict }}
-        run: scripts/security_preflight.sh --strict
+      - name: Reject non-strict calls
+        if: ${{ !inputs.strict }}
+        run: |
+          echo "::error::security.yml only supports strict mode"
+          exit 1
 
       - name: Run security preflight
-        if: ${{ !inputs.strict }}
-        run: scripts/security_preflight.sh
+        run: scripts/security_preflight.sh --strict
 
       - name: Verify the advisory policy records
         run: python3 scripts/check_advisory_policy.py

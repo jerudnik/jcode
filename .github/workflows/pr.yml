@@ -34,7 +34,7 @@ jobs:
           # its change set and fails closed on an unreadable one). Until now
           # the harness ran only inside Fork CI, a leg the routing verdict can
           # switch off -- the detector sat downstream of the decision it
-          # audits (docs/issues/classifier-shadow-precedes-its-guard.md).
+          # audits.
           # Running it here, before the route is computed, closes that
           # ordering: a weakened guard fails this job, and a failed classify
           # job fails PR Gate through needs.classify.result.
