@@ -210,8 +210,8 @@ pub fn openai_compatible_profiles() -> &'static [OpenAiCompatibleProfile] {
 /// This is a sparse table rather than a field on `OpenAiCompatibleProfile`
 /// deliberately. A field would force `models_path: None` onto all 36 literals
 /// for the sake of one exception, which both buries the exception in noise and
-/// pushes `catalog.rs` past the 1200-line budget in
-/// `scripts/check_code_size_budget.py` (1172 + 36 = 1208 at minimum).
+/// pushes `catalog.rs` past the repository's 1200-line oversize threshold in
+/// `scripts/check_critical_path_budget.py` (1172 + 36 = 1208 at minimum).
 const CATALOG_PATH_OVERRIDES: [(&str, &str); 1] = [("https://api.perplexity.ai", "/v1/models")];
 
 /// Resolve the model-catalog URL for an OpenAI-compatible `api_base`.

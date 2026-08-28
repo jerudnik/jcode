@@ -604,11 +604,8 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
         / "github-governance.proposed.json"
     )
     RATCHET_BASELINES = {
-        "scripts/code_size_budget.json",
-        "scripts/panic_budget.json",
-        "scripts/swallowed_error_budget.json",
-        "scripts/test_size_budget.json",
         "scripts/warning_budget.txt",
+        "scripts/wildcard_reexport_budget.json",
     }
 
     @staticmethod
@@ -677,7 +674,7 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
             f"{sorted(required ^ live_paths)}",
         )
 
-        # The ratchet baselines are deliberately unprotected everywhere; if a
+        # The remaining recorded baselines are deliberately unprotected; if a
         # future edit adds one back it must happen in all artifacts at once,
         # which this test forces by pinning their absence.
         for baseline in sorted(self.RATCHET_BASELINES):
@@ -703,12 +700,12 @@ class ProtectedPathAdjudicationTests(ComparatorCase):
     def test_adjudicated_additions_are_enforced(self) -> None:
         # Flipping the flag on a pending addition must turn the same fixture
         # red, which proves the flag is load-bearing rather than decorative.
-        # Use a deliberately unprotected ratchet baseline: it exists in the
+        # Use a deliberately unprotected recorded baseline: it exists in the
         # tree (so the schema check passes) but the fixture workflow does not
         # name it, so enforcement must fail with a mismatch.
         manifest = load_manifest()
         manifest["protected_paths"]["proposed_additions"] = [
-            "scripts/panic_budget.json"
+            "scripts/warning_budget.txt"
         ]
         manifest["protected_paths"]["additions_adjudicated"] = True
         snapshot = load_fixture()
@@ -716,7 +713,7 @@ class ProtectedPathAdjudicationTests(ComparatorCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, EXIT_MISMATCH, output)
         self.assertIn("does not name protected path", output)
-        self.assertIn("scripts/panic_budget.json", output)
+        self.assertIn("scripts/warning_budget.txt", output)
 
     def test_protected_path_that_does_not_exist_is_a_schema_error(self) -> None:
         # A protected path with a typo protects nothing while reading as

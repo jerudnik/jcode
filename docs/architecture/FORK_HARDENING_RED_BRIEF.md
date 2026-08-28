@@ -168,6 +168,12 @@ A 62KB machine-maintained swallowed-error ratchet is an executable ledger by any
 definition. **Why it contradicts the model:** the concept the doc named and killed
 came back at scale, undocumented in the sustainability model.
 
+> Update (2026-08): accepted. The four standalone ratchet scripts and their
+> baseline files were retired; `check_critical_path_budget.py` now measures
+> repository totals directly against pinned high-water marks. Only
+> `warning_budget.txt` and `wildcard_reexport_budget.json` remain as recorded
+> baselines. See GOVERNANCE_DECISIONS.md.
+
 ### 8. [MED] The patch-ledger does not keep pace with the divergence it governs
 The ledger last moved 2026-07-04 (`4dd64d650`) and is 85 lines / ~19 rows. It
 tracks ~7 patch families. But the fork now has **16 non-test source files** deleting

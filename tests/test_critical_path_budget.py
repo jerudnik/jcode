@@ -173,30 +173,29 @@ class CeilingAndTargetCoherenceTests(unittest.TestCase):
 
 
 class RepositoryTrendTests(unittest.TestCase):
-    def test_recorded_baselines_are_at_or_below_their_marks(self) -> None:
-        self.assertEqual(budget.repository_trend_regressions(budget.repository_totals()), [])
+    def test_measured_tree_is_at_or_below_the_pinned_marks(self) -> None:
+        # The one full-scan test in this module: the actual tree must sit at or
+        # below every pinned high-water mark, which is what the wired gate
+        # enforces on every run.
+        totals = budget.repository_totals(budget.measure())
+        self.assertEqual(budget.repository_trend_regressions(totals), [])
 
-    def test_a_raised_baseline_is_reported_as_a_regression(self) -> None:
-        raised = dict(budget.repository_totals())
+    def test_a_total_above_its_mark_is_reported_as_a_regression(self) -> None:
+        raised = {key: 0 for key in budget.REPOSITORY_CEILINGS}
         raised["panic"] = budget.REPOSITORY_CEILINGS["panic"] + 1
         regressions = budget.repository_trend_regressions(raised)
         self.assertEqual(len(regressions), 1)
         self.assertIn("panic", regressions[0])
 
-    def test_a_lowered_baseline_is_not_a_regression(self) -> None:
-        lowered = {key: max(0, value - 1) for key, value in budget.repository_totals().items()}
+    def test_a_total_below_its_mark_is_not_a_regression(self) -> None:
+        lowered = {key: 0 for key in budget.REPOSITORY_CEILINGS}
         self.assertEqual(budget.repository_trend_regressions(lowered), [])
 
     def test_marks_cover_every_measured_repository_key(self) -> None:
-        self.assertEqual(set(budget.repository_totals()), set(budget.REPOSITORY_CEILINGS))
-
-
-class OversizeThresholdTests(unittest.TestCase):
-    def test_pinned_threshold_matches_the_unprotected_baseline(self) -> None:
-        baseline = json.loads(
-            (REPO_ROOT / "scripts" / "code_size_budget.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(baseline["threshold_loc"], budget.OVERSIZE_THRESHOLD_LOC)
+        # An unmeasured Measurement still has the full key shape, plus the
+        # warnings key repository_totals() adds from the recorded budget.
+        totals = budget.repository_totals(budget.Measurement())
+        self.assertEqual(set(totals), set(budget.REPOSITORY_CEILINGS))
 
 
 class ScopeShrinkTests(unittest.TestCase):
@@ -275,12 +274,12 @@ class CriticalPathGateContractTests(unittest.TestCase):
     def test_repository_marks_are_not_derived_from_the_baselines(self) -> None:
         """The pinned marks must stay pinned; deriving them makes the gate vacuous.
 
-        `repository_totals()` reads the live ratchet baselines. If
-        REPOSITORY_CEILINGS were derived from the same source - a change that
-        looks like a cleanup, and that the module comment once implied was
-        already the case - every comparison becomes `value > value`. This test
-        demonstrates that failure mode directly rather than describing it: under
-        derived marks, even doubled debt reports no breach.
+        `repository_totals()` measures the working tree. If
+        REPOSITORY_CEILINGS were derived from the same measurement - a change
+        that looks like a cleanup - every comparison becomes `value > value`.
+        This test demonstrates that failure mode directly rather than
+        describing it: under derived marks, even doubled debt reports no
+        breach.
         """
 
         live = {"panic": 10, "swallowed_error": 100, "oversize_files": 5,

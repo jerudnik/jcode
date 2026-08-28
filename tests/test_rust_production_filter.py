@@ -14,8 +14,7 @@ _BORROWED_PATH_ENTRY = _SCRIPTS_PATH not in sys.path
 if _BORROWED_PATH_ENTRY:
     sys.path.append(_SCRIPTS_PATH)
 try:
-    import check_panic_budget  # noqa: E402
-    import check_swallowed_error_budget  # noqa: E402
+    import check_critical_path_budget  # noqa: E402
     from rust_production_filter import is_test_rust_file, production_lines, production_lines_from_text  # noqa: E402
 finally:
     if _BORROWED_PATH_ENTRY:
@@ -28,8 +27,8 @@ def production_text(source: str) -> str:
 
 class RustProductionFilterTests(unittest.TestCase):
     def test_budget_scripts_use_the_shared_classifier(self) -> None:
-        self.assertIs(check_panic_budget.production_lines, production_lines)
-        self.assertIs(check_swallowed_error_budget.production_lines, production_lines)
+        self.assertIs(check_critical_path_budget.production_lines, production_lines)
+        self.assertIs(check_critical_path_budget.is_test_rust_file, is_test_rust_file)
 
     def test_normal_production_code_is_retained(self) -> None:
         output = production_text(

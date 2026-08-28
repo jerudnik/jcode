@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
 """Enforce zero-growth critical-path quality ceilings and report the debt trend.
 
-Why this exists on top of the repository-wide ratchets
-------------------------------------------------------
-`check_panic_budget.py`, `check_swallowed_error_budget.py` and
-`check_code_size_budget.py` already refuse to let debt grow *in the working
-tree*: a new production file with a panic is rejected, a tracked file may not
-grow, and the totals may not increase. What they do not do is bound how far a
-baseline may be moved. Their baselines
-(`panic_budget.json`, `swallowed_error_budget.json`, `code_size_budget.json`,
-`test_size_budget.json`, `warning_budget.txt`) are deliberately *unprotected*
-governance-wise, so that routine tightening after a cleanup needs no
-maintenance window. The accepted cost is that a *raise* is only "visible in
-review".
+What this gates
+---------------
+Two things, both measured directly from the working tree on every run.
 
-That trade is fine for the repository at large. It is not fine for the paths
-acceptance standard A6 calls critical: lifecycle, persistence, updater,
-provider-infrastructure and TUI. For those, this script records an explicit
-machine-readable scope plus a per-domain ceiling, and `just check` pins the whole
-data block by digest. PR Gate calls that recipe through `.github/workflows/ci.yml`
-and `.github/workflows/fork-ci.yml`, so weakening anything here - raising a
+First, per-domain ceilings on the paths acceptance standard A6 calls
+critical: lifecycle, persistence, updater, provider-infrastructure and TUI.
+This script records an explicit machine-readable scope plus a per-domain
+ceiling, and `just check` pins the whole data block by digest. PR Gate calls
+that recipe through `.github/workflows/ci.yml` and
+`.github/workflows/fork-ci.yml`, so weakening anything here - raising a
 ceiling, shrinking the scope, relaxing a downward target, or loosening the
-oversize threshold - requires updating the reviewed local/CI contract rather than
-silently changing the checker. Tightening needs no edit at all:
+oversize threshold - requires updating the reviewed local/CI contract rather
+than silently changing the checker. Tightening needs no edit at all:
 ceilings are high-water marks, so cleanup simply opens headroom, and the
 report records the real current value and the distance to target.
+
+Second, repository-wide high-water marks. The same scan totals panic-prone
+lines, swallowed errors and oversize files across the whole tree and holds
+them under REPOSITORY_CEILINGS, which the digest also pins. Until 2026-08
+these totals were read from standalone ratchet baselines (panic_budget.json
+and friends, maintained by per-dimension check scripts). Those scripts were
+never wired into CI and their recorded numbers could drift from the tree, so
+they were retired and this checker now measures the tree itself; the marks
+were kept unchanged, and the measured tree sat below every mark at the
+switch.
 
 Policy
 ------
@@ -34,8 +35,9 @@ Policy
   their per-domain ceiling. Debt cannot be shuffled between domains.
 - Downward targets are recorded per domain and reported as distance-to-target.
   They are goals, not gates, so they never block unrelated work.
-- Non-critical paths are not gated here. New debt there is caught by the
-  repository-wide ratchets, and the aggregate trend is reported below.
+- Non-critical paths are bounded only by the repository-wide marks. There is
+  deliberately no per-file ratchet: the marks bound the totals, and where the
+  debt sits inside the tree is not governance's business.
 
 Usage
 -----
@@ -72,17 +74,23 @@ _BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
 if _BORROWED_PATH_ENTRY:
     sys.path.append(_SCRIPTS_DIR)
 try:
-    from rust_production_filter import production_lines, production_rust_files
+    from rust_production_filter import (
+        is_test_rust_file,
+        production_lines,
+        production_rust_files,
+    )
 finally:
     if _BORROWED_PATH_ENTRY:
         sys.path.remove(_SCRIPTS_DIR)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CODE_SIZE_BASELINE = REPO_ROOT / "scripts" / "code_size_budget.json"
-PANIC_BASELINE = REPO_ROOT / "scripts" / "panic_budget.json"
-SWALLOWED_BASELINE = REPO_ROOT / "scripts" / "swallowed_error_budget.json"
-TEST_SIZE_BASELINE = REPO_ROOT / "scripts" / "test_size_budget.json"
+# Warnings are the one dimension this script cannot measure itself: counting
+# them needs a full compile. The recorded warning budget is read instead, and
+# scripts/check_warning_budget.sh remains the tool that keeps it honest.
 WARNING_BASELINE = REPO_ROOT / "scripts" / "warning_budget.txt"
+# Test files live outside the production filter, so the test-oversize mark
+# scans these roots separately.
+TEST_SCAN_ROOTS = ("src", "crates", "tests")
 
 PANIC_PATTERN = re.compile(r"\.unwrap\(|\.expect\(|\b(?:panic!|todo!|unimplemented!)")
 SWALLOWED_PATTERNS = (
@@ -96,9 +104,8 @@ SWALLOWED_PATTERNS = (
 # digest CI pins, so it cannot be weakened without a maintenance window.
 # ---------------------------------------------------------------------------
 
-# Oversize threshold. Asserted equal to code_size_budget.json's threshold_loc so
-# that raising the (unprotected) baseline threshold cannot silently retire the
-# oversize dimension for critical or non-critical paths alike.
+# Oversize threshold, for production and test files alike. Pinned by the
+# digest, so it cannot drift without a maintenance window.
 OVERSIZE_THRESHOLD_LOC = 1200
 
 # A6: "Critical lifecycle, persistence, updater, provider-infrastructure, and
@@ -243,28 +250,21 @@ EXPECTED_FILE_COUNTS: dict[str, int] = {
     "tui": 196,
 }
 
-# Repository-wide high-water marks: hardcoded here ON PURPOSE, and deliberately
-# NOT read from the five ratchet baselines.
+# Repository-wide high-water marks: hardcoded here ON PURPOSE.
 #
-# `repository_totals()` already reads the live baselines. If these marks were
-# also derived from them, every comparison in
+# `repository_totals()` measures the working tree. If these marks were derived
+# from the same measurement, every comparison in
 # `repository_trend_regressions()` would reduce to `value > value` and the gate
-# would be vacuous - it would report zero breaches even if the recorded debt
-# doubled. `test_repository_marks_are_not_derived_from_the_baselines` pins that.
-# The pinned literal is the whole mechanism: it is the independent record that
-# a live baseline is checked *against*.
+# would be vacuous - it would report zero breaches even if the debt doubled.
+# `test_repository_marks_are_not_derived_from_the_baselines` pins that. The
+# pinned literal is the whole mechanism: it is the independent record that a
+# fresh measurement is checked *against*.
 #
 # The cost of pinning is that these go stale: they must be refreshed whenever a
-# ceiling is legitimately raised, and a stale mark shows up as a breach rather
-# than as silence. That is the correct failure direction.
-#
-# The existing ratchets already refuse growth *in the working tree*. What they
-# cannot bound is how far their own (deliberately unprotected) baseline may be
-# moved. These marks close that: a baseline may be lowered freely, because a
-# lower value stays under its mark and needs no edit here, but it cannot be
-# raised without also updating the reviewed recipe pin. That is the intended asymmetry - tightening is frictionless, loosening is
-# reviewed - and it is what makes "the repository debt trend cannot increase"
-# true of the recorded budget and not merely of one working tree.
+# mark is legitimately raised, and a stale mark shows up as a breach rather
+# than as silence. That is the correct failure direction. Lowering needs no
+# edit at all, because a smaller measurement stays under its mark - tightening
+# is frictionless, loosening is reviewed.
 REPOSITORY_CEILINGS: dict[str, int] = {
     "panic": 56,
     "swallowed_error": 3034,
@@ -352,6 +352,16 @@ class Measurement:
         }
         self.file_counts: dict[str, int] = {domain: 0 for domain in CRITICAL_PATHS}
         self.scanned = 0
+        # Repository-wide totals, accumulated by the same scan that fills the
+        # per-domain counts. test_oversize_files comes from a separate walk of
+        # the test roots; warnings are added by repository_totals().
+        self.repository: dict[str, int] = {
+            "panic": 0,
+            "swallowed_error": 0,
+            "oversize_files": 0,
+            "oversize_total_loc": 0,
+            "test_oversize_files": 0,
+        }
 
     def contributors(self, domain: str, dimension: str) -> list[str]:
         """Name the worst contributors so a red gate is actionable."""
@@ -366,54 +376,58 @@ def measure() -> Measurement:
     result = Measurement()
     for path in production_rust_files():
         rel = path.relative_to(REPO_ROOT).as_posix()
-        domain = domain_for(rel)
-        if domain is None:
-            continue
-        result.scanned += 1
-        result.file_counts[domain] += 1
         lines = list(production_lines(path))
         panics = sum(1 for line in lines if PANIC_PATTERN.search(line))
         swallowed = sum(
             1 for line in lines if any(pattern.search(line) for pattern in SWALLOWED_PATTERNS)
         )
+        loc = rust_file_line_count(path)
+        result.repository["panic"] += panics
+        result.repository["swallowed_error"] += swallowed
+        if loc > OVERSIZE_THRESHOLD_LOC:
+            result.repository["oversize_files"] += 1
+            result.repository["oversize_total_loc"] += loc
+        domain = domain_for(rel)
+        if domain is None:
+            continue
+        result.scanned += 1
+        result.file_counts[domain] += 1
         result.counts[domain]["panic"] += panics
         result.counts[domain]["swallowed_error"] += swallowed
         if panics:
             result.per_file[f"{domain}/panic"].append((rel, panics))
         if swallowed:
             result.per_file[f"{domain}/swallowed_error"].append((rel, swallowed))
-        loc = rust_file_line_count(path)
         if loc > OVERSIZE_THRESHOLD_LOC:
             result.counts[domain]["oversize_files"] += 1
             result.oversize_files[domain].append(f"{rel} ({loc} LOC)")
+    for root_name in TEST_SCAN_ROOTS:
+        root = REPO_ROOT / root_name
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.rs")):
+            if not is_test_rust_file(path, REPO_ROOT):
+                continue
+            if rust_file_line_count(path) > OVERSIZE_THRESHOLD_LOC:
+                result.repository["test_oversize_files"] += 1
     return result
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+def repository_totals(measurement: Measurement) -> dict[str, int]:
+    """Repository-wide debt, measured from the working tree.
 
-
-def repository_totals() -> dict[str, int]:
-    """Repository-wide debt as recorded by the five ratchet baselines.
-
-    These are the *recorded budget*, not a fresh scan. That is deliberate: the
-    per-ratchet scripts already prove the working tree matches its baseline, so
-    reading the baselines here checks the one thing they cannot check, namely
-    whether the recorded budget itself moved up.
+    The same scan that fills the per-domain counts accumulates these totals,
+    so the gate compares the actual tree against the pinned marks. Warnings
+    are the one exception: counting them needs a full compile, so the recorded
+    warning budget is read instead.
     """
 
-    code_size = load_json(CODE_SIZE_BASELINE)
     warnings_text = WARNING_BASELINE.read_text(encoding="utf-8").strip()
     if not warnings_text.isdigit():
         raise SystemExit(f"error: invalid warning baseline in {WARNING_BASELINE}: {warnings_text!r}")
-    return {
-        "panic": load_json(PANIC_BASELINE)["total"],
-        "swallowed_error": load_json(SWALLOWED_BASELINE)["total"],
-        "oversize_files": len(code_size["tracked_files"]),
-        "oversize_total_loc": sum(code_size["tracked_files"].values()),
-        "test_oversize_files": len(load_json(TEST_SIZE_BASELINE)["tracked_files"]),
-        "warnings": int(warnings_text),
-    }
+    totals = dict(measurement.repository)
+    totals["warnings"] = int(warnings_text)
+    return totals
 
 
 def build_report(measurement: Measurement) -> dict[str, Any]:
@@ -448,7 +462,7 @@ def build_report(measurement: Measurement) -> dict[str, Any]:
         entry["oversize_files"] = sorted(measurement.oversize_files[domain])
         domains[domain] = entry
 
-    repo = repository_totals()
+    repo = repository_totals(measurement)
     return {
         "version": 1,
         "scope_digest": scope_digest(),
@@ -467,7 +481,7 @@ def build_report(measurement: Measurement) -> dict[str, Any]:
         "repository_totals": repo,
         "repository_trend": {
             key: {
-                "recorded": repo[key],
+                "measured": repo[key],
                 "high_water_mark": mark,
                 "headroom": mark - repo[key],
                 "reduced_by": max(0, mark - repo[key]),
@@ -500,7 +514,7 @@ def scope_shrink_regressions(file_counts: dict[str, int]) -> list[str]:
 
 def repository_trend_regressions(repo: dict[str, int]) -> list[str]:
     return [
-        f"repository {key} budget rose above its recorded high-water mark: "
+        f"repository {key} rose above its pinned high-water mark: "
         f"{REPOSITORY_CEILINGS[key]} -> {value}"
         for key, value in sorted(repo.items())
         if value > REPOSITORY_CEILINGS[key]
@@ -534,13 +548,13 @@ def print_report(report: dict[str, Any]) -> None:
             f"target={values['target']} to-go={values['distance_to_target']} "
             f"repo={report['repository_totals'][dim]} ({share}% of repository)"
         )
-    print("  Repository debt trend (recorded budget vs high-water mark):")
+    print("  Repository debt trend (measured vs high-water mark):")
     for key, values in report["repository_trend"].items():
         direction = (
             f"reduced by {values['reduced_by']}" if values["reduced_by"] else "unchanged"
         )
         print(
-            f"    {key:20s} recorded={values['recorded']:7d} "
+            f"    {key:20s} measured={values['measured']:7d} "
             f"mark={values['high_water_mark']:7d} ({direction})"
         )
 
@@ -555,23 +569,12 @@ def main() -> int:
     if args.expect_digest is not None and args.expect_digest != scope_digest():
         print(
             "Critical-path budget scope digest mismatch.\n"
-            f"  expected (pinned in .github/workflows/fork-ci.yml): {args.expect_digest}\n"
-            f"  actual   (scripts/check_critical_path_budget.py):   {scope_digest()}\n"
+            f"  expected (pinned in the justfile `check` recipe): {args.expect_digest}\n"
+            f"  actual   (scripts/check_critical_path_budget.py): {scope_digest()}\n"
             "The critical-path scope, ceilings, targets, or oversize threshold changed. "
-            "Both this script and the workflow pin are protected governance paths, so an "
-            "intentional change belongs in a maintenance window; update the workflow pin "
+            "Both this script and the justfile pin are protected governance paths, so an "
+            "intentional change belongs in a maintenance window; update the justfile pin "
             "with `python3 scripts/check_critical_path_budget.py --print-digest`.",
-            file=sys.stderr,
-        )
-        return 1
-
-    baseline_threshold = load_json(CODE_SIZE_BASELINE)["threshold_loc"]
-    if baseline_threshold != OVERSIZE_THRESHOLD_LOC:
-        print(
-            "Oversize threshold drift: "
-            f"scripts/code_size_budget.json threshold_loc={baseline_threshold} but the pinned "
-            f"critical-path threshold is {OVERSIZE_THRESHOLD_LOC}. The baseline is unprotected, "
-            "so raising it there cannot be allowed to retire the oversize dimension.",
             file=sys.stderr,
         )
         return 1
