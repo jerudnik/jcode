@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Verdict: KEEP-MANUAL
+# Operator: the maintainer investigating hidden-continuation persistence runs
+# this with a SINCE cutoff after a candidate fix. Personal session history and
+# immutable old blanks make the all-time result unsuitable for a shared gate.
 """Count blank user turns across jcode session files.
 
 The defect: a hidden continuation persists a user message whose content is
