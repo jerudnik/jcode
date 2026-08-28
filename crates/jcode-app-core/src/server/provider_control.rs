@@ -1272,6 +1272,14 @@ mod tests {
             vec!["test-model-a".to_string(), "test-model-b".to_string()]
         }
 
+        fn context_window(&self) -> usize {
+            if self.model() == "test-model-b" {
+                32_000
+            } else {
+                16_000
+            }
+        }
+
         fn reasoning_effort(&self) -> Option<String> {
             self.effort.lock().expect("effort lock").clone()
         }
@@ -1391,6 +1399,7 @@ mod tests {
             .await
             .expect("deferred model change should finish after agent is idle");
         assert_eq!(provider.model(), "test-model-b");
+        assert_eq!(agent.lock().await.compaction_token_budget().await, 32_000);
         assert!(matches!(
             event,
             Some(ServerEvent::ModelChanged {
@@ -1400,6 +1409,29 @@ mod tests {
                 error: None,
             }) if model == "test-model-b" && provider_name == "test-effort"
         ));
+    }
+
+    #[tokio::test]
+    async fn set_model_shrinks_compaction_budget_for_smaller_context() {
+        let _guard = crate::storage::lock_test_env();
+        let _runtime = IsolatedRuntimeDir::new();
+
+        let (provider, agent, client_event_tx, mut client_event_rx) =
+            test_agent("session_shrink_budget").await;
+        for (model, expected_budget) in [("test-model-b", 32_000), ("test-model-a", 16_000)] {
+            handle_set_model(9, model.to_string(), &agent, &client_event_tx).await;
+            timeout(Duration::from_secs(1), client_event_rx.recv())
+                .await
+                .expect("model change event");
+            assert_eq!(provider.model(), model);
+            // Moving to a smaller window must lower the budget, not keep the
+            // larger one and let the transcript grow past the new limit.
+            assert_eq!(
+                agent.lock().await.compaction_token_budget().await,
+                expected_budget,
+                "{model}"
+            );
+        }
     }
 
     #[tokio::test]
