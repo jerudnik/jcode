@@ -125,6 +125,15 @@ exists to catch pass through.
 Total for a docs-touching commit: about 1.7s including the two existing checks.
 A commit touching no documentation stays at 0.26s.
 
+**Do not pass `--update`.** Two of the rules in `check_docs_references.py`,
+`machine-local` and `stale-code-path`, are per-file ratchets measured against a
+recorded baseline rather than failed on first sight, because both were
+inherited at a nonzero count. A ratcheted count may only fall, so newly broken
+citations still fail even in a file that carries inherited debt. The `--update`
+flag rewrites that baseline. A hook that refreshed the baseline would accept
+every regression as the new normal and disarm the ratchet permanently, on every
+commit, silently. The hook reads; it must never record.
+
 **Missing vale.** With vale absent, `lint_docs.py` currently dies on an
 uncaught `FileNotFoundError` traceback. This was hit twice by two people in one
 session. The hook must detect a missing vale first and print a one-line install
