@@ -1434,7 +1434,7 @@ fn make_endpoint(name: &str, throughput: f64, uptime: f64, cache: bool, cost: f6
 fn make_provider() -> OpenRouterProvider {
     OpenRouterProvider {
         client: jcode_provider_core::shared_http_client(),
-        model: Arc::new(RwLock::new(DEFAULT_MODEL.to_string())),
+        model: Arc::new(RwLock::new("test/default-model".to_string())),
         reasoning_effort: Arc::new(RwLock::new(None)),
         api_base: DEFAULT_API_BASE.to_string(),
         auth: ProviderAuth::AuthorizationBearer {
@@ -1463,7 +1463,7 @@ fn make_provider() -> OpenRouterProvider {
 fn make_custom_compatible_provider() -> OpenRouterProvider {
     OpenRouterProvider {
         client: jcode_provider_core::shared_http_client(),
-        model: Arc::new(RwLock::new(DEFAULT_MODEL.to_string())),
+        model: Arc::new(RwLock::new("test/default-model".to_string())),
         reasoning_effort: Arc::new(RwLock::new(None)),
         api_base: "https://compat.example.test/v1".to_string(),
         auth: ProviderAuth::AuthorizationBearer {

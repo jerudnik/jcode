@@ -202,7 +202,6 @@ impl MultiProvider {
                 Ok(())
             }
             ActiveProvider::OpenRouter => {
-                self.clear_active_openai_compatible_profile();
                 // Decide whether the slot must be rebound to the real
                 // OpenRouter API-key runtime. Rebinding repairs a slot left
                 // flavored as a *known catalog profile* runtime by startup
@@ -252,6 +251,13 @@ impl MultiProvider {
                     );
                 };
                 openrouter.set_model(model)?;
+                // Deactivate any active OpenAI-compatible profile only AFTER
+                // the switch has fully succeeded. Clearing it first stranded a
+                // failed switch on whatever runtime the raw slot held (the
+                // claude-sonnet-4 misidentity incident): the profile marker
+                // was gone, the rebind bailed, and execution silently fell
+                // through to the slot's default runtime and model.
+                self.clear_active_openai_compatible_profile();
                 self.set_active_provider(ActiveProvider::OpenRouter);
                 Ok(())
             }

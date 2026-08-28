@@ -164,54 +164,43 @@ fn test_model_command_trailing_space_shows_model_suggestions() {
 }
 
 #[test]
-fn test_model_command_provider_suggestions_include_openrouter_routes() {
+fn test_model_command_no_longer_suggests_openrouter_provider_pins() {
+    // Retired passthrough: `model@provider` pins no longer resolve, so the
+    // suggestion surface must not offer them.
     let mut app = create_test_app();
     configure_test_remote_openrouter_provider_routes(&mut app);
 
-    let suggestions = app.get_suggestions_for("/model anthropic/claude-sonnet-4@");
-    let commands: Vec<&str> = suggestions.iter().map(|(cmd, _)| cmd.as_str()).collect();
-
-    assert!(commands.contains(&"/model anthropic/claude-sonnet-4@auto"));
-    assert!(commands.contains(&"/model anthropic/claude-sonnet-4@Fireworks"));
-    assert!(commands.contains(&"/model anthropic/claude-sonnet-4@OpenAI"));
+    for input in [
+        "/model anthropic/claude-sonnet-4@",
+        "/model anthropic/claude-sonnet-4@fi",
+    ] {
+        let suggestions = app.get_suggestions_for(input);
+        assert!(
+            !suggestions.iter().any(|(cmd, _)| cmd.contains('@')),
+            "no pin suggestions expected for {input}: {suggestions:?}"
+        );
+    }
 }
 
 #[test]
-fn test_model_command_provider_suggestions_rank_matching_provider_prefix() {
-    let mut app = create_test_app();
-    configure_test_remote_openrouter_provider_routes(&mut app);
-
-    let suggestions = app.get_suggestions_for("/model anthropic/claude-sonnet-4@fi");
-    assert_eq!(
-        suggestions.first().map(|(cmd, _)| cmd.as_str()),
-        Some("/model anthropic/claude-sonnet-4@Fireworks")
-    );
-}
-
-#[test]
-fn test_model_command_provider_suggestions_normalize_bare_openai_model_to_openrouter_catalog_id() {
+fn test_model_command_no_longer_normalizes_bare_models_into_openrouter_pins() {
+    // Retired passthrough: bare models are not rewritten into
+    // `openai/...@Provider` pin suggestions anymore.
     let (app, _set_model_calls) = create_openrouter_spec_capture_test_app();
 
-    let suggestions = app.get_suggestions_for("/model gpt-5.4@op");
-    assert_eq!(
-        suggestions.first().map(|(cmd, _)| cmd.as_str()),
-        Some("/model openai/gpt-5.4@OpenAI")
-    );
+    for input in ["/model gpt-5.4@op", "/model gpt-5.4@"] {
+        let suggestions = app.get_suggestions_for(input);
+        assert!(
+            !suggestions
+                .iter()
+                .any(|(cmd, _)| cmd.starts_with("/model openai/")),
+            "no normalized pin suggestions expected for {input}: {suggestions:?}"
+        );
+    }
 }
 
 #[test]
-fn test_model_command_provider_suggestions_include_auto_for_normalized_bare_openai_model() {
-    let (app, _set_model_calls) = create_openrouter_spec_capture_test_app();
-
-    let suggestions = app.get_suggestions_for("/model gpt-5.4@");
-    let commands: Vec<&str> = suggestions.iter().map(|(cmd, _)| cmd.as_str()).collect();
-
-    assert!(commands.contains(&"/model openai/gpt-5.4@auto"));
-    assert!(commands.contains(&"/model openai/gpt-5.4@OpenAI"));
-}
-
-#[test]
-fn test_remote_fallback_provider_suggestions_normalize_bare_openai_openrouter_routes() {
+fn test_remote_fallback_no_longer_normalizes_bare_openai_openrouter_routes() {
     with_temp_jcode_home(|| {
         let prev_api_key = std::env::var_os("OPENROUTER_API_KEY");
         crate::env::set_var("OPENROUTER_API_KEY", "test-openrouter-key");
@@ -226,8 +215,9 @@ fn test_remote_fallback_provider_suggestions_normalize_bare_openai_openrouter_ro
         let suggestions = app.get_suggestions_for("/model gpt-5.4@");
         let commands: Vec<&str> = suggestions.iter().map(|(cmd, _)| cmd.as_str()).collect();
 
-        assert!(commands.contains(&"/model openai/gpt-5.4@auto"));
-        assert!(commands.contains(&"/model openai/gpt-5.4@OpenAI"));
+        // Retired passthrough: remote fallback no longer fabricates
+        // OpenRouter pin suggestions either.
+        assert!(!commands.iter().any(|cmd| cmd.starts_with("/model openai/")));
 
         if let Some(prev_api_key) = prev_api_key {
             crate::env::set_var("OPENROUTER_API_KEY", prev_api_key);
@@ -267,15 +257,17 @@ fn test_model_autocomplete_completes_unique_match() {
 }
 
 #[test]
-fn test_model_autocomplete_completes_unique_provider_match() {
+fn test_model_autocomplete_no_longer_completes_openrouter_provider_pins() {
+    // Retired passthrough: with pin suggestions gone there is nothing to
+    // complete for a `model@prefix` input.
     let mut app = create_test_app();
     configure_test_remote_openrouter_provider_routes(&mut app);
 
     app.input = "/model anthropic/claude-sonnet-4@fi".to_string();
     app.cursor_pos = app.input.len();
 
-    assert!(app.autocomplete());
-    assert_eq!(app.input(), "/model anthropic/claude-sonnet-4@Fireworks");
+    assert!(!app.autocomplete());
+    assert_eq!(app.input(), "/model anthropic/claude-sonnet-4@fi");
 }
 
 #[test]

@@ -127,10 +127,34 @@ pub(super) async fn create_headless_session(
             route_api_method_override.as_deref(),
         );
         if let Err(e) = new_agent.set_model(&model_request) {
-            crate::logging::warn(&format!(
-                "Failed to set headless session model override '{}' (request '{}'): {}",
-                model, model_request, e
-            ));
+            // Providers without model switching (mock/ACP-style runtimes) are
+            // fine as long as the fork already carries the requested model —
+            // inheriting the coordinator's model is then a no-op. Anything
+            // else is a real substitution: the old warn-only path here let a
+            // spawn report the requested identity while the forked provider
+            // ran another model (the claude-sonnet-4 misidentity incident).
+            // Fail the spawn, and remove the just-created session artifacts
+            // so nothing orphaned survives.
+            if new_agent.provider_model() == model {
+                crate::logging::info(&format!(
+                    "Headless spawn: provider rejected model override '{}' but already runs it; continuing: {}",
+                    model, e
+                ));
+            } else {
+                crate::logging::warn(&format!(
+                    "Failing headless spawn: model override '{}' (request '{}') could not be applied: {}",
+                    model, model_request, e
+                ));
+                if let Ok(path) = crate::session::session_path(&client_session_id) {
+                    let _ = std::fs::remove_file(path);
+                }
+                if let Ok(path) = crate::session::session_journal_path(&client_session_id) {
+                    let _ = std::fs::remove_file(path);
+                }
+                anyhow::bail!(
+                    "Failed to apply spawn model override '{model}' (request '{model_request}'): {e}"
+                );
+            }
         }
     }
 

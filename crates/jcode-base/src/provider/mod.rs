@@ -392,7 +392,9 @@ impl Provider for MultiProvider {
             ActiveProvider::OpenRouter => self
                 .active_openrouter_execution_provider()
                 .map(|o| o.model())
-                .unwrap_or_else(|| "anthropic/claude-sonnet-4".to_string()),
+                // No runtime in the slot means there is no model; an empty
+                // string is honest, a phantom claude-sonnet-4 default is not.
+                .unwrap_or_default(),
         }
     }
 

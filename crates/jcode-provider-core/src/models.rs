@@ -107,14 +107,20 @@ pub fn builtin_provider_for_model_with_hint(
     }
 
     let model = model.trim();
-    if model.contains('@') {
-        Some(ActiveProvider::OpenRouter)
-    } else if ALL_CLAUDE_MODELS.contains(&model) {
+    // Names containing '/' or '@' are deliberately unclassified. They used to
+    // auto-map to OpenRouter, which let arbitrary unlisted ids "resolve" and
+    // then run on whatever runtime the OpenRouter slot held (the
+    // claude-sonnet-4 misidentity incident). The OpenRouter.ai passthrough is
+    // retired; such names must resolve through a catalog route or an explicit
+    // provider prefix instead — and the family-prefix arms below must not
+    // misread them (`claude-sonnet-5@X` is not a Claude API model id).
+    if model.contains('/') || model.contains('@') {
+        return None;
+    }
+    if ALL_CLAUDE_MODELS.contains(&model) {
         Some(ActiveProvider::Claude)
     } else if ALL_OPENAI_MODELS.contains(&model) {
         Some(ActiveProvider::OpenAI)
-    } else if model.contains('/') {
-        Some(ActiveProvider::OpenRouter)
     } else if model.starts_with("claude-") {
         Some(ActiveProvider::Claude)
     } else if model.starts_with("gpt-") {
@@ -412,14 +418,10 @@ mod tests {
             ("claude-sonnet-5", Some(ActiveProvider::Claude)),
             ("gpt-5.5", Some(ActiveProvider::OpenAI)),
             ("gemini-3-pro", Some(ActiveProvider::Gemini)),
-            (
-                "anthropic/claude-sonnet-5",
-                Some(ActiveProvider::OpenRouter),
-            ),
-            (
-                "claude-sonnet-5@Anthropic",
-                Some(ActiveProvider::OpenRouter),
-            ),
+            // Slash- and pin-form ids no longer auto-classify as OpenRouter:
+            // the passthrough is retired, so shape alone resolves nothing.
+            ("anthropic/claude-sonnet-5", None),
+            ("claude-sonnet-5@Anthropic", None),
             ("custom-model", None),
         ] {
             assert_eq!(builtin_provider_for_model(model), expected, "{model}");

@@ -116,16 +116,10 @@ pub fn resolve_model_spec(model: &str, cfg: &crate::config::Config) -> ResolvedM
         };
     }
 
-    if let Some((bare_model, provider)) = model.rsplit_once('@')
-        && !bare_model.trim().is_empty()
-        && !provider.trim().is_empty()
-    {
-        return ResolvedModelSpec {
-            provider_key: Some(ActiveProvider::OpenRouter.key().to_string()),
-            bare_model: model.to_string(),
-            explicit_prefix: None,
-        };
-    }
+    // NOTE: `model@provider` OpenRouter pins are no longer classified here.
+    // The OpenRouter.ai passthrough is retired; a pin without an explicit
+    // recognized prefix falls through to the builtin detector (which no
+    // longer shape-matches '/' or '@' either) and stays unresolved.
 
     ResolvedModelSpec {
         provider_key: base_builtin_provider_for_model(model)

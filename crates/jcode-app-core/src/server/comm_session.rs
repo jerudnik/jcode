@@ -18,7 +18,7 @@ use crate::protocol::{
     NotificationType, PlanGraphStatus, ServerEvent, SwarmFleetEntry, SwarmFleetMember,
     TokenUsageTotals,
 };
-use crate::provider::Provider;
+use crate::provider::{ModelRoute, Provider};
 use crate::session::Session;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -350,11 +350,52 @@ fn validate_concrete_spawn_selection(
     Ok(())
 }
 
+/// Resolve a bare requested model against the live route catalog — the same
+/// `ModelRoute` list `swarm list_models` serves — so every listed name spawns
+/// on the route it was listed under. Prefers an available route; a name whose
+/// only catalog routes are unavailable fails with the route's own detail
+/// instead of silently spawning somewhere else.
+fn catalog_selection_for_model(
+    model: &str,
+    routes: &[ModelRoute],
+) -> Option<anyhow::Result<SwarmSpawnSelection>> {
+    let mut matched = routes
+        .iter()
+        .filter(|route| route.model == model)
+        .peekable();
+    matched.peek()?;
+    let Some(route) = matched.clone().find(|route| route.available) else {
+        let detail = matched
+            .map(|route| route.detail.trim())
+            .find(|detail| !detail.is_empty())
+            .unwrap_or("route unavailable");
+        return Some(Err(anyhow::anyhow!(
+            "Swarm model '{model}' is listed but currently unavailable: {detail}"
+        )));
+    };
+
+    // Round-trip the route's api_method through the canonical request builder
+    // so the derived provider_key matches what session restore will resolve.
+    let request = crate::provider::MultiProvider::model_switch_request_for_session_route(
+        model,
+        None,
+        Some(&route.api_method),
+    );
+    let provider_key =
+        crate::provider::resolve_model_spec(&request, crate::config::config()).provider_key;
+    Some(Ok(SwarmSpawnSelection {
+        model: Some(model.to_string()),
+        provider_key,
+        route_api_method: Some(route.api_method.clone()),
+    }))
+}
+
 /// Selection for a concrete model string (optionally route-prefixed like
 /// `openai-api:gpt-5.5`), reconciled against the coordinator's identity.
 fn selection_for_concrete_model(
     model: String,
     coordinator: &CoordinatorSpawnIdentity,
+    routes: &[ModelRoute],
 ) -> anyhow::Result<SwarmSpawnSelection> {
     let resolved = crate::provider::resolve_model_spec(&model, crate::config::config());
 
@@ -379,8 +420,24 @@ fn selection_for_concrete_model(
             route_api_method: coordinator.route_api_method.clone(),
         }
     } else {
+        // A bare name resolves against the same route catalog `list_models`
+        // serves, so every listed name spawns and lands on its listed route.
+        if resolved.explicit_prefix.is_none()
+            && let Some(catalog) = catalog_selection_for_model(&model, routes)
+        {
+            return catalog;
+        }
+        // Names classified as OpenRouter purely by shape ('/' or '@' in the
+        // id, no explicit `openrouter:` prefix, not in the catalog) used to
+        // spawn "successfully" with provider_key=openrouter and then run on
+        // whatever runtime the openrouter slot happened to hold — the
+        // claude-sonnet-4 misidentity incident. Fail closed instead.
+        let provider_key = resolved.provider_key.clone().filter(|key| {
+            resolved.explicit_prefix.is_some()
+                || key != jcode_provider_core::ActiveProvider::OpenRouter.key()
+        });
         SwarmSpawnSelection {
-            provider_key: resolved.provider_key.clone(),
+            provider_key,
             model: Some(model),
             route_api_method: None,
         }
@@ -400,6 +457,7 @@ fn resolve_swarm_spawn_selection(
     requested_model: Option<String>,
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
+    routes: &[ModelRoute],
 ) -> anyhow::Result<SwarmSpawnSelection> {
     // A per-spawn requested model (the `model` param on `swarm spawn`) takes
     // precedence over the `agents.swarm_model` config pin. An explicit
@@ -412,7 +470,7 @@ fn resolve_swarm_spawn_selection(
         if is_inherit_sentinel(&requested) {
             return Ok(inherit_coordinator_selection(coordinator));
         }
-        return selection_for_concrete_model(requested, coordinator);
+        return selection_for_concrete_model(requested, coordinator, routes);
     }
 
     // Treat empty strings and the explicit "inherit"/"coordinator" sentinels as
@@ -424,8 +482,27 @@ fn resolve_swarm_spawn_selection(
         .filter(|model| !model.trim().is_empty() && !is_inherit_sentinel(model));
 
     match configured_swarm_model {
-        Some(model) => selection_for_concrete_model(model, coordinator),
+        Some(model) => selection_for_concrete_model(model, coordinator, routes),
         None => Ok(inherit_coordinator_selection(coordinator)),
+    }
+}
+
+/// The route catalog visible to a spawn request: the requesting session's live
+/// catalog when its agent lock is free, otherwise the provider template's —
+/// the exact fallback `handle_comm_list_models` uses, so what `list_models`
+/// printed is what spawn resolution consults.
+async fn spawn_model_routes(
+    req_session_id: &str,
+    sessions: &SessionAgents,
+    provider_template: &Arc<dyn Provider>,
+) -> Vec<ModelRoute> {
+    let agent = {
+        let agent_sessions = sessions.read().await;
+        agent_sessions.get(req_session_id).cloned()
+    };
+    match agent.as_ref().and_then(|agent| agent.try_lock().ok()) {
+        Some(agent_guard) => agent_guard.model_routes(),
+        None => provider_template.model_routes(),
     }
 }
 
@@ -683,10 +760,12 @@ pub(super) async fn spawn_swarm_agent(
     let agents_config = &crate::config::config().agents;
     let configured_swarm_model = agents_config.swarm_model.clone();
     let resolved_spawn_mode = spawn_mode.unwrap_or(agents_config.swarm_spawn_mode);
+    let spawn_routes = spawn_model_routes(req_session_id, sessions, provider_template).await;
     let selection = resolve_swarm_spawn_selection(
         requested_model.clone(),
         configured_swarm_model.clone(),
         &coordinator,
+        &spawn_routes,
     )?;
     let spawn_model = selection.model.clone();
     let spawn_provider_key = selection.provider_key.clone();

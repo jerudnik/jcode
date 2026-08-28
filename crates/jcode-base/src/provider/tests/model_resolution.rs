@@ -64,8 +64,10 @@ fn resolved_model_spec_uses_one_context_aware_precedence_table() {
             explicit_prefix: None,
         },
         Case {
+            // Retired passthrough: '@floor' pin shape no longer classifies as
+            // OpenRouter; it stays unresolved.
             model: "anthropic/claude-sonnet-4@floor",
-            provider_key: Some("openrouter"),
+            provider_key: None,
             bare_model: "anthropic/claude-sonnet-4@floor",
             explicit_prefix: None,
         },
@@ -130,8 +132,9 @@ fn resolved_model_spec_uses_one_context_aware_precedence_table() {
             explicit_prefix: None,
         },
         Case {
+            // Retired passthrough: pin shape stays unresolved.
             model: "meta-llama/llama-3.3:free@floor",
-            provider_key: Some("openrouter"),
+            provider_key: None,
             bare_model: "meta-llama/llama-3.3:free@floor",
             explicit_prefix: None,
         },
@@ -199,20 +202,13 @@ fn test_resolved_provider_key_bedrock() {
 
 #[test]
 fn test_resolved_provider_key_openrouter() {
-    // OpenRouter uses provider/model format
-    assert_eq!(
-        resolved_provider_key("anthropic/claude-sonnet-4"),
-        Some("openrouter")
-    );
-    assert_eq!(resolved_provider_key("openai/gpt-4o"), Some("openrouter"));
-    assert_eq!(
-        resolved_provider_key("google/gemini-2.0-flash"),
-        Some("openrouter")
-    );
-    assert_eq!(
-        resolved_provider_key("meta-llama/llama-3.1-405b"),
-        Some("openrouter")
-    );
+    // Retired passthrough: OpenRouter-shaped `vendor/model` ids no longer
+    // classify by spelling. They must resolve through a catalog route or an
+    // explicit provider prefix.
+    assert_eq!(resolved_provider_key("anthropic/claude-sonnet-4"), None);
+    assert_eq!(resolved_provider_key("openai/gpt-4o"), None);
+    assert_eq!(resolved_provider_key("google/gemini-2.0-flash"), None);
+    assert_eq!(resolved_provider_key("meta-llama/llama-3.1-405b"), None);
 }
 
 #[test]
@@ -225,9 +221,11 @@ fn test_openrouter_catalog_model_id_normalizes_bare_openai_and_claude_models() {
         openrouter_catalog_model_id("claude-sonnet-4-6").as_deref(),
         Some("anthropic/claude-sonnet-4-6")
     );
+    // Retired passthrough: an already-qualified `vendor/model` id no longer
+    // classifies as OpenRouter by spelling, so it does not pass through.
     assert_eq!(
-        openrouter_catalog_model_id("anthropic/claude-sonnet-4").as_deref(),
-        Some("anthropic/claude-sonnet-4")
+        openrouter_catalog_model_id("anthropic/claude-sonnet-4"),
+        None
     );
     assert_eq!(
         openrouter_catalog_model_id(
@@ -382,6 +380,12 @@ fn test_direct_chutes_ignores_legacy_openrouter_catalog_cache() {
                     .expect("Chutes should initialize as a direct profile");
                 assert_eq!(direct_route.0, "Chutes");
                 assert_eq!(direct_route.1, "openai-compatible:chutes");
+                // The retired passthrough default is gone: a profile with no
+                // default/static models constructs without a model, so pick one
+                // explicitly before asserting on model-bearing routes.
+                openrouter
+                    .set_model("chutes/test-model")
+                    .expect("direct Chutes profile accepts an explicit model");
 
                 let display_models = openrouter.available_models_display();
                 assert!(
@@ -819,7 +823,7 @@ fn test_openrouter_and_compatible_profile_transition_invariants() {
 }
 
 #[test]
-fn test_set_model_accepts_bare_openai_openrouter_pin_when_openrouter_available() {
+fn test_set_model_rejects_bare_openai_openrouter_pin_now_that_passthrough_is_retired() {
     with_clean_provider_test_env(|| {
         with_env_var("OPENROUTER_API_KEY", "test-openrouter-key", || {
             let openrouter =
@@ -844,12 +848,15 @@ fn test_set_model_accepts_bare_openai_openrouter_pin_when_openrouter_available()
         session_working_dir: std::sync::RwLock::new(None),
             };
 
+            // Retired passthrough: a bare `model@Provider` pin used to jump
+            // to the OpenRouter aggregator as `openai/gpt-5.4`. It no longer
+            // classifies, so the switch is refused and the active provider
+            // stays put.
             provider
                 .set_model("gpt-5.4@OpenAI")
-                .expect("bare pinned OpenRouter spec should normalize");
+                .expect_err("bare pinned OpenRouter spec must be refused");
 
-            assert_eq!(provider.active_provider(), ActiveProvider::OpenRouter);
-            assert_eq!(provider.model(), "openai/gpt-5.4");
+            assert_eq!(provider.active_provider(), ActiveProvider::OpenAI);
         })
     });
 }

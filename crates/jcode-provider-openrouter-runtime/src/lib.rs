@@ -63,9 +63,6 @@ const OPENROUTER_TRANSPORT_STATE_ENV: &str = "JCODE_OPENROUTER_TRANSPORT_STATE";
 const CODING_AGENT_USER_AGENT: &str = "claude-cli/1.0.0";
 const CODING_AGENT_X_APP: &str = "cli";
 
-/// Default model (Claude Sonnet via OpenRouter)
-const DEFAULT_MODEL: &str = "anthropic/claude-sonnet-4";
-
 /// Soft refresh TTL for the model catalog.
 ///
 /// We keep the 24h disk cache for resilience/offline startup, but after this
@@ -1603,10 +1600,6 @@ impl OpenRouterProvider {
                 label: key_label,
             },
         };
-        let model = profile
-            .default_model
-            .clone()
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
         let static_models = profile
             .models
             .iter()
@@ -1614,6 +1607,16 @@ impl OpenRouterProvider {
             .filter(|id| !id.is_empty())
             .map(ToString::to_string)
             .collect::<Vec<_>>();
+        let model = profile
+            .default_model
+            .clone()
+            .or_else(|| static_models.first().cloned())
+            .unwrap_or_else(|| {
+                jcode_base::logging::warn(&format!(
+                    "Provider profile '{profile_name}' has no default_model and no models; requests will fail until a model is selected (there is no implicit default model)"
+                ));
+                String::new()
+            });
         let static_context_limits = profile
             .models
             .iter()
@@ -1870,7 +1873,14 @@ impl OpenRouterProvider {
                     .as_ref()
                     .and_then(|profile| profile.default_model.clone())
             })
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+            .or_else(|| static_models.first().cloned())
+            .unwrap_or_else(|| {
+                jcode_base::logging::warn(&format!(
+                    "No model configured for the OpenAI-compatible runtime (profile: {}); requests will fail until a model is selected (there is no implicit default model)",
+                    profile_id.as_deref().unwrap_or("none")
+                ));
+                String::new()
+            });
 
         // Parse provider routing from environment
         let provider_routing = if supports_provider_features {
@@ -1921,10 +1931,19 @@ impl OpenRouterProvider {
                 path
             )
         })?;
+        // The OpenRouter aggregator runtime carries no implicit default model.
+        // It is normally constructed on the way to an explicit model switch;
+        // until a model is selected (or named via JCODE_OPENROUTER_MODEL),
+        // requests fail instead of silently running a phantom default.
+        let model = std::env::var("JCODE_OPENROUTER_MODEL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_default();
 
         Ok(Self {
             client: jcode_provider_core::shared_http_client(),
-            model: Arc::new(RwLock::new(DEFAULT_MODEL.to_string())),
+            model: Arc::new(RwLock::new(model)),
             reasoning_effort: Arc::new(RwLock::new(None)),
             api_base: DEFAULT_API_BASE.to_string(),
             auth: ProviderAuth::AuthorizationBearer {
@@ -2021,7 +2040,14 @@ impl OpenRouterProvider {
         let model = resolved
             .default_model
             .clone()
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+            .or_else(|| static_models.first().cloned())
+            .unwrap_or_else(|| {
+                jcode_base::logging::warn(&format!(
+                    "Provider profile '{}' has no default_model and no static models; requests will fail until a model is selected (there is no implicit default model)",
+                    resolved.id
+                ));
+                String::new()
+            });
 
         Ok(Self {
             client: jcode_provider_core::shared_http_client(),

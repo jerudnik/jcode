@@ -13,6 +13,7 @@ use crate::config::SwarmSpawnMode;
 use crate::message::{Message, ToolDefinition};
 use crate::plan::{NodeMeta, PlanItem};
 use crate::protocol::{NotificationType, ServerEvent};
+use crate::provider::ModelRoute;
 use crate::provider::{EventStream, Provider};
 use crate::server::swarm_mutation_state::SwarmMutationRuntime;
 use crate::server::{SwarmEventType, SwarmMember, VersionedPlan};
@@ -585,7 +586,10 @@ fn prepare_visible_spawn_session_cleans_session_when_launch_errors() {
 }
 
 #[test]
-fn prepare_visible_spawn_session_persists_and_launches_provider_key_for_openrouter_model() {
+fn prepare_visible_spawn_session_no_longer_guesses_openrouter_from_model_shape() {
+    // `model@Provider` / `vendor/model` shapes used to persist
+    // provider_key=openrouter purely from their spelling; the passthrough is
+    // retired, so an uncataloged shape persists no provider key at all.
     let _guard = crate::storage::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     crate::env::set_var("JCODE_HOME", temp_home.path());
@@ -600,7 +604,7 @@ fn prepare_visible_spawn_session_persists_and_launches_provider_key_for_openrout
         false,
         None,
         |_session_id, _cwd: &std::path::Path, _selfdev, provider_key| {
-            assert_eq!(provider_key, Some("openrouter"));
+            assert_eq!(provider_key, None);
             Ok(true)
         },
     )
@@ -609,7 +613,7 @@ fn prepare_visible_spawn_session_persists_and_launches_provider_key_for_openrout
     assert!(launched);
     let session = crate::session::Session::load(&session_id).expect("prepared session should save");
     assert_eq!(session.model.as_deref(), Some("openai/gpt-5.4@OpenAI"));
-    assert_eq!(session.provider_key.as_deref(), Some("openrouter"));
+    assert_eq!(session.provider_key, None);
 
     crate::env::remove_var("JCODE_HOME");
 }
@@ -742,8 +746,101 @@ fn resolved_spawn_selection(
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
 ) -> SwarmSpawnSelection {
-    resolve_swarm_spawn_selection(requested_model, configured_swarm_model, coordinator)
+    resolve_swarm_spawn_selection(requested_model, configured_swarm_model, coordinator, &[])
         .expect("spawn model should resolve")
+}
+
+fn catalog_route(model: &str, provider: &str, api_method: &str, available: bool) -> ModelRoute {
+    ModelRoute {
+        model: model.to_string(),
+        provider: provider.to_string(),
+        api_method: api_method.to_string(),
+        available,
+        detail: if available {
+            String::new()
+        } else {
+            "requires extra usage".to_string()
+        },
+        cheapness: None,
+    }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_accepts_any_listed_catalog_model() {
+    // Every name `swarm list_models` prints must spawn, and must land on the
+    // route it was listed under (the list/resolve asymmetry incident).
+    let routes = [
+        catalog_route("k3", "Kimi Code", "openai-compatible:kimi", true),
+        catalog_route(
+            "grok-4.5",
+            "Grok Direct",
+            "openai-compatible:grok-direct",
+            true,
+        ),
+        catalog_route(
+            "bridge/gemini-3-flash-agent",
+            "OpenAI-compatible",
+            "openai-compatible:openai-compatible",
+            true,
+        ),
+    ];
+    let coordinator = coordinator_identity(
+        Some("claude-opus-4-8"),
+        Some("claude-oauth"),
+        Some("claude-oauth"),
+    );
+
+    for route in &routes {
+        let selection =
+            resolve_swarm_spawn_selection(Some(route.model.clone()), None, &coordinator, &routes)
+                .expect("listed model must resolve");
+        assert_eq!(selection.model.as_deref(), Some(route.model.as_str()));
+        assert_eq!(
+            selection.route_api_method.as_deref(),
+            Some(route.api_method.as_str()),
+            "listed model must spawn on its listed route"
+        );
+    }
+}
+
+#[test]
+fn resolve_swarm_spawn_model_reports_unavailable_catalog_routes() {
+    let routes = [catalog_route(
+        "claude-opus-4-6[1m]",
+        "Anthropic",
+        "claude-oauth",
+        false,
+    )];
+    let error = resolve_swarm_spawn_selection(
+        Some("claude-opus-4-6[1m]".to_string()),
+        None,
+        &coordinator_identity(None, None, None),
+        &routes,
+    )
+    .expect_err("unavailable-only catalog model must fail");
+    let message = error.to_string();
+    assert!(message.contains("currently unavailable"));
+    assert!(message.contains("requires extra usage"));
+}
+
+#[test]
+fn resolve_swarm_spawn_model_rejects_uncataloged_slash_names() {
+    // A slash-form id used to auto-classify as OpenRouter and spawn
+    // "successfully" with provider_key=openrouter route=none, then run on
+    // whatever runtime the openrouter slot held (the claude-sonnet-4
+    // misidentity incident). Without a catalog entry it must now fail closed.
+    let error = resolve_swarm_spawn_selection(
+        Some("bridge/gemini-3-flash-agent".to_string()),
+        None,
+        &coordinator_identity(
+            Some("claude-opus-4-8"),
+            Some("claude-oauth"),
+            Some("claude-oauth"),
+        ),
+        &[],
+    )
+    .expect_err("uncataloged slash-form model must fail closed");
+    assert!(error.to_string().contains("swarm list_models"));
 }
 
 #[test]
@@ -759,6 +856,7 @@ fn resolve_swarm_spawn_model_rejects_unknown_per_spawn_model() {
             Some("claude-oauth"),
             Some("claude-oauth"),
         ),
+        &[],
     )
     .expect_err("unknown per-spawn model must fail closed");
 
@@ -779,6 +877,7 @@ fn resolve_swarm_spawn_model_rejects_unknown_configured_model() {
             Some("claude-oauth"),
             Some("claude-oauth"),
         ),
+        &[],
     )
     .expect_err("unknown agents.swarm_model must fail closed");
 
@@ -830,20 +929,33 @@ fn concrete_spawn_validation_allows_only_an_inheritance_or_resolved_route_escape
 
 #[test]
 fn resolve_swarm_spawn_model_prefers_configured_model_over_coordinator_model() {
-    let selection = resolved_spawn_selection(
+    // The configured pin uses a catalog-listed model: bare OpenRouter-style
+    // `model@provider` pins fail closed now that the passthrough heuristic is
+    // gone, so the pin must name a route the catalog actually serves.
+    let routes = [catalog_route(
+        "MiniMax-M3",
+        "MiniMax",
+        "openai-compatible:minimax",
+        true,
+    )];
+    let selection = resolve_swarm_spawn_selection(
         None,
-        Some("openai/gpt-5.4@OpenAI".to_string()),
+        Some("MiniMax-M3".to_string()),
         &coordinator_identity(
             Some("nvidia/llama-3.3-nemotron-super-49b-v1"),
             Some("nvidia"),
             Some("openai-compatible:nvidia-nim"),
         ),
-    );
+        &routes,
+    )
+    .expect("configured catalog model should resolve");
 
-    assert_eq!(selection.model.as_deref(), Some("openai/gpt-5.4@OpenAI"));
-    assert_eq!(selection.provider_key.as_deref(), Some("openrouter"));
+    assert_eq!(selection.model.as_deref(), Some("MiniMax-M3"));
     // A different configured model must not inherit the coordinator's route.
-    assert_eq!(selection.route_api_method, None);
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("openai-compatible:minimax")
+    );
 }
 
 #[test]

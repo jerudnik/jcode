@@ -829,12 +829,13 @@ mod tests {
             .as_deref(),
             Some("anthropic-api")
         );
+        // Retired passthrough: an '@' pin without an explicit recognized
+        // prefix no longer classifies as OpenRouter.
         assert_eq!(
             MultiProvider::explicit_session_provider_key_for_model_request(
                 "anthropic/claude-sonnet-4@floor"
-            )
-            .as_deref(),
-            Some("openrouter")
+            ),
+            None
         );
         assert_eq!(
             MultiProvider::model_switch_request_for_session_model(
