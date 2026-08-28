@@ -137,3 +137,46 @@ Remaining (tracked separately): single identity source for session meta /
 evidence / UI chip / provider_activity, and de-multiplexing the OpenRouter
 slot — the stage-3 refactor. Observability defects seen during the audit are
 docs/issues/swarm-observability-status-and-wake-gaps.md.
+
+## Addendum (2026-08-28 06:40): a pre-fix reproduction, and one new symptom
+
+Reproduced from the `session-issue-filing` session (coordinator `mouse`,
+`claude-opus-5`). The spawn named `zai/glm-5.3`, a route `list_models` reports
+as available through the local bridge at `10.201.0.2:3350`. It resolved to
+`provider_key=openrouter route=none` and made every request as
+`anthropic/claude-sonnet-4`.
+
+This is the same chain with a route name the earlier reproductions had not
+tried. It is **not** evidence that the fixes failed. The three fixes reached
+`main` at 2026-08-28 00:23 and this reproduction happened at 02:40 in a session
+whose binary was built before that, so it shows the defect as it stood before
+the repair. A first draft of this addendum claimed the fixes were unmerged;
+that check ran against a stale `main` ref in a worktree that had not fetched,
+and it was wrong. On `github/main` all three fixes are ancestors and the
+phantom default line no longer exists.
+
+The operational point worth keeping: a running session holds its binary until
+it is reloaded, so every session started before 00:23 kept reproducing this
+for hours after the fix landed. Merging the fix does not retire the live
+instances of the bug.
+
+### New symptom: the mis-routed worker does not merely lie, it stops working
+
+Earlier reproductions describe an identity mismatch. This one degraded past
+labelling. From the session log, every turn:
+
+```
+[openrouter] Dropped 27 orphaned tool output(s) during re-ordering
+API call complete in 46.19s (input=0 output=0 cache_read=0 cache_write=0)
+```
+
+Twenty-seven tool outputs discarded per turn and zero accounted tokens on a
+46-second call. The worker ran thirty minutes, executed one tool call at a
+time, and produced no output file; two `await_members` calls timed out on it
+before it was stopped. The verification it was doing was later completed by
+hand in a single command.
+
+This matters for acceptance. A fix verified only by reading back the reported
+model name would pass while this symptom survived. The check should be that a
+spawned worker on a named route completes a small real task, not that its chip
+shows the right string.
