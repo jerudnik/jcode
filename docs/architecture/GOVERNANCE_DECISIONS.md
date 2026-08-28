@@ -1047,8 +1047,10 @@ increasing order of severity.
 
 *It would pin bytes that nothing executes.* Of the guards this repository
 describes as load-bearing, five gate a pull request. Three budget guards exit 1
-against a clean, green `main`, and `scripts/test_critical_path_budget.py` is
-invoked by no workflow, recipe, or script in the tree. A manifest over the
+against a clean, green `main`, and the budget checker's test suite, now
+`tests/test_critical_path_budget.py`, was invoked by no workflow, recipe, or
+script in the tree; it sat in `scripts/` at the time, where the wiring rule does
+not reach. A manifest over the
 pre-G10A set would spend the ceremony of a ruleset transaction on files whose
 behaviour no gate observes.
 
@@ -1659,7 +1661,8 @@ the domain's measured counts fell (tui swallowed_error 596 -> 594, oversize 33
 digest pin `5ed12e31...` -> `249e7ab1...`. The pin lives in `justfile`, a
 protected path, so this merged through the ruleset maintenance window above.
 
-**Observed while diagnosing, not fixed here.** `scripts/test_critical_path_budget.py`
+**Observed while diagnosing, not fixed here.** The budget checker's test suite,
+now `tests/test_critical_path_budget.py` and at the time still under `scripts/`,
 is not wired into any recipe: `test-python` iterates `tests/test_*.py`, and this
 file sits in `scripts/`. It has four failing tests on `main` at `45b96548d`,
 unchanged by this PR. Two of them,
@@ -1674,5 +1677,86 @@ for is the same shape as D037.
 
 **Reopen trigger:** a further decrease in any domain's file count, which will
 fail the same way and should be recorded the same way; or wiring
-`scripts/test_critical_path_budget.py` into `test-python`, which requires
+that suite into `test-python`, which requires
 resolving the four pre-existing failures first.
+
+**Resolved 2026-08-27.** The second trigger fired. The suite moved to
+`tests/test_critical_path_budget.py`, which the `test-python` glob already
+covers and which `check_test_wiring.py` polices, so it cannot be orphaned
+again. Of the four failures, the two count assertions were the drift itself and
+were fixed by re-recording `EXPECTED_FILE_COUNTS` (lifecycle 66 -> 69,
+provider_infrastructure 20 -> 21, digest `249e7ab1...` -> `aae1ad95...`); the
+other two were stale assertions about `fork-ci.yml` and about panic headroom,
+and were corrected without weakening what they test. All 33 cases pass.
+
+## The decision log rule now measures loss instead of forbidding edits
+
+**2026-08-27.** `governance-root.yml` failed any pull request that removed a
+single line from this file. The intent, stated in the comment above the rule, is
+that losing the log is the failure PR #155 nearly caused. The implementation was
+stricter than that intent, and the gap was not free.
+
+Moving the critical-path budget test suite from `scripts/` to
+`tests/test_critical_path_budget.py` left three citations in
+this file pointing at a path that no longer exists.
+`scripts/check_docs_references.py` holds this file at a zero baseline for
+stale code paths and says to update the citation to where the code moved, and
+refuses to have its baseline raised. This rule said the edit that would do so was
+forbidden. Both controls are individually sound and they gave opposite orders, so
+no honest version of that change could pass. Both were run to confirm it rather
+than argued from: updating the citations lost four lines and failed here, and
+leaving them and appending a correction instead reported three findings there.
+
+The rule now checks three things. The file must exist, so deleting or moving it
+still fails and moving the log stays a governance event. Its `##` entry count must
+not fall, so no decision can be dropped. Its total length must not fall, so an
+entry cannot be gutted while its heading is left in place to satisfy the count.
+Correcting a citation inside an entry passes, because it removes lines without
+losing anything.
+
+This does not license rewriting history. The log's convention is unchanged and
+the digest supersession above is still the pattern to follow when a recorded fact
+goes stale: append the correction, leave the original. The rule simply no longer
+treats every in-place edit as an attempt to destroy the record.
+
+**Reopen trigger:** a change that drops a decision while adding enough lines and
+headings elsewhere to keep both counts up. The guard would not see it. If that
+happens, compare entry headings by name rather than by count.
+
+## The standalone ratchet scripts are retired; the wired gate measures the tree
+
+**2026-08-27.** The four per-dimension ratchet scripts and their baselines are
+deleted: the panic, swallowed-error, code-size, and test-size checkers with
+`panic_budget.json`, `swallowed_error_budget.json`, `code_size_budget.json`,
+and `test_size_budget.json`. They ran only from `scripts/preflight.sh`, which
+no workflow and no justfile recipe executes, and the guard non-vacuity harness
+had already recorded that three of them exited 1 against clean main. A checker
+that fails on the code it is supposed to certify, and that nothing runs, gates
+nothing; keeping it invites the C7 failure mode this log records above, where
+machinery survives on the strength of what it used to do.
+
+What they nominally provided is now measured directly.
+`scripts/check_critical_path_budget.py`, which `just check` and both CI entry
+workflows already run digest-pinned, previously read the repository totals for
+its trend section out of those baseline files. It now scans the tree itself
+with the same shared classifier (`scripts/rust_production_filter.py`) and
+holds the measured totals under its pinned `REPOSITORY_CEILINGS`: panic-prone
+lines, swallowed errors, oversize production files and their total LOC, and
+oversize test files. At the switch the measured tree sat at or below every
+mark, verified by running both the old baseline read and the new scan; no
+ceiling moved. The scope digest is unchanged because the marks and scope are
+unchanged.
+
+What is lost, deliberately: the per-file ratchets. The old scripts pinned debt
+to individual files, so debt could not migrate between files without an edit
+to a baseline. The marks bound only the totals. That trade was accepted
+because the per-file mechanism was unwired and red, so its precision was
+theoretical, and because the critical domains keep per-domain ceilings with
+per-file reporting in the wired gate. `warning_budget.txt` stays: counting
+warnings needs a full compile, so the recorded number remains the input, and
+`scripts/check_warning_budget.sh` remains its maintainer.
+
+**Reopen trigger:** a sustained rise in a repository total toward its mark
+with the debt concentrating in files outside the critical domains. That is the
+migration the per-file ratchets would have caught, and it would justify wiring
+a successor rather than resurrecting the dead scripts.

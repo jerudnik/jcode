@@ -99,10 +99,6 @@ run() {
 }
 
 # ── 1. Fast text/ratchet gates (no compilation) ──────────────────────────────
-run "swallowed-error ratchet"  python3 scripts/check_swallowed_error_budget.py
-run "panic-prone ratchet"      python3 scripts/check_panic_budget.py
-run "code-size ratchet"        python3 scripts/check_code_size_budget.py
-run "test-size ratchet"        python3 scripts/check_test_size_budget.py
 run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.py
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py

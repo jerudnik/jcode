@@ -668,7 +668,7 @@ class TheHarnessGoesRed(unittest.TestCase):
     def test_an_unknown_status_is_reported(self) -> None:
         original = harness.GUARDS
         harness.GUARDS = original + (
-            harness.Guard("scripts/check_panic_budget.py", "advisory", reason="r"),
+            harness.Guard("scripts/check_warning_budget.sh", "advisory", reason="r"),
         )
         try:
             failures, _ = harness.run()
