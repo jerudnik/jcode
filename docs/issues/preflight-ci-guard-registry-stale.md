@@ -73,3 +73,26 @@ the same commit, rather than preserving the old count by hand.
 - The two skipped guards retain accurate reasons for remaining dormant.
 - The section 2 totals in the undecided-bucket issue match the registry.
 - `python3 -I scripts/check_guard_nonvacuity.py` and its tests pass.
+
+## One reason string also cites a path that no longer exists
+
+Separate from the gating and dormant question, the
+`scripts/check_warning_budget.sh` entry cites its test as
+`scripts/test_warning_budget.py`. PR #225 moved that module to
+`tests/test_warning_budget.py` so the `tests/test_*.py` glob would collect it,
+which makes the citation dangling and its "is itself unrun" clause false.
+
+This was fixed once during the #225 merge and then deliberately reverted.
+`scripts/check_guard_nonvacuity.py` is a governance path, so the one-line
+correction turned an otherwise window-free PR into one needing a ruleset
+maintenance window. The fix belongs in the change that rewrites these reason
+strings anyway, rather than costing a separate window on its own.
+
+Nothing breaks in the meantime. The path appears in a `reason` string, not in
+executable logic, and `check_guard_nonvacuity.py` passes either way at 28
+claims.
+
+Add to the resolution criteria: no `reason` string cites a path that does not
+exist. Checking this mechanically across `GUARDS` would prevent the next
+instance, since a moved file is the same failure mode issue #224 addressed for
+documentation citations.
