@@ -78,7 +78,7 @@ End the prose-regex pattern; keep the guarantee, on ground where it can
 be exact:
 
 1. Convention: a repository path a doc wants kept true is written as a
-   repo-relative markdown link, `[scripts/foo.py](../scripts/foo.py)`.
+   repo-relative markdown link whose text is the path itself.
    The existing broken-link rule already resolves links exactly, is
    already fatal, uses a parser rather than a prose regex, and needs no
    baseline. This is strictly stronger than the rule being retired.
