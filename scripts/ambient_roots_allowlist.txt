@@ -10,9 +10,9 @@ crates/jcode-base/src/browser.rs:676  # Firefox's native-messaging manifest dir 
 crates/jcode-base/src/browser.rs:681  # Same as :676, macOS variant: Firefox reads ~/Library/Application Support, a real-home OS location.
 crates/jcode-base/src/browser.rs:692  # Same as :676, Windows variant: dirs::data_dir() is where Firefox looks for the manifest.
 crates/jcode-base/src/hooks.rs:112  # Expands `~` in a user-authored hook command; the user means their real shell home, not the sandbox.
-crates/jcode-base/src/memory_log.rs:458  # regression test: names the real home in order to assert log_dir() never resolves under it
-crates/jcode-base/src/mobile_server.rs:106  # regression test: names the real home in order to assert jcode_home() never resolves under it
-crates/jcode-provider-copilot-runtime/src/copilot_tests.rs:705  # regression test: names the real home in order to assert machine_id never resolves under it
+crates/jcode-base/src/memory_log.rs:467  # regression test: names the real home in order to assert log_dir() never resolves under it
+crates/jcode-base/src/mobile_server.rs:113  # regression test: names the real home in order to assert jcode_home() never resolves under it
+crates/jcode-provider-copilot-runtime/src/copilot_tests.rs:711  # regression test: names the real home in order to assert machine_id never resolves under it
 crates/jcode-provider-openai-runtime/src/openai_tests.rs:131  # Test-only probe for a real ~/.codex/auth.json; the point is to detect the developer's actual Codex credentials, and the test skips when absent.
 crates/jcode-provider-openrouter/src/lib.rs:807  # regression test: names the real home in order to assert the model caches never resolve under it
 crates/jcode-tui/src/tui/remote_diff.rs:90  # Expands `~` in a path the user typed at the diff prompt; must resolve to their real home.
@@ -21,9 +21,9 @@ crates/jcode-tui/src/tui/ui_header.rs:466  # Display-only: abbreviates the real 
 crates/jcode-tui/src/video_export.rs:44  # Locates a real ~/.cargo/bin tool binary; the toolchain lives in the real home regardless of JCODE_HOME.
 crates/jcode-tui/src/video_export.rs:68  # Reads the user's real ~/.config/kitty/kitty.conf to match terminal font settings; a sandbox copy would not exist.
 src/cli/auth_test/types.rs:145  # Reports where *Cursor* stores its config, an external app's real-home path we only read.
-src/cli/commands.rs:1377  # Searches for an external `jade` checkout in the real home; not jcode-owned state.
-src/cli/commands.rs:528  # Expands `~/` in a user-supplied CLI path argument; the user means their real home.
-src/cli/commands.rs:533  # Same as :528, the bare `~` case.
+src/cli/commands/cloud_sessions.rs:1057  # Searches for an external `jade` checkout in the real home; not jcode-owned state.
+src/cli/commands/cloud_sessions.rs:502  # Expands `~/` in a user-supplied CLI path argument; the user means their real home.
+src/cli/commands/cloud_sessions.rs:507  # Same as :502, the bare `~` case.
 src/cli/commands/menubar.rs:178  # Deliberate: the macOS menu bar is one per-login-session resource, so its lock must anchor to the real home for every process to share one inode. Rationale documented at the call site.
 src/cli/commands/menubar.rs:193  # Deliberate: compares JCODE_HOME *against* the real ~/.jcode to detect a sandbox. Resolving both through storage would make the comparison always true.
-src/cli/login.rs:1264  # Expands `~/` in a credential path the user typed at the login prompt.
+src/cli/login.rs:1505  # Expands `~/` in a credential path the user typed at the login prompt.

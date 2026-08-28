@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Verdict: KEEP-MANUAL
+# Operator: the authentication maintainer runs this on a prepared workstation
+# after OAuth transport changes. It requires Python requests, Claude CLI OAuth
+# credentials, live jcode sockets, network access, and consumes OAuth quota.
 """
 Test OAuth usage comparison between Claude Code CLI and jcode direct API.
 
