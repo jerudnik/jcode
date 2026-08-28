@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Preflight: run the blocking CI gate set locally before pushing.
+# Status: WIRE. The required `just pre-pr` gate executes this script for every
+# non-docs-only pull request change set.
 #
 # Motivation: the fork's Quality Guardrails / fork-ci rails enforce several
 # ratchets (swallowed-error, panic, code/test size, wildcard re-export, warning
@@ -107,6 +109,9 @@ run() {
 run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.py
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py
+run "env lease drop order"     python3 scripts/check_env_lease_drop_order.py
+run "TUI render lock"          python3 scripts/check_tui_render_lock.py
+run "ambient roots"            bash scripts/check_ambient_roots.sh
 run "agent instructions"       python3 scripts/check_agent_instructions.py
 # Advisory ownership: every ignore in .cargo/audit.toml must be owned,
 # documented, and unexpired in docs/security/advisories.toml. The date is
@@ -129,7 +134,7 @@ run "docs references"          python3 -I scripts/check_docs_references.py
 # Docs prose lint (vale) is gated on changed markdown: it is style-only, so
 # unlike the reference checker a non-docs change cannot break it, and vale via
 # `nix shell` costs ~1.8s of resolution overhead every caller would pay.
-if git diff --name-only --diff-filter=ACMR "$(git merge-base HEAD github/main 2>/dev/null || echo HEAD~1)" -- '*.md' 2>/dev/null | grep -q .; then
+if git diff --name-only --diff-filter=ACMR "$(git merge-base HEAD main 2>/dev/null || echo HEAD~1)" -- '*.md' 2>/dev/null | grep -q .; then
   if command -v vale >/dev/null 2>&1; then
     run "docs lint"            python3 -I scripts/lint_docs.py
   else

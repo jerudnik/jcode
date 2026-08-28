@@ -65,8 +65,8 @@ It runs the workflow's exact cargo commands, so a red result is known before any
 
 ## Before opening a pull request
 
-Run the pre-PR gate. It composes the legs PR Gate will route to for the change
-set, using CI's own path classifier, so nothing red should reach hosted CI:
+Run the pre-PR gate. It uses CI's path classifier to select the local gate tier
+for the change set and catches locally reproducible failures before hosted CI:
 
 ```bash
 just pre-pr
@@ -76,6 +76,9 @@ Routing and cost: a docs-only change runs the docs gates (~10s); other changes
 add preflight plus the `check`/`test` recipes (~5-10 min warm); a
 product-impacting change adds the CI full-test mirror (`scripts/ci_local.sh`,
 ~5-20 min cache-dependent). Known constraints:
+
+- This is the local reproducible subset, not a replacement for hosted CI's
+  platform-specific Nix, security, and FreeBSD smoke jobs.
 
 - Python-based recipes need Python 3.11+; `pre-pr` pins Python (and vale)
   through `nix shell`, so a stale system interpreter cannot false-fail it.

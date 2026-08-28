@@ -81,7 +81,7 @@ lint-docs:
 pre-pr:
     #!/usr/bin/env bash
     set -euo pipefail
-    base="$(git rev-parse --verify --quiet github/main >/dev/null 2>&1 && echo github/main || echo origin/main)"
+    base="$(git rev-parse --verify refs/heads/main)"
     nix shell nixpkgs#vale nixpkgs#python3 --command just lint-docs
     route="$(python3 -I scripts/classify_pr_paths.py --base "$base" --head HEAD)"
     printf '%s\n' "$route"
