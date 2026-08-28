@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Self-tests for scripts/check_warning_budget.sh.
 
+WIRE verdict: ``just test-python`` collects this module through the
+``tests/test_*.py`` glob.
+
 The gate this covers was vacuous for its entire life. It counted with
 ``rg -c '^warning:' || printf '0\\n'`` on runners that have no ripgrep, so
 ``rg: command not found`` was swallowed by the ``||`` and the gate printed
