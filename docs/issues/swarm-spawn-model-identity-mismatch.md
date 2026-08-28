@@ -5,7 +5,6 @@ priority: high
 owner: unassigned
 opened: 2026-08-27
 related:
-  - docs/issues/swarm-model-policy-enforcement.md
   - docs/issues/swarm-observability-status-and-wake-gaps.md
   - docs/architecture/provider-confusion.md
 ---

@@ -47,10 +47,10 @@ so each item gets an explicit wire-or-retire decision instead of ambient rot.
 `security_preflight` is gating but explicitly lacks a plant, so its
 non-vacuity is asserted, not demonstrated. Mechanisms recorded in the
 decision log as intended but never implemented: the security plant, the
-scheduled end-to-end mutation canary, disabled-model policy enforcement
-(docs/issues/swarm-model-policy-enforcement.md), swarm capability tiers,
-hard cwd enforcement (only a soft signal exists), and the role-aware
-liveness watchdog.
+scheduled end-to-end mutation canary, swarm capability tiers, hard cwd
+enforcement (only a soft signal exists), and the role-aware liveness
+watchdog. Disabled-model policy enforcement left this list when spawn-time
+rejection landed in PR #229.
 
 ## 3. Execution surfaces
 
@@ -94,8 +94,6 @@ Recorded follow-ups with no implementation or closure evidence, by doc:
   spawn resolution, resolved identity in completion reports, narrowing
   `set_model`'s fail-open branch, and the subagent tool still inheriting
   provider key blindly (`tool/subagent.rs:64-70`).
-- `docs/issues/swarm-model-policy-enforcement.md:89`: disabled models are
-  still pickable, spawnable, and inheritable.
 
 The remaining six commitments live inside already-open issue files
 (`swarm-runaway-growth.md:129-131` capability tiers, cwd enforcement at
