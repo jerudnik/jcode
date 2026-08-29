@@ -141,6 +141,7 @@ async fn assign_task_does_not_stack_on_busy_worker() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(

@@ -1,6 +1,39 @@
 use super::run_plan_errors::*;
 use super::*;
 
+fn unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+/// Read the plan's wall-clock window: when its budget clock started and how
+/// long it may run.
+///
+/// A plan with no persisted safety ledger predates budgets or was seeded
+/// through a path that does not write one. Treat that as a plan starting its
+/// clock now under current configuration rather than refusing to schedule it:
+/// the budget exists to stop runaway growth, and declining to run a plan at all
+/// is a strictly worse failure than running it under a freshly derived limit.
+fn graph_wall_clock(summary: &PlanGraphStatus) -> Result<(u64, u64)> {
+    // Fail closed. Deriving a fresh window here instead would restart the clock
+    // on every call, so a graph missing its ledger could never age out at all.
+    // A seed path that does not persist a ledger is the bug to fix; refusing is
+    // the safe response to one that slips through.
+    let raw = summary
+        .phases_by_id
+        .get(jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID)
+        .ok_or_else(|| {
+            anyhow::anyhow!("run_plan refused to schedule a graph without a persisted safety ledger")
+        })?;
+    let (started, limit) = raw.split_once(':').ok_or_else(|| {
+        anyhow::anyhow!("run_plan refused a graph with an invalid persisted safety ledger")
+    })?;
+    Ok((started.parse()?, limit.parse()?))
+}
+
 /// Decide how many swarm workers `run_plan` keeps active at once.
 ///
 /// Policy:
@@ -581,6 +614,7 @@ pub(super) async fn run_swarm_plan_loop(
     reporter: &RunPlanReporter,
 ) -> Result<ToolOutput> {
     let initial_summary = fetch_plan_status(&ctx.session_id).await?;
+    let (graph_started_at_unix_ms, graph_wall_clock_limit_ms) = graph_wall_clock(&initial_summary)?;
     let is_deep = initial_summary.mode.eq_ignore_ascii_case("deep");
     let initial_seed_count = if initial_summary.seeded_count > 0 {
         initial_summary.seeded_count
@@ -621,6 +655,37 @@ pub(super) async fn run_swarm_plan_loop(
                 "run_plan exceeded {} coordination loops; leaving workers untouched for inspection",
                 max_loops
             ));
+        }
+
+        let elapsed_ms = unix_now_ms().saturating_sub(graph_started_at_unix_ms);
+        if elapsed_ms > graph_wall_clock_limit_ms {
+            let message = format!(
+                "Task graph paused: hard wall-clock budget exceeded (limit {}s, observed {}s). The scheduler rejected further coordination and froze graph growth. Inspect the plan and start a smaller replacement graph; ordinary unfreeze cannot bypass the exhausted budget.",
+                graph_wall_clock_limit_ms / 1_000,
+                elapsed_ms / 1_000
+            );
+            let response = send_request(Request::CommTaskControl {
+                id: REQUEST_ID,
+                session_id: ctx.session_id.clone(),
+                action: "freeze".to_string(),
+                task_id: String::new(),
+                target_session: None,
+                message: Some(message.clone()),
+            })
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Failed to pause wall-clock-exhausted plan: {error}")
+            })?;
+            ensure_success(&response)?;
+            reporter.checkpoint(&message).await;
+            if let Err(error) = broadcast_plan_alert(ctx, &message).await {
+                reporter
+                    .log(&format!(
+                        "failed to broadcast wall-clock budget pause to the swarm: {error}"
+                    ))
+                    .await;
+            }
+            return Err(anyhow::anyhow!(message));
         }
 
         let summary = fetch_plan_status(&ctx.session_id).await?;
@@ -972,5 +1037,21 @@ pub(super) async fn assign_task_to_session(
             target_session,
             e
         )),
+    }
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn graph_start_comes_from_persisted_status_and_missing_data_fails_closed() {
+        let mut summary = PlanGraphStatus::empty_for_swarm("durable-clock");
+        assert!(graph_wall_clock(&summary).is_err());
+        summary.phases_by_id.insert(
+            jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID.to_string(),
+            "1234:5678".to_string(),
+        );
+        assert_eq!(graph_wall_clock(&summary).unwrap(), (1234, 5678));
     }
 }
