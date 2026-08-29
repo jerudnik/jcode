@@ -49,6 +49,7 @@ async fn assign_next_prefers_worker_with_dependency_context() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
