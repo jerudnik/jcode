@@ -591,6 +591,20 @@ pub struct AgentsConfig {
     /// budget and tells the model how many slots remain.
     #[serde(default = "default_swarm_max_graph_nodes")]
     pub swarm_max_graph_nodes: usize,
+    /// Maximum generated lineage depth in a swarm task graph. Seed nodes are
+    /// depth zero regardless of dependency-chain length; expansion children,
+    /// gates, and injected gaps increment generated ancestry. Default 2.
+    #[serde(default = "default_swarm_max_graph_lineage_depth")]
+    pub swarm_max_graph_lineage_depth: usize,
+    /// Maximum number of gap/fix children one gate may inject across all runs.
+    /// Exhaustion pauses the plan and escalates to the coordinator. Default 3.
+    #[serde(default = "default_swarm_max_gate_injections_per_gate")]
+    pub swarm_max_gate_injections_per_gate: usize,
+    /// Maximum wall-clock lifetime of a nonterminal swarm task graph, in
+    /// seconds. The clock starts when the graph is seeded and does not reset on
+    /// worker activity or loop progress. Default two hours.
+    #[serde(default = "default_swarm_max_graph_wall_clock_secs")]
+    pub swarm_max_graph_wall_clock_secs: u64,
 }
 
 fn default_swarm_max_concurrent_agents() -> usize {
@@ -599,6 +613,18 @@ fn default_swarm_max_concurrent_agents() -> usize {
 
 fn default_swarm_max_graph_nodes() -> usize {
     64
+}
+
+fn default_swarm_max_graph_lineage_depth() -> usize {
+    2
+}
+
+fn default_swarm_max_gate_injections_per_gate() -> usize {
+    3
+}
+
+fn default_swarm_max_graph_wall_clock_secs() -> u64 {
+    2 * 60 * 60
 }
 
 fn default_memory_embedding_backend() -> String {
@@ -641,6 +667,9 @@ impl Default for AgentsConfig {
             memory_embedding_dim: None,
             swarm_max_concurrent_agents: default_swarm_max_concurrent_agents(),
             swarm_max_graph_nodes: default_swarm_max_graph_nodes(),
+            swarm_max_graph_lineage_depth: default_swarm_max_graph_lineage_depth(),
+            swarm_max_gate_injections_per_gate: default_swarm_max_gate_injections_per_gate(),
+            swarm_max_graph_wall_clock_secs: default_swarm_max_graph_wall_clock_secs(),
         }
     }
 }
