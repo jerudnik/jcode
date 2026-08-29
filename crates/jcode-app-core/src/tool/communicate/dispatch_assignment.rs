@@ -117,7 +117,7 @@ pub(super) async fn handle_assignment_action(
             let members = fetch_swarm_members(&ctx.session_id).await?;
 
             let active_count = coordination_in_flight_count(&summary, &members, &ctx.session_id);
-            if active_count >= concurrency_limit {
+            if dispatch_window_full(active_count, concurrency_limit) {
                 return Ok(ToolOutput::new(format!(
                     "Window already full: {} active/in-flight task(s) >= limit {}",
                     active_count, concurrency_limit
@@ -195,5 +195,25 @@ pub(super) async fn handle_assignment_action(
         }
 
         _ => unreachable!("action routed to wrong dispatch family"),
+    }
+}
+
+/// Whether the fill_slots dispatch window has no free slot. Pure so the
+/// boundary is unit-testable: a mutation probe turned the previous inline
+/// `>=` into `>` (an over-dispatch off-by-one) and zero tests went red.
+fn dispatch_window_full(active_count: usize, concurrency_limit: usize) -> bool {
+    active_count >= concurrency_limit
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::dispatch_window_full;
+
+    #[test]
+    fn dispatch_window_is_full_at_exactly_the_limit() {
+        assert!(!dispatch_window_full(0, 2));
+        assert!(!dispatch_window_full(1, 2));
+        assert!(dispatch_window_full(2, 2));
+        assert!(dispatch_window_full(3, 2));
     }
 }
