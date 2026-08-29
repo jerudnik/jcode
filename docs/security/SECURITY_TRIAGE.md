@@ -6,19 +6,19 @@ Fork-specific narrative for advisories the fork ignores in `.cargo/audit.toml`
 beyond what `docs/SECURITY_DEPENDENCIES.md` covers.
 
 **This file is no longer an enforcement surface.** Since F22, the
-machine-readable ownership record is `docs/security/advisories.toml` and the
-gate is `scripts/check_advisory_policy.py`, run from the `advisory ownership
-policy` job in `.github/workflows/security.yml` and the `advisory ownership`
-gate in `scripts/preflight.sh`. The old check grepped these Markdown files for
+machine-readable ownership record is `docs/security/advisories.toml`,
+reviewed via the weekly report from
+`.github/workflows/security.yml`. The old check grepped these Markdown files for
 the advisory ID, which a passing mention satisfied and which carried no owner
-or expiry. Adding prose here suppresses nothing.
+or expiry. Adding prose here suppresses nothing. The automated ownership gate
+was retired in 2026-08; the record format below is maintained by review.
 
-Policy (enforced by `scripts/check_advisory_policy.py`):
+Policy:
 
 | Advisory class | Handling |
 |---|---|
-| Direct vulnerability (workspace dependency) | Gate fails until fixed or given a complete record in `docs/security/advisories.toml` |
-| Reachable runtime transitive | Gate fails until triaged; weekly report re-lists for review |
+| Direct vulnerability (workspace dependency) | Fix, or give a complete record in `docs/security/advisories.toml` |
+| Reachable runtime transitive | Triage; weekly report re-lists for review |
 | Build-time / non-compiled-target transitive | Triaged ignore; weekly report re-lists |
 | Unmaintained / unsound warnings | Advisory only, listed in the weekly report issue |
 

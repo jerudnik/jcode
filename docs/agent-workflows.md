@@ -194,7 +194,7 @@ Current workflow authority:
 - `.github/workflows/pr.yml` exposes the single required PR result named `PR Gate`; print the maintained required name with `jq -r '.required_checks[].context' scripts/required-checks.json`.
 - `.github/workflows/ci.yml` is the reusable PR Gate orchestrator. It runs docs lint for docs-only PRs and otherwise calls the fork, security, Nix, and smoke helpers.
 - `.github/workflows/fork-ci.yml` is the fork Rust and quality helper. PR Gate reaches it for non-docs PRs, and scheduled or dispatch events may also call it.
-- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper. Its validate job lints fork-owned workflows with the flake-locked `.#actionlint` package and runs `scripts/check_reusable_workflow_calls.py` and `scripts/check_workflow_permissions.py`, which enforce GitHub's same-repository reusable-workflow and permissions rules.
+- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper. Its validate job lints fork-owned workflows with the flake-locked `.#actionlint` package and runs `scripts/check_reusable_workflow_calls.py`, which enforces GitHub's same-repository reusable-workflow rules.
 - `.github/workflows/security.yml` owns secret scanning and the triaged dependency audit as a PR Gate helper and scheduled helper.
 - `.github/workflows/release.yml` owns release artifacts.
 - Inherited or dispatch-only workflows are not substitutes for the fork gates.

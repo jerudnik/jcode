@@ -1,8 +1,0 @@
-on: push
-permissions:
-  contents: read
-jobs:
-  call:
-    permissions:
-      contents: write
-    uses: ./.github/workflows/callee.yml

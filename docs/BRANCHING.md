@@ -156,9 +156,8 @@ Every workflow lives on `main` with everything else.
 
 All fork-owned workflows are linted by actionlint in `nix.yml` and the flake
 workflow-syntax check; `freebsd-smoke.yml` is the sole upstream exemption.
-Reusable-workflow call sites and permissions are policy-checked by
-`scripts/check_reusable_workflow_calls.py` and
-`scripts/check_workflow_permissions.py`.
+Reusable-workflow call sites are policy-checked by
+`scripts/check_reusable_workflow_calls.py`.
 
 ## Platforms
 

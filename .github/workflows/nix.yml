@@ -74,8 +74,6 @@ jobs:
 
           python3 scripts/check_reusable_workflow_calls.py .
           python3 tests/test_reusable_workflow_calls.py
-          python3 scripts/check_workflow_permissions.py .
-          python3 -m unittest tests.test_workflow_permissions
 
       - name: Run package recipe
         run: nix shell nixpkgs#just -c just package

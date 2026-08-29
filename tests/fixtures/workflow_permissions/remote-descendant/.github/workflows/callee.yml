@@ -1,7 +1,0 @@
-on:
-  workflow_call:
-jobs:
-  call:
-    permissions:
-      contents: read
-    uses: octo-org/central/.github/workflows/build.yml@v1

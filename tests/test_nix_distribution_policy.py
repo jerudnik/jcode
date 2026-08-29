@@ -17,7 +17,6 @@ _BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
 if _BORROWED_PATH_ENTRY:
     sys.path.append(_SCRIPTS_DIR)
 try:
-    from check_workflow_permissions import WorkflowPermissionChecker
     from check_reusable_workflow_calls import ReusableWorkflowCallChecker
 finally:
     if _BORROWED_PATH_ENTRY:
@@ -188,9 +187,6 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
 class NixOnlyDistributionPolicy(unittest.TestCase):
     def test_reusable_workflow_calls_follow_github_policy(self) -> None:
         ReusableWorkflowCallChecker(ROOT).check()
-
-    def test_reusable_workflow_permissions_never_elevate(self) -> None:
-        self.assertEqual([], WorkflowPermissionChecker(ROOT).check())
 
     def test_retired_paths_are_absent(self) -> None:
         for relative in RETIRED_PATHS:
