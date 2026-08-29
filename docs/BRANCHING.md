@@ -140,22 +140,15 @@ Every workflow lives on `main` with everything else.
 
 | Workflow | Role | Trigger |
 |---|---|---|
-| `docs-impact.yml` | Advisory branch-wide DOX review packet derived from APM scopes | PR open/update/reopen/ready-for-review |
-| `pr.yml` | Pull request classifier plus PR Gate entrypoint | PR to `main` |
-| `ci.yml` | Reusable PR Gate orchestrator: docs lint for docs-only PRs, otherwise fork, security, Nix, and smoke helpers | workflow_call from `pr.yml` |
-| `fork-ci.yml` | Reusable fork helper for quality + macOS build/test, advisory Linux tests | workflow_call from `ci.yml` and `scheduled.yml` |
-| `security.yml` | Reusable secret-scan + triaged cargo-audit helper; weekly full advisory report | workflow_call from `ci.yml` and `scheduled.yml` |
-| `nix.yml` | Reusable flake validation + maintained-system build helper, plus Cachix publication when requested | workflow_call from `ci.yml`, `main.yml`, and `scheduled.yml` |
-| `freebsd-smoke.yml` | Reusable FreeBSD smoke helper | workflow_call from `ci.yml`, `main.yml`, and `scheduled.yml` |
+| `pr.yml` | The whole pull-request surface: classifier routing, docs lint, Rust checks, smoke, the advisory DOX packet, the Governance Root audit gate, and the required `PR Gate` summary | PR to `main` |
+| `security.yml` | Reusable secret-scan + triaged cargo-audit helper; weekly full advisory report | workflow_call from `pr.yml` and `scheduled.yml` |
+| `nix.yml` | Reusable flake validation + maintained-system build helper, plus Cachix publication when requested | workflow_call from `pr.yml`, `main.yml`, and `scheduled.yml` |
 | `main.yml` | Main-branch publish and smoke checks | push to `main` |
-| `scheduled.yml` | Weekly broad checks: fork, security, Nix, and smoke | weekly schedule, manual dispatch |
-| `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
-| `governance-root.yml` | Governance-path audit gate: fails PRs that change protected governance files outside the recorded maintenance procedure (R07) | PR to `main` |
-| `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
+| `scheduled.yml` | Everything on a clock: weekly broad checks (Rust, security, Nix, smoke, metrics, coverage, performance), daily rail-invariant health check, weekly `flake.lock` bump PR | schedules, manual dispatch |
 | `release.yml` | Metadata-only GitHub release notes; rejects attached assets | tag push matching `v*` |
 
-All fork-owned workflows are linted by actionlint in `nix.yml` and the flake
-workflow-syntax check; `freebsd-smoke.yml` is the sole upstream exemption.
+All workflows are fork-owned and linted by actionlint in `nix.yml` and the
+flake workflow-syntax check.
 Reusable-workflow call sites are policy-checked by
 `scripts/check_reusable_workflow_calls.py`.
 
