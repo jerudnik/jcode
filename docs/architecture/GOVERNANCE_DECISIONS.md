@@ -1827,3 +1827,20 @@ tense, they are history, not contract. This entry is the correction of record.
 **Reopen trigger:** a real regression that one of the deleted gates would have
 caught, recurring more than once. That would justify a narrow, wired,
 product-focused successor — not resurrection of the meta-apparatus.
+
+## Maintenance window: PR #241 merged under the recorded procedure
+
+**2026-08-29.** PR #241 (the apparatus deletion wave recorded in the entry
+above) changed protected paths — the `justfile`, `scripts/preflight.sh`, and
+workflow files — so `Governance Root` stayed red by design while every other
+check was green, and the window procedure above was executed.
+
+The live ruleset was read and its required contexts matched the recorded
+contract before anything was touched. The window payload removed only the
+`Governance Root` context from the required status checks, the pull request
+was merged through the REST endpoint as merge commit `e0d4791c3`, and the
+writable contract was put back verbatim. A fresh read then matched the
+restore payload exactly after stripping response-only keys, the ruleset is
+`active` with empty bypass actors and both required contexts restored, and
+`scripts/fork-health.sh --live` reported every invariant green. The window
+was open for roughly four seconds and nothing else merged inside it.
