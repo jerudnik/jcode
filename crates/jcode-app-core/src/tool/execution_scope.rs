@@ -271,6 +271,19 @@ pub(crate) fn authorize_tool_call(
             authorize_optional_target(input, "path", tool_name, &boundary)?;
             authorize_optional_target(input, "file", tool_name, &boundary)?;
             authorize_optional_target(input, "file_path", tool_name, &boundary)?;
+            // Outline mode reads the file named by 'query', or by the first
+            // term, when 'file' is omitted. Those fields are path inputs
+            // there, not search patterns.
+            if input.get("mode").and_then(Value::as_str) == Some("outline") {
+                authorize_optional_target(input, "query", tool_name, &boundary)?;
+                if let Some(Value::String(term)) = input
+                    .get("terms")
+                    .and_then(Value::as_array)
+                    .and_then(|terms| terms.first())
+                {
+                    authorize_target(tool_name, &boundary, term)?;
+                }
+            }
         }
         "write" | "edit" | "multiedit" => {
             let target = required_string(input, "file_path", tool_name, &boundary)?;
@@ -655,5 +668,61 @@ mod tests {
         );
         assert_eq!(allowed.expect("spawn inside the boundary"), Some(boundary.clone()));
         assert_eq!(unrooted.expect("swarm call without a directory"), Some(boundary));
+    }
+
+    #[test]
+    fn scoped_agentgrep_outline_cannot_name_a_file_through_query_or_terms() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let inside = temp.path().join("inside");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&inside).expect("inside dir");
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        std::fs::write(outside.join("secret.rs"), "fn hidden() {}\n").expect("outside file");
+
+        let swarm_id = format!("scope-outline-{}", temp.path().display());
+        let session_id = format!("scope-outline-session-{}", temp.path().display());
+        let boundary = record_plan_execution_scope(&swarm_id, 1, &inside).expect("record scope");
+        bind_session_execution_scope(&session_id, &swarm_id, 1).expect("bind scope");
+
+        // Outline mode falls back to 'query', then 'terms[0]', as the file to
+        // read when 'file' is omitted. Both fallbacks are path inputs there.
+        let query_escape = authorize_tool_call(
+            &session_id,
+            "agentgrep",
+            &serde_json::json!({
+                "mode": "outline",
+                "query": outside.join("secret.rs"),
+            }),
+        )
+        .expect_err("outline query escape");
+        let term_escape = authorize_tool_call(
+            &session_id,
+            "agentgrep",
+            &serde_json::json!({
+                "mode": "outline",
+                "terms": [outside.join("secret.rs")],
+            }),
+        )
+        .expect_err("outline term escape");
+        // A search-mode regex that is not a path must stay allowed.
+        let search_query = authorize_tool_call(
+            &session_id,
+            "agentgrep",
+            &serde_json::json!({"query": "fn hidden"}),
+        );
+        clear_session_execution_scope(&session_id);
+
+        assert!(matches!(
+            &query_escape,
+            ExecutionScopeError::OutsideBoundary { .. }
+        ));
+        assert!(matches!(
+            &term_escape,
+            ExecutionScopeError::OutsideBoundary { .. }
+        ));
+        assert_eq!(
+            search_query.expect("search query stays allowed"),
+            Some(boundary)
+        );
     }
 }
