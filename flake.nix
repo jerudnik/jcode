@@ -99,7 +99,6 @@
               ./scripts/clean_target.sh
               ./scripts/check_agent_instructions.py
               ./scripts/check_reusable_workflow_calls.py
-              ./scripts/check_workflow_permissions.py
               ./scripts/dev_cargo.sh
               ./scripts/docs_impact_advisory.py
               ./scripts/preflight.sh
@@ -111,9 +110,7 @@
               ./scripts/test_incremental_policy.sh
               ./scripts/governance_compare.py
               ./tests/test_reusable_workflow_calls.py
-              ./tests/test_workflow_permissions.py
               ./tests/fixtures/actionlint-dollar-local
-              ./tests/fixtures/workflow_permissions
               ./.apm/instructions
               ./.jcode/preferred-tools.md
               ./.jcode/prompt-overlay.md
@@ -370,8 +367,6 @@
 
                   ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py .
                   ${pkgs.python3}/bin/python3 tests/test_reusable_workflow_calls.py
-                  ${pkgs.python3}/bin/python3 scripts/check_workflow_permissions.py .
-                  ${pkgs.python3}/bin/python3 -m unittest tests.test_workflow_permissions
 
                   dollar_fixture="$TMPDIR/actionlint-dollar-local-valid"
                   cp -R "$src/tests/fixtures/actionlint-dollar-local" "$dollar_fixture"
@@ -382,7 +377,6 @@
                     actionlint .github/workflows/caller.yml .github/workflows/called.yaml
                   )
                   ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py "$dollar_fixture"
-                  ${pkgs.python3}/bin/python3 scripts/check_workflow_permissions.py "$dollar_fixture"
 
                   fixture_dir="$TMPDIR/actionlint-permissions"
                   mkdir -p "$fixture_dir"

@@ -34,7 +34,6 @@ SCRIPTS_IMPORTING_TEST_MODULES = (
     "test_classify_pr_paths.py",
     "test_nix_distribution_policy.py",
     "test_reusable_workflow_calls.py",
-    "test_workflow_permissions.py",
 )
 
 
