@@ -1048,6 +1048,55 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
 }
 
 #[tokio::test]
+async fn update_member_status_delivers_long_completion_report_without_loss() {
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        "swarm-1".to_string(),
+        HashSet::from(["coord".to_string(), "worker".to_string()]),
+    )])));
+
+    let (coord, _coord_rx) = swarm_member("coord", "coordinator", false);
+    let coord_queue = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sessions: SessionAgents = Arc::new(RwLock::new(HashMap::new()));
+    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    register_session_interrupt_queue(&soft_interrupt_queues, "coord", coord_queue.clone()).await;
+    let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
+    worker.status = "running".to_string();
+    worker.report_back_to_session_id = Some("coord".to_string());
+    {
+        let mut members = swarm_members.write().await;
+        members.insert("coord".to_string(), coord);
+        members.insert("worker".to_string(), worker);
+    }
+
+    let report = format!("{}\nTAIL: all recommendations arrived.", "Δ".repeat(4_100));
+    update_member_status_with_report(
+        "worker",
+        "ready",
+        None,
+        Some(report.clone()),
+        &swarm_members,
+        &swarms_by_id,
+        Some(&sessions),
+        Some(&soft_interrupt_queues),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let pending = coord_queue.lock().expect("queue lock");
+    assert_eq!(pending.len(), 1);
+    assert!(
+        pending[0]
+            .content
+            .contains(&format!("\n\nReport:\n{report}\n\n")),
+        "the queued report was not delivered byte-for-byte"
+    );
+    assert!(!pending[0].content.contains("Report truncated by jcode"));
+}
+
+#[tokio::test]
 async fn update_member_status_skips_noop_broadcasts() {
     let swarm_members = Arc::new(RwLock::new(HashMap::new()));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(

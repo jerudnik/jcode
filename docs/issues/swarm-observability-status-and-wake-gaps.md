@@ -11,8 +11,8 @@ related:
 # Swarm worker lifecycle status disagrees across surfaces, and completion wakes can go missing
 
 Observed 2026-08-27 while coordinating the provider-identity audit (coordinator
-session `sheep`, worker `session_lizard_1787863669258_12b84aba3ada7f79`). Four
-distinct observability defects, all reproduced in one session:
+session `sheep`, worker `session_lizard_1787863669258_12b84aba3ada7f79`). Three
+observability defects remain from that session:
 
 ## 1. Missed completion wake
 
@@ -42,18 +42,8 @@ viewport, but it is indistinguishable from a real hang without reading
 evidence logs by hand. The viewport (or the member chip) should surface
 last-activity age so a live worker never looks dead.
 
-## 4. Report truncation mid-delivery
-
-Lizard's final report was cut mid-sentence by the delivery pipeline ("[Report
-truncated by jcode before delivery.]"), losing the tail of its fix
-recommendations. The tldr + external-memory pattern worked around it, but
-truncation of a structured final report silently drops exactly the content a
-coordinator needs. Related history: docs/issues/cross-session-content-leakage.md
-records the 240-char agent-to-agent lossiness of DMs; this is the report-path
-sibling.
-
 ## Suggested direction
 
 One lifecycle state machine owned by the server, consumed by await/list/UI;
 wake delivery acknowledged or retried; worker chips carry last-evidence-event
-age; report delivery either whole or explicitly chunked, never silently cut.
+age.

@@ -35,12 +35,14 @@ reported, because the two carry different weight.
 Detail lived in `docs/issues/swarm-dm-delivery-investigation.md` (deleted when
 its mechanism was resolved; `git log` retains it).
 
-Update 2026-08-19: items 1-3 are resolved. The notify delivery defect (item 1)
-was fixed in PR #194 (notify/broadcast/completion reports now queue for the
-recipient's next turn boundary); with that, the "delivered but never
-actionable" observations are explained. The 220-char swarm event-history stub
-is the only server-side archive of DM bodies, so long-body reconstruction from
-swarm context stays lossy by design.
+Items 1-3 are resolved. PR #194 made notify and broadcast messages queue their
+full bodies for the recipient's next turn boundary. Structured completion
+reports use the same queue and are no longer cut at 4,000 characters. The
+collapsed `tldr` is presentation metadata, not the receiving agent's only copy.
+
+The 220-character swarm event-history stub remains the only server-side archive
+of DM bodies. Reconstructing a long message later from swarm context therefore
+stays lossy by design; this change does not claim to repair that archive.
 
 ## Reported, not yet reproduced here
 

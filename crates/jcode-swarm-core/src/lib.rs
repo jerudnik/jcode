@@ -5,7 +5,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Cow;
 use std::path::PathBuf;
 
-pub const MAX_SWARM_COMPLETION_REPORT_CHARS: usize = 4000;
 pub const SWARM_COMPLETION_REPORT_MARKER: &str = "SWARM COMPLETION REPORT REQUIRED";
 
 /// Message/report bodies longer than this require a sender-provided `tldr`
@@ -678,20 +677,7 @@ pub fn format_structured_completion_report(
 
 pub fn normalize_completion_report(report: Option<String>) -> Option<String> {
     let report = report?.trim().to_string();
-    if report.is_empty() {
-        return None;
-    }
-
-    let char_count = report.chars().count();
-    if char_count <= MAX_SWARM_COMPLETION_REPORT_CHARS {
-        return Some(report);
-    }
-
-    let suffix = "\n\n[Report truncated by jcode before delivery.]";
-    let keep_chars = MAX_SWARM_COMPLETION_REPORT_CHARS.saturating_sub(suffix.chars().count());
-    let mut truncated: String = report.chars().take(keep_chars).collect();
-    truncated.push_str(suffix);
-    Some(truncated)
+    (!report.is_empty()).then_some(report)
 }
 
 fn completion_status_intro(name: &str, status: &str) -> String {
@@ -962,19 +948,14 @@ mod tests {
     }
 
     #[test]
-    fn completion_report_normalization_trims_and_truncates() {
+    fn completion_report_normalization_trims_and_preserves_long_reports() {
         assert_eq!(
             normalize_completion_report(Some("  done  ".to_string())),
             Some("done".to_string())
         );
         assert_eq!(normalize_completion_report(Some("   ".to_string())), None);
-        let long = "x".repeat(MAX_SWARM_COMPLETION_REPORT_CHARS + 100);
-        let normalized = normalize_completion_report(Some(long)).unwrap();
-        assert_eq!(
-            normalized.chars().count(),
-            MAX_SWARM_COMPLETION_REPORT_CHARS
-        );
-        assert!(normalized.ends_with("[Report truncated by jcode before delivery.]"));
+        let long = format!("{}\nTAIL: all recommendations arrived.", "Δ".repeat(4_100));
+        assert_eq!(normalize_completion_report(Some(long.clone())), Some(long));
     }
 
     #[test]
