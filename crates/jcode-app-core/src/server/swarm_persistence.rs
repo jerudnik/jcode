@@ -565,15 +565,12 @@ fn recover_member_status(
 
     // Done headless members finished their work before the reload. Nothing
     // in-flight was lost and their completion report remains available.
-    if is_headless
-        && !matches!(
-            status,
-            SwarmLifecycleStatus::Completed
-                | SwarmLifecycleStatus::Done
-                | SwarmLifecycleStatus::Failed
-                | SwarmLifecycleStatus::Stopped
-        )
-    {
+    // Ask the state machine rather than listing status constants: several old
+    // names now share one state (`Completed` and `Done` are both `Succeeded`),
+    // so an alias list reads as if it covers more than it does and leaves arms
+    // the compiler can prove dead. `is_terminal` also covers `Lost`, which was
+    // missing here and is already the state this branch would assign.
+    if is_headless && !status.is_terminal() {
         return (
             SwarmLifecycleStatus::Crashed,
             append_recovery_detail(detail, "headless session did not survive reload"),
