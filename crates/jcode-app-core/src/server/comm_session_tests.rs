@@ -188,6 +188,7 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
             )]),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 

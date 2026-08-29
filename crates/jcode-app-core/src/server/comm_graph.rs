@@ -8,69 +8,15 @@ use super::{
 use crate::protocol::{NotificationType, ServerEvent, TaskGraphNodeSpec};
 use jcode_plan::bridge::{apply_task_graph, parse_kind, to_task_graph};
 use jcode_plan::dag::{
-    self, BudgetViolation, DagError, GraphBudget, HandoffArtifact, NodeSpec, NodeStatus, TaskGraph,
+    self, BudgetViolation, DagError, GraphBudget, HandoffArtifact, NodeSpec, NodeStatus,
+    PlanSafetyLedger, PlanSafetyPolicy, PlanSafetyStatus, TaskGraph,
 };
-use jcode_plan::{NodeMeta, SwarmTaskProgress};
-use serde::{Deserialize, Serialize};
+use jcode_plan::NodeMeta;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::sync::{RwLock, broadcast};
-
-const PLAN_SAFETY_PROGRESS_KEY: &str = dag::PLAN_SAFETY_STATUS_META_ID;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct PlanSafetyPolicy {
-    max_nodes: usize,
-    max_lineage_depth: usize,
-    max_gate_injections_per_gate: usize,
-    max_wall_clock_ms: u64,
-}
-
-impl PlanSafetyPolicy {
-    fn configured(plan: &VersionedPlan) -> Self {
-        let agents = &crate::config::config().agents;
-        Self {
-            max_nodes: plan.max_nodes.unwrap_or(agents.swarm_max_graph_nodes),
-            max_lineage_depth: agents.swarm_max_graph_lineage_depth,
-            max_gate_injections_per_gate: agents.swarm_max_gate_injections_per_gate,
-            max_wall_clock_ms: agents.swarm_max_graph_wall_clock_secs.saturating_mul(1_000),
-        }
-    }
-
-    fn apply_to(&self, graph: &mut TaskGraph) {
-        graph.max_nodes = Some(self.max_nodes);
-        graph.max_lineage_depth = self.max_lineage_depth;
-        graph.max_gate_injections_per_gate = self.max_gate_injections_per_gate;
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum PlanSafetyStatus {
-    Running,
-    PausedBudgetExceeded,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct PlanSafetyLedger {
-    policy: PlanSafetyPolicy,
-    started_at_unix_ms: u64,
-    status: PlanSafetyStatus,
-    pause: Option<BudgetViolation>,
-}
-
-impl PlanSafetyLedger {
-    fn new(plan: &VersionedPlan, now_unix_ms: u64) -> Self {
-        Self {
-            policy: PlanSafetyPolicy::configured(plan),
-            started_at_unix_ms: now_unix_ms,
-            status: PlanSafetyStatus::Running,
-            pause: None,
-        }
-    }
-}
 
 enum GraphMutationResult<T> {
     Applied(T),
@@ -78,7 +24,7 @@ enum GraphMutationResult<T> {
     Paused(BudgetViolation),
 }
 
-fn unix_now_ms() -> u64 {
+pub(super) fn unix_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -86,56 +32,30 @@ fn unix_now_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-fn load_safety_ledger(plan: &VersionedPlan, now_unix_ms: u64) -> PlanSafetyLedger {
-    let Some(json) = plan
-        .task_progress
-        .get(PLAN_SAFETY_PROGRESS_KEY)
-        .and_then(|progress| progress.checkpoint_summary.as_deref())
-    else {
-        return PlanSafetyLedger::new(plan, now_unix_ms);
-    };
-
-    match serde_json::from_str(json) {
-        Ok(ledger) => ledger,
-        Err(error) => {
-            // A ledger we cannot read is the one case where falling back is
-            // dangerous: starting fresh zeroes the spend the budget exists to
-            // cap, so a plan that already overran could quietly buy itself a
-            // second full allowance. Say so rather than letting the reset look
-            // like an ordinary first run.
-            eprintln!(
-                "swarm budget: plan safety ledger unreadable ({error}); restarting budget \
-                 accounting from zero, so prior spend is no longer counted"
-            );
-            PlanSafetyLedger::new(plan, now_unix_ms)
-        }
+/// Resolve the budget a new plan runs under from current configuration.
+pub(super) fn configured_policy(plan: &VersionedPlan) -> PlanSafetyPolicy {
+    let agents = &crate::config::config().agents;
+    PlanSafetyPolicy {
+        max_nodes: plan.max_nodes.unwrap_or(agents.swarm_max_graph_nodes),
+        max_lineage_depth: agents.swarm_max_graph_lineage_depth,
+        max_gate_injections_per_gate: agents.swarm_max_gate_injections_per_gate,
+        max_wall_clock_ms: agents.swarm_max_graph_wall_clock_secs.saturating_mul(1_000),
     }
 }
 
-fn store_safety_ledger(plan: &mut VersionedPlan, ledger: &PlanSafetyLedger) {
-    let json = match serde_json::to_string(ledger) {
-        Ok(json) => json,
-        Err(error) => {
-            // Every field is a plain owned scalar, so this should be
-            // unreachable. Refuse to panic over it anyway: an unwritten ledger
-            // degrades to re-deriving the budget on the next tick, which is
-            // survivable, whereas a panic takes down the handler that enforces
-            // the budget in the first place.
-            eprintln!(
-                "swarm budget: could not serialize plan safety ledger ({error}); keeping the \
-                 previous ledger"
-            );
-            return;
-        }
-    };
-    plan.task_progress.insert(
-        PLAN_SAFETY_PROGRESS_KEY.to_string(),
-        SwarmTaskProgress {
-            started_at_unix_ms: Some(ledger.started_at_unix_ms),
-            checkpoint_summary: Some(json),
-            ..SwarmTaskProgress::default()
-        },
-    );
+/// Read the plan's ledger, starting one under current configuration if the plan
+/// predates budgets. A missing ledger is an ordinary first run, not an error:
+/// refusing to proceed would strand every plan created before this feature.
+fn load_safety_ledger(plan: &VersionedPlan, now_unix_ms: u64) -> PlanSafetyLedger {
+    plan.safety_ledger
+        .clone()
+        .unwrap_or_else(|| PlanSafetyLedger::started(configured_policy(plan), now_unix_ms))
+}
+
+pub(super) fn store_safety_ledger(plan: &mut VersionedPlan, ledger: &PlanSafetyLedger) {
+    plan.safety_ledger = Some(ledger.clone());
+    // Mirror the wall-clock window into node metadata as well: that is the
+    // surface `run_plan` reads to decide whether a graph still has time left.
     plan.node_meta.insert(
         dag::PLAN_SAFETY_STATUS_META_ID.to_string(),
         NodeMeta {
@@ -256,8 +176,66 @@ fn budget_pause_message(violation: &BudgetViolation) -> String {
     )
 }
 
+/// Give a plan a budget clock if it does not have one yet.
+///
+/// `run_plan` refuses to drive a plan with no persisted ledger, and deriving
+/// one at read time would restart the clock on every call. So every path that
+/// creates or updates a plan persists one exactly once, here.
+pub(super) fn ensure_safety_ledger(plan: &mut VersionedPlan, now_unix_ms: u64) {
+    if plan.safety_ledger.is_some() {
+        return;
+    }
+    let ledger = PlanSafetyLedger::started(configured_policy(plan), now_unix_ms);
+    store_safety_ledger(plan, &ledger);
+}
+
+/// Refusal for the coordinator's direct `plan.items` replacement.
+///
+/// That path rewrites the item list wholesale instead of growing a graph, so it
+/// never reaches `mutate_plan_with_budget` and inherited none of its stops. That
+/// made the hard pause bypassable: a paused coordinator could re-propose an
+/// unbounded list and keep dispatching, because assignment reads `plan.items`
+/// without consulting the ledger. Apply the same order of stops here.
+pub(super) fn direct_plan_update_refusal(
+    plan: &mut VersionedPlan,
+    incoming_items: usize,
+    now_unix_ms: u64,
+) -> Option<String> {
+    ensure_safety_ledger(plan, now_unix_ms);
+    let ledger = load_safety_ledger(plan, now_unix_ms);
+    if ledger.status == PlanSafetyStatus::PausedBudgetExceeded {
+        return Some(
+            ledger
+                .pause
+                .as_ref()
+                .map(budget_pause_message)
+                .unwrap_or_else(|| {
+                    "task graph is paused because a hard budget was exceeded".into()
+                }),
+        );
+    }
+    if plan.frozen {
+        return Some(
+            "Plan is frozen. Existing assigned work may complete, but the scheduler rejects new plan items until the coordinator unfreezes it."
+                .to_string(),
+        );
+    }
+    if let Some(violation) = wall_clock_violation(&ledger, now_unix_ms) {
+        let message = budget_pause_message(&violation);
+        pause_for_budget(plan, ledger, violation);
+        return Some(message);
+    }
+    let max_nodes = ledger.policy.max_nodes;
+    if incoming_items > max_nodes {
+        return Some(format!(
+            "plan node budget is {max_nodes}; this update proposes {incoming_items} items. Split the work across graphs or raise `agents.swarm_max_graph_nodes`."
+        ));
+    }
+    None
+}
+
 fn initialize_safety_ledger(plan: &mut VersionedPlan, now_unix_ms: u64) -> PlanSafetyLedger {
-    let ledger = PlanSafetyLedger::new(plan, now_unix_ms);
+    let ledger = PlanSafetyLedger::started(configured_policy(plan), now_unix_ms);
     plan.max_nodes = Some(ledger.policy.max_nodes);
     store_safety_ledger(plan, &ledger);
     ledger
@@ -1106,11 +1084,76 @@ mod tests {
     }
 
     #[test]
+    fn direct_plan_update_is_refused_while_paused() {
+        let mut plan = VersionedPlan::new();
+        let mut ledger = PlanSafetyLedger::started(configured_policy(&plan), 100);
+        ledger.status = PlanSafetyStatus::PausedBudgetExceeded;
+        ledger.pause = Some(BudgetViolation {
+            budget: GraphBudget::Nodes,
+            limit: 1,
+            observed: 2,
+            operation: "seeding".to_string(),
+        });
+        store_safety_ledger(&mut plan, &ledger);
+
+        let refusal = direct_plan_update_refusal(&mut plan, 1, 200);
+
+        assert!(
+            refusal.is_some_and(|message| message.contains("node count")),
+            "a paused plan must refuse a direct item replacement"
+        );
+    }
+
+    #[test]
+    fn direct_plan_update_is_refused_while_frozen() {
+        let mut plan = VersionedPlan::new();
+        ensure_safety_ledger(&mut plan, 100);
+        plan.frozen = true;
+
+        let refusal = direct_plan_update_refusal(&mut plan, 1, 200);
+
+        assert!(
+            refusal.is_some_and(|message| message.contains("frozen")),
+            "a frozen plan must refuse a direct item replacement"
+        );
+    }
+
+    #[test]
+    fn direct_plan_update_respects_the_node_budget() {
+        let mut plan = VersionedPlan::new();
+        plan.max_nodes = Some(2);
+        ensure_safety_ledger(&mut plan, 100);
+
+        assert!(
+            direct_plan_update_refusal(&mut plan, 2, 200).is_none(),
+            "a plan at its budget is still proposable"
+        );
+        assert!(
+            direct_plan_update_refusal(&mut plan, 3, 200)
+                .is_some_and(|message| message.contains("node budget is 2")),
+            "an over-budget item list must be refused"
+        );
+    }
+
+    #[test]
+    fn direct_plan_update_mints_a_ledger_for_a_budgetless_plan() {
+        let mut plan = VersionedPlan::new();
+        assert!(plan.safety_ledger.is_none());
+
+        assert!(direct_plan_update_refusal(&mut plan, 1, 100).is_none());
+
+        assert!(
+            plan.safety_ledger.is_some(),
+            "a plan proposed directly still needs a budget clock for run_plan"
+        );
+    }
+
+    #[test]
     fn seed_budget_overrun_pauses_without_replacing_the_graph() {
         let mut plan = VersionedPlan::new();
         let mut replacement = VersionedPlan::new();
         replacement.max_nodes = Some(1);
-        let ledger = PlanSafetyLedger::new(&replacement, 100);
+        let ledger = PlanSafetyLedger::started(configured_policy(&replacement), 100);
         let specs = vec![
             NodeSpec::new("one", "one", NodeKind::Explore),
             NodeSpec::new("two", "two", NodeKind::Explore),

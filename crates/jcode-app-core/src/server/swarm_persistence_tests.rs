@@ -85,6 +85,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
             node_meta: HashMap::new(),
             max_nodes: Some(64),
             frozen: true,
+            safety_ledger: None,
         },
     );
     let coordinators = HashMap::from([("swarm-alpha".to_string(), "session-2".to_string())]);
@@ -405,6 +406,7 @@ fn remove_swarm_state_deletes_persisted_snapshot() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )]);
     persist_swarm_state("swarm-beta", plans.get("swarm-beta"), None, &[], 0);
@@ -475,6 +477,7 @@ fn deep_plan_mode_and_node_meta_round_trip() {
         node_meta,
         max_nodes: Some(96),
         frozen: true,
+            safety_ledger: None,
     };
 
     persist_swarm_state("swarm-deep", Some(&plan), None, &[], 0);

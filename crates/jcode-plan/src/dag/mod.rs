@@ -440,6 +440,61 @@ pub struct BudgetViolation {
     pub operation: String,
 }
 
+/// The growth limits a plan is held to for its whole life.
+///
+/// Resolved once from configuration and then carried on the plan, so a running
+/// plan keeps the budget it started under even if the process is reconfigured
+/// underneath it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanSafetyPolicy {
+    pub max_nodes: usize,
+    pub max_lineage_depth: usize,
+    pub max_gate_injections_per_gate: usize,
+    pub max_wall_clock_ms: u64,
+}
+
+impl PlanSafetyPolicy {
+    pub fn apply_to(&self, graph: &mut TaskGraph) {
+        graph.max_nodes = Some(self.max_nodes);
+        graph.max_lineage_depth = self.max_lineage_depth;
+        graph.max_gate_injections_per_gate = self.max_gate_injections_per_gate;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSafetyStatus {
+    Running,
+    PausedBudgetExceeded,
+}
+
+/// A plan's budget accounting: the limits it runs under, when its clock
+/// started, and whether a budget has already stopped it.
+///
+/// This lives in its own field rather than in `task_progress` because the two
+/// have opposite lifetimes. Per-node progress is stale the moment the graph is
+/// replaced and is cleared then; the ledger is plan-level and must outlive any
+/// single graph, or a plan could be handed a fresh allowance simply by being
+/// reseeded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanSafetyLedger {
+    pub policy: PlanSafetyPolicy,
+    pub started_at_unix_ms: u64,
+    pub status: PlanSafetyStatus,
+    pub pause: Option<BudgetViolation>,
+}
+
+impl PlanSafetyLedger {
+    pub fn started(policy: PlanSafetyPolicy, now_unix_ms: u64) -> Self {
+        Self {
+            policy,
+            started_at_unix_ms: now_unix_ms,
+            status: PlanSafetyStatus::Running,
+            pause: None,
+        }
+    }
+}
+
 impl NodeSpec {
     pub fn new(id: impl Into<String>, content: impl Into<String>, kind: NodeKind) -> Self {
         Self {

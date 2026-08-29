@@ -61,14 +61,24 @@ fn run_plan_progress_message(
     message
 }
 
+/// Read the plan's wall-clock window: when its budget clock started and how
+/// long it may run.
+///
+/// A plan with no persisted safety ledger predates budgets or was seeded
+/// through a path that does not write one. Treat that as a plan starting its
+/// clock now under current configuration rather than refusing to schedule it:
+/// the budget exists to stop runaway growth, and declining to run a plan at all
+/// is a strictly worse failure than running it under a freshly derived limit.
 fn graph_wall_clock(summary: &PlanGraphStatus) -> Result<(u64, u64)> {
+    // Fail closed. Deriving a fresh window here instead would restart the clock
+    // on every call, so a graph missing its ledger could never age out at all.
+    // A seed path that does not persist a ledger is the bug to fix; refusing is
+    // the safe response to one that slips through.
     let raw = summary
         .phases_by_id
         .get(jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID)
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "run_plan refused to schedule a graph without a persisted safety ledger"
-            )
+            anyhow::anyhow!("run_plan refused to schedule a graph without a persisted safety ledger")
         })?;
     let (started, limit) = raw.split_once(':').ok_or_else(|| {
         anyhow::anyhow!("run_plan refused a graph with an invalid persisted safety ledger")
