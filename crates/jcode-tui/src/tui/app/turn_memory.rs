@@ -48,6 +48,16 @@ impl App {
             &mut split,
             self.provider.reasoning_effort().as_deref(),
         );
+        if let Err(error) = skills.ensure_valid() {
+            if !split.dynamic_part.is_empty() {
+                split.dynamic_part.push_str("\n\n");
+            }
+            split.dynamic_part.push_str("# Skill Registry Error\n\n");
+            split.dynamic_part.push_str(&error.to_string());
+            split.dynamic_part.push_str(
+                "\n\nThe conflicting skill names are disabled. Remove or rename every duplicate before invoking them.",
+            );
+        }
         self.context_info = context_info;
         split
     }

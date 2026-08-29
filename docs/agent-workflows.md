@@ -106,12 +106,13 @@ make opposite tooling choices (hook: PATH tools, degrade with a hint;
 
 This repository defaults to the TUI target. In a self-development session:
 
-1. Use `selfdev build` for a coordinated build.
-2. Use `selfdev build-reload` when the new binary should replace the running binary immediately.
-3. Continue automatically after reload.
-4. Confirm the running revision or behavior. Use `debug_socket` testers and frames for TUI changes.
+1. Run `selfdev status` to confirm the repository, mode, and published binary.
+2. Use `selfdev build` for a coordinated build.
+3. Use `selfdev build-reload` when the successful build should replace the running binary immediately.
+4. Continue automatically after reload.
+5. Confirm the running revision or behavior. Use `debug_socket` testers and frames for TUI changes.
 
-Use direct local Cargo builds only when `selfdev` is unavailable or the documented fallback is required. Desktop builds and desktop UI debugging are reserved for desktop-specific tasks.
+Outside a self-development session, the tool exposes the `enter`, `setup`, `reload`, `status`, and `find-config` on-ramp actions but not build actions. Use direct local Cargo builds only when `selfdev` is unavailable or the documented fallback is required. Desktop builds and desktop UI debugging are reserved for desktop-specific tasks.
 
 ## Nix, remote builders, and caches
 
@@ -237,13 +238,35 @@ APM is the source of truth for generated agent surfaces:
 - Do not hand-edit generated `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or client rule directories.
 - Run validation and preview before regeneration when scope or placement changes.
 
-APM is not part of the pinned development shell. If `apm` is absent, prefix the commands below with `nix shell nixpkgs#apm-cli --command`.
+APM is not part of the pinned development shell. Use APM 0.28.0 or newer and
+confirm with `apm --version` before changing the tracked lockfile. If `apm` is
+absent, enter an environment that provides the reviewed version rather than
+silently accepting an older package.
 
 ```bash
 apm compile --validate
 apm compile --dry-run
 apm compile
+apm install
+apm install --frozen
+apm audit --ci --no-fail-fast
 ```
+
+Use normal install to refresh `apm.lock.yaml`, frozen install to prove exact
+restoration from that lock, and CI audit to check lock consistency and deployed
+file drift. Jcode rejects duplicate declared skill names across all discovery
+paths; consolidate or rename a collision instead of depending on path order.
+
+### Governed migration blocker
+
+The tracked lock remains the pre-migration lock until the governed local
+`.apm/skills/plain-language` promotion candidate is approved for cleanup. APM
+0.28 root-project integration deploys every local skill; neither `includes` nor
+`--skill` filters root `.apm` content. Refreshing the lock before that retirement
+would project a second `plain-language` beside the shared canonical skill, so it
+must not be treated as a valid frozen-restoration result. Preserve the source in
+place and complete the approval gate rather than adding an override or hidden
+exclusion.
 
 Generated files are intentionally ignored and local. After compilation, use Jcode prompt diagnostics such as `/info` to confirm that project `AGENTS.md`, `.jcode/preferred-tools.md`, and `.jcode/prompt-overlay.md` were loaded.
 
