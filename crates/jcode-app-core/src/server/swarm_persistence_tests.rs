@@ -1079,3 +1079,52 @@ fn empty_persist_dissolution_removes_backup_and_cannot_resurrect() {
         "a dissolved swarm must not be restored on the next load"
     );
 }
+
+#[test]
+fn reload_recovery_reads_a_persisted_status_by_state() {
+    // A status read back from disk carries the epoch, revision and timestamp
+    // it was last written with. Recovery must classify it by lifecycle state;
+    // comparing whole values against the zero-valued aliases matches only a
+    // freshly constructed constant, so every persisted member would fall
+    // through to the crashed branch.
+    let persisted = |state| jcode_swarm_core::SwarmLifecycleStatus {
+        state,
+        assignment_epoch: 4,
+        revision: 9,
+        reason: None,
+        updated_at_unix_ms: 1_787_900_000_000,
+    };
+    use jcode_swarm_core::MemberLifecycleState as State;
+    const RECOVERED_AT: u64 = 1_787_903_000_000;
+
+    let (status, detail) = recover_member_status(persisted(State::Succeeded), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Succeeded, "{detail:?}");
+    assert_eq!(status.assignment_epoch, 4, "recovery keeps the assignment");
+
+    let (status, _) = recover_member_status(persisted(State::Failed), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Failed);
+
+    let (status, detail) = recover_member_status(persisted(State::Running), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Lost);
+    assert!(
+        detail.unwrap_or_default().contains("while running"),
+        "a member running at reload is reported as lost in flight"
+    );
+    assert_eq!(
+        status.assignment_epoch, 4,
+        "the assignment epoch survives recovery so a late report is still recognised as stale"
+    );
+    assert_eq!(status.revision, 10, "recovery is a lifecycle transition");
+    assert_eq!(status.updated_at_unix_ms, RECOVERED_AT);
+
+    let (status, detail) = recover_member_status(persisted(State::Ready), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Stopped);
+    assert!(detail.unwrap_or_default().contains("idle worker"));
+
+    let (status, _) = recover_member_status(persisted(State::Starting), None, true, RECOVERED_AT);
+    assert_eq!(
+        status.state,
+        State::Lost,
+        "a nonterminal headless member did not survive the reload"
+    );
+}
