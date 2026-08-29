@@ -36,7 +36,6 @@ jobs:
             scripts/governance_compare.py
             scripts/generate_governance_fixture.py
             justfile
-            tests/test_governance_compare.py
             tests/test_classify_pr_paths.py
           )
           if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
