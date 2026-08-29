@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use std::sync::Arc;
 
 #[test]
 fn test_normalize_flat_params() {
@@ -140,4 +141,72 @@ fn test_schema_keeps_flat_generic_subcall_shape() {
         Some(1)
     );
     assert!(schema["properties"]["tool_calls"]["items"]["oneOf"].is_null());
+}
+
+#[tokio::test]
+async fn rejects_two_edits_to_the_same_file_before_running_either() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let file_path = temp.path().join("same-file.txt");
+    tokio::fs::write(&file_path, "first second\n")
+        .await
+        .expect("write fixture");
+
+    let registry = Registry::empty();
+    let batch = BatchTool::new(registry.clone());
+    {
+        let mut tools = registry.tools.write().await;
+        tools.insert(
+            "edit".to_string(),
+            Arc::new(super::super::edit::EditTool::new()),
+        );
+        tools.insert("batch".to_string(), Arc::new(batch));
+    }
+
+    let ctx = ToolContext {
+        session_id: "test-batch-same-file-edit".to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: crate::tool::ToolExecutionMode::Direct,
+    };
+
+    let error = registry
+        .execute(
+            "batch",
+            json!({
+                "tool_calls": [
+                    {
+                        "tool": "edit",
+                        "file_path": file_path,
+                        "old_string": "first",
+                        "new_string": "FIRST"
+                    },
+                    {
+                        "tool": "edit",
+                        "file_path": file_path,
+                        "old_string": "second",
+                        "new_string": "SECOND"
+                    }
+                ]
+            }),
+            ctx,
+        )
+        .await
+        .expect_err("same-file mutations should be rejected before execution");
+
+    assert!(
+        error
+            .to_string()
+            .contains("Cannot batch multiple mutating calls for the same file"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read fixture"),
+        "first second\n",
+        "a rejected batch must not run either edit"
+    );
 }

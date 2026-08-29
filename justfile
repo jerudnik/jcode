@@ -61,3 +61,41 @@ release-check:
 lint-docs:
     python3 -I scripts/lint_docs.py
     python3 -I scripts/check_docs_references.py
+
+# Pre-PR gate: run the legs PR Gate will route to, locally, BEFORE `gh pr
+# create`. Added after PR #215 went red three times on locally-catchable
+# failures (a docs ratchet and two full-test-only integration tests).
+#
+# Reuses CI's own path classifier so the tier cannot drift from the route CI
+# will take. Never passes --update to the docs-reference checker: --update is a
+# baseline-maintenance mode that returns success BEFORE evaluating any finding.
+# Strictness contrast with the pre-commit hook layer is deliberate: the hook
+# uses PATH tools and degrades; this recipe pins through nix and fails closed
+# (the hook layer's issue records the same contrast from its side).
+#
+# Timings (warm, remote builder): docs-only PR ~10s; non-product PR ~5-10 min;
+# product-impacting adds the CI full-test mirror (~5-20 min, cache-dependent).
+# If the fleet builder is not this host's platform, run the mirror leg as
+# `JCODE_REMOTE_CARGO=0 scripts/ci_local.sh` (the e2e leg needs a LOCAL
+# release binary; remote --target builds skip binary sync-back).
+pre-pr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base="$(git rev-parse --verify refs/heads/main)"
+    nix shell nixpkgs#vale nixpkgs#python3 --command just lint-docs
+    route="$(python3 -I scripts/classify_pr_paths.py --base "$base" --head HEAD)"
+    printf '%s\n' "$route"
+    if grep -q '^docs_only=true$' <<<"$route"; then
+      echo "pre-pr: docs-only route; heavy legs skipped."
+      exit 0
+    fi
+    # --no-branch-handoff: that gate inventories OTHER local branches, which on
+    # a shared machine blocks PR creation on unrelated in-progress work.
+    scripts/preflight.sh --no-branch-handoff
+    nix shell nixpkgs#python3 --command just check
+    just test
+    if grep -q '^product_impacting=true$' <<<"$route"; then
+      echo "pre-pr: product-impacting route; running the CI full-test mirror."
+      scripts/ci_local.sh
+    fi
+    echo "pre-pr: all routed gates passed."

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 const MAX_PARALLEL: usize = 10;
 
@@ -147,6 +148,19 @@ fn normalize_batch_input(mut input: Value) -> Value {
     input
 }
 
+fn mutating_file_path(tool_name: &str, parameters: &Value, ctx: &ToolContext) -> Option<PathBuf> {
+    if !matches!(tool_name, "edit" | "multiedit" | "write") {
+        return None;
+    }
+
+    let file_path = parameters.get("file_path")?.as_str()?;
+    Some(
+        ctx.resolve_path(Path::new(file_path))
+            .components()
+            .collect(),
+    )
+}
+
 #[async_trait]
 impl Tool for BatchTool {
     fn name(&self) -> &str {
@@ -196,6 +210,25 @@ impl Tool for BatchTool {
                 (i, tool_name, parameters)
             })
             .collect();
+
+        let mut mutation_paths: HashMap<PathBuf, (usize, String)> = HashMap::new();
+        for (i, tool_name, parameters) in &subcalls {
+            let Some(path) = mutating_file_path(tool_name, parameters, &ctx) else {
+                continue;
+            };
+            if let Some((previous_i, previous_tool)) =
+                mutation_paths.insert(path.clone(), (*i, tool_name.clone()))
+            {
+                return Err(anyhow::anyhow!(
+                    "Cannot batch multiple mutating calls for the same file '{}': call {} ({}) and call {} ({})",
+                    path.display(),
+                    previous_i + 1,
+                    previous_tool,
+                    i + 1,
+                    tool_name
+                ));
+            }
+        }
 
         let mut running: HashMap<usize, ToolCall> = subcalls
             .iter()
