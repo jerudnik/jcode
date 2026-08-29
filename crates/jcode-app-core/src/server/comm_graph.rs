@@ -189,6 +189,51 @@ pub(super) fn ensure_safety_ledger(plan: &mut VersionedPlan, now_unix_ms: u64) {
     store_safety_ledger(plan, &ledger);
 }
 
+/// Refusal for the coordinator's direct `plan.items` replacement.
+///
+/// That path rewrites the item list wholesale instead of growing a graph, so it
+/// never reaches `mutate_plan_with_budget` and inherited none of its stops. That
+/// made the hard pause bypassable: a paused coordinator could re-propose an
+/// unbounded list and keep dispatching, because assignment reads `plan.items`
+/// without consulting the ledger. Apply the same order of stops here.
+pub(super) fn direct_plan_update_refusal(
+    plan: &mut VersionedPlan,
+    incoming_items: usize,
+    now_unix_ms: u64,
+) -> Option<String> {
+    ensure_safety_ledger(plan, now_unix_ms);
+    let ledger = load_safety_ledger(plan, now_unix_ms);
+    if ledger.status == PlanSafetyStatus::PausedBudgetExceeded {
+        return Some(
+            ledger
+                .pause
+                .as_ref()
+                .map(budget_pause_message)
+                .unwrap_or_else(|| {
+                    "task graph is paused because a hard budget was exceeded".into()
+                }),
+        );
+    }
+    if plan.frozen {
+        return Some(
+            "Plan is frozen. Existing assigned work may complete, but the scheduler rejects new plan items until the coordinator unfreezes it."
+                .to_string(),
+        );
+    }
+    if let Some(violation) = wall_clock_violation(&ledger, now_unix_ms) {
+        let message = budget_pause_message(&violation);
+        pause_for_budget(plan, ledger, violation);
+        return Some(message);
+    }
+    let max_nodes = ledger.policy.max_nodes;
+    if incoming_items > max_nodes {
+        return Some(format!(
+            "plan node budget is {max_nodes}; this update proposes {incoming_items} items. Split the work across graphs or raise `agents.swarm_max_graph_nodes`."
+        ));
+    }
+    None
+}
+
 fn initialize_safety_ledger(plan: &mut VersionedPlan, now_unix_ms: u64) -> PlanSafetyLedger {
     let ledger = PlanSafetyLedger::started(configured_policy(plan), now_unix_ms);
     plan.max_nodes = Some(ledger.policy.max_nodes);
@@ -1036,6 +1081,71 @@ mod tests {
         })
         .await
         .unwrap_or(false)
+    }
+
+    #[test]
+    fn direct_plan_update_is_refused_while_paused() {
+        let mut plan = VersionedPlan::new();
+        let mut ledger = PlanSafetyLedger::started(configured_policy(&plan), 100);
+        ledger.status = PlanSafetyStatus::PausedBudgetExceeded;
+        ledger.pause = Some(BudgetViolation {
+            budget: GraphBudget::Nodes,
+            limit: 1,
+            observed: 2,
+            operation: "seeding".to_string(),
+        });
+        store_safety_ledger(&mut plan, &ledger);
+
+        let refusal = direct_plan_update_refusal(&mut plan, 1, 200);
+
+        assert!(
+            refusal.is_some_and(|message| message.contains("node count")),
+            "a paused plan must refuse a direct item replacement"
+        );
+    }
+
+    #[test]
+    fn direct_plan_update_is_refused_while_frozen() {
+        let mut plan = VersionedPlan::new();
+        ensure_safety_ledger(&mut plan, 100);
+        plan.frozen = true;
+
+        let refusal = direct_plan_update_refusal(&mut plan, 1, 200);
+
+        assert!(
+            refusal.is_some_and(|message| message.contains("frozen")),
+            "a frozen plan must refuse a direct item replacement"
+        );
+    }
+
+    #[test]
+    fn direct_plan_update_respects_the_node_budget() {
+        let mut plan = VersionedPlan::new();
+        plan.max_nodes = Some(2);
+        ensure_safety_ledger(&mut plan, 100);
+
+        assert!(
+            direct_plan_update_refusal(&mut plan, 2, 200).is_none(),
+            "a plan at its budget is still proposable"
+        );
+        assert!(
+            direct_plan_update_refusal(&mut plan, 3, 200)
+                .is_some_and(|message| message.contains("node budget is 2")),
+            "an over-budget item list must be refused"
+        );
+    }
+
+    #[test]
+    fn direct_plan_update_mints_a_ledger_for_a_budgetless_plan() {
+        let mut plan = VersionedPlan::new();
+        assert!(plan.safety_ledger.is_none());
+
+        assert!(direct_plan_update_refusal(&mut plan, 1, 100).is_none());
+
+        assert!(
+            plan.safety_ledger.is_some(),
+            "a plan proposed directly still needs a budget clock for run_plan"
+        );
     }
 
     #[test]
