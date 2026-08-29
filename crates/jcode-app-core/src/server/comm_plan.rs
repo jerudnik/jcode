@@ -126,6 +126,10 @@ pub(super) async fn handle_comm_propose_plan(
             }
             plan.items = items.clone();
             plan.version += 1;
+            // A plan proposed directly (not seeded as a DAG) still needs a
+            // budget clock, or `run_plan` will fail closed when it tries to
+            // drive it.
+            super::comm_graph::ensure_safety_ledger(plan, super::comm_graph::unix_now_ms());
             (plan.version, plan.participants.clone())
         };
 

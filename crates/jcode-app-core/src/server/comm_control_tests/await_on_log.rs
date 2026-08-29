@@ -52,6 +52,7 @@ async fn w2_await_wakes_on_light_auto_complete_without_broadcast_nudge() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -190,6 +191,7 @@ async fn w2_await_wakes_on_salvage_of_departed_owner_without_broadcast_nudge() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -479,6 +481,7 @@ async fn w2_satisfied_await_flags_low_confidence_evidence() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);

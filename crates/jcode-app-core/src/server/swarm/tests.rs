@@ -278,6 +278,7 @@ async fn broadcast_swarm_plan_with_previous_includes_newly_ready_ids() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (worker, mut worker_rx) = swarm_member("worker", "agent", false);
@@ -369,6 +370,7 @@ async fn swarm_plan_broadcast_versions_can_invert_on_one_member_channel() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (worker, mut worker_rx) = swarm_member("worker", "agent", false);
@@ -562,6 +564,7 @@ async fn stale_participants_starve_live_members_of_plan_broadcasts() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     // Ghost member as produced by swarm_persistence restore: present in
@@ -630,6 +633,7 @@ async fn remove_session_from_swarm_reassigns_to_non_headless_member() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
@@ -1134,6 +1138,7 @@ async fn refresh_swarm_task_staleness_marks_running_tasks_stale_and_heartbeat_re
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (worker, _worker_rx) = swarm_member("worker", "agent", true);
@@ -1236,6 +1241,7 @@ fn running_plan_assigned_to(
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])))
 }
@@ -1568,6 +1574,7 @@ async fn refresh_swarm_task_staleness_reaps_orphaned_tasks_past_deadline() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
@@ -1636,6 +1643,7 @@ async fn refresh_swarm_task_staleness_leaves_stale_tasks_of_live_members() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
