@@ -192,12 +192,18 @@ class DocsReferencesTest(unittest.TestCase):
         its own rules forbid rewriting old entries. Without this exemption the
         PR that deletes a checker cannot also record the deletion, which is
         exactly backwards."""
-        findings = self.run_move_check(
-            "See src/old.rs, deleted by this entry.\n",
-            delete=True,
-            doc_path="docs/architecture/GOVERNANCE_DECISIONS.md",
-        )
-        self.assertEqual(findings, [])
+        for record in (
+            "docs/architecture/GOVERNANCE_DECISIONS.md",
+            "docs/architecture/FORK_HARDENING_RED_BRIEF.md",
+            "docs/architecture/FORK_HARDENING_BLUE_BRIEF.md",
+        ):
+            with self.subTest(record=record):
+                findings = self.run_move_check(
+                    "See src/old.rs, deleted by this entry.\n",
+                    delete=True,
+                    doc_path=record,
+                )
+                self.assertEqual(findings, [])
 
     def test_default_scan_leaves_path_shaped_prose_unchecked(self):
         findings = self.run_on_git_tree(
