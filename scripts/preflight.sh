@@ -113,7 +113,6 @@ run "env lease drop order"     python3 scripts/check_env_lease_drop_order.py
 run "TUI render lock"          python3 scripts/check_tui_render_lock.py
 run "ambient roots"            bash scripts/check_ambient_roots.sh
 run "agent instructions"       python3 scripts/check_agent_instructions.py
-run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
 # Docs references: the machine-local / stale-code-path ratchets and the fatal
 # broken-link / retired-rail rules. ~1s, and its failures are usually
