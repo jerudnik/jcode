@@ -278,6 +278,7 @@ async fn broadcast_swarm_plan_with_previous_includes_newly_ready_ids() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (worker, mut worker_rx) = swarm_member("worker", "agent", false);
@@ -369,6 +370,7 @@ async fn swarm_plan_broadcast_versions_can_invert_on_one_member_channel() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (worker, mut worker_rx) = swarm_member("worker", "agent", false);
@@ -562,6 +564,7 @@ async fn stale_participants_starve_live_members_of_plan_broadcasts() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     // Ghost member as produced by swarm_persistence restore: present in
@@ -630,6 +633,7 @@ async fn remove_session_from_swarm_reassigns_to_non_headless_member() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
@@ -997,6 +1001,8 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
     let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
     worker.status = "running".to_string();
     worker.report_back_to_session_id = Some("coord".to_string());
+    worker.runtime.model = Some("gpt-5.6-sol".to_string());
+    worker.runtime.provider = Some("OpenAI".to_string());
     {
         let mut members = swarm_members.write().await;
         members.insert("coord".to_string(), coord);
@@ -1026,10 +1032,17 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
                 notification_type: NotificationType::Message { .. },
                 message,
                 ..
-            } if message.contains("Report:\nValidated the parser")
+            } if message.contains("Report:\nResolved identity: OpenAI / gpt-5.6-sol\n\nValidated the parser")
                 && !message.contains("No final textual report")
         )
     }));
+    let stored_report = swarm_members
+        .read()
+        .await
+        .get("worker")
+        .and_then(|member| member.latest_completion_report.clone())
+        .expect("completion report should be stored");
+    assert!(stored_report.starts_with("Resolved identity: OpenAI / gpt-5.6-sol\n\n"));
     let pending = coord_queue.lock().expect("queue lock");
     assert_eq!(
         pending.len(),
@@ -1041,7 +1054,9 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
             .collect::<Vec<_>>()
     );
     assert!(
-        pending[0].content.contains("Report:\nValidated the parser"),
+        pending[0]
+            .content
+            .contains("Report:\nResolved identity: OpenAI / gpt-5.6-sol\n\nValidated the parser"),
         "completion report queued the wrong body: {:?}",
         pending[0].content
     );
@@ -1134,6 +1149,7 @@ async fn refresh_swarm_task_staleness_marks_running_tasks_stale_and_heartbeat_re
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (worker, _worker_rx) = swarm_member("worker", "agent", true);
@@ -1236,6 +1252,7 @@ fn running_plan_assigned_to(
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])))
 }
@@ -1568,6 +1585,7 @@ async fn refresh_swarm_task_staleness_reaps_orphaned_tasks_past_deadline() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
@@ -1636,6 +1654,7 @@ async fn refresh_swarm_task_staleness_leaves_stale_tasks_of_live_members() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 

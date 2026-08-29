@@ -106,6 +106,7 @@ async fn dead_pid_sweep_then_salvage_requeues_once_without_duplicate_assignment(
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (coord, mut coord_rx) = swarm_member("coord", "coordinator", false);

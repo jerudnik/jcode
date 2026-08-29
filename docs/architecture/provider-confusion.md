@@ -1,6 +1,6 @@
 # Provider confusion: unknown model names silently fall back to the default provider
 
-Status: implemented-path-A, 2026-08-13
+Status: implemented, 2026-08-28
 
 ## Implemented Path A
 
@@ -17,10 +17,10 @@ and configured models, `inherit`, exact coordinator-model inheritance, and the
 explicit OpenAI and Claude API/OAuth prefixes. The earlier test that accepted
 an unknown prefix with `provider_key=None` was deliberately replaced.
 
-Path A does not infer live catalog routes. A bare name already classified by a
-static heuristic remains on that heuristic route even if a different live
-provider catalog advertises the same name. Resolving those names requires the
-deferred unique live-route lookup below.
+The 2026-08-28 follow-up now resolves bare spawn names against the same live
+`ModelRoute` catalog returned by `swarm list_models`. It carries the selected
+route's API method into session creation and rejects listed-but-unavailable and
+uncataloged names before a worker starts.
 
 ## Symptom
 
@@ -83,7 +83,8 @@ route disambiguation problem deferred below.
 
 - Before Path A, the spawn result contained only the session id, not the
   resolved model/provider.
-- Headless workers do not announce their identity in reports.
+- Before the 2026-08-28 follow-up, headless workers did not announce their
+  identity in reports.
 - `swarm list_models` presents one flat namespace with no marker for "this
   name is spawnable as-is" vs "this name needs a route prefix".
 
@@ -100,28 +101,45 @@ route disambiguation problem deferred below.
    an explicit route prefix, instead of falling back to inheritance. An
    explicit `inherit` sentinel already exists for the inherit case, so nothing
    legitimate is lost.
-3. **Reconcile the catalogs.** Either (a) make `swarm list_models` print the
-   route-prefixed spawnable form for every entry (e.g.
-   `cursor:gpt-5.6-sol-high-fast`), or (b) feed the live Cursor catalog into
-   bare-name resolution (`routes_memo` already caches live routes for other
-   purposes). (a) is simpler and self-documenting; (b) fixes typo-adjacent
-   confusion too. Do (a) first.
-4. **Surface identity in completion reports.** Append the resolved
-   model/provider to the worker's report header so post-hoc audits do not
-   require `swarm list` before sessions are cleaned up.
-5. **Partly implemented in Path A: tests.** Selection tests cover unknown
-   per-spawn and configured models, inheritance, exact coordinator-model
-   matching, and explicit OpenAI/Claude auth prefixes. Live-catalog unique-match
-   and `list_models` round-trip coverage belongs with the deferred live router.
+3. **Implemented on 2026-08-28: reconcile the catalogs.**
+   `catalog_selection_for_model` in `server/comm_session.rs` resolves bare names
+   against the live route list, selects an available route, preserves its API
+   method, and fails closed when the name is absent or unavailable. Tests
+   `resolve_swarm_spawn_model_accepts_any_listed_catalog_model`,
+   `resolve_swarm_spawn_model_reports_unavailable_catalog_routes`, and
+   `resolve_swarm_spawn_model_rejects_uncataloged_slash_names` cover the
+   list-and-spawn contract. This supersedes the earlier proposal to require a
+   route-prefixed catalog entry or a separate unique-match lookup.
+4. **Implemented on 2026-08-28: surface identity in completion reports.**
+   `completion_report_with_identity` in `server/swarm.rs` adds the resolved
+   provider and model to every non-empty report before the report is stored and
+   sent to the owner. The identity therefore survives cleanup in the durable
+   completion report. Test
+   `update_member_status_includes_completion_report_in_owner_notification`
+   covers stored and delivered text.
+5. **Implemented on 2026-08-28: apply the resolver contract to `subagent`.**
+   `resolve_subagent_selection` in `tool/subagent.rs` resolves overrides against
+   the provider's live route catalog, preserves explicit auth routes, enforces
+   `agents.swarm_denied_models`, inherits only for an omitted/sentinel/same-model
+   request, and rejects unresolved concrete names before creating the child
+   session. Tests
+   `model_override_resolves_against_live_catalog_instead_of_inheriting_parent_route`,
+   `unresolved_model_override_fails_closed_instead_of_inheriting_parent_route`,
+   and `denied_model_override_fails_before_inheriting_the_same_parent_model`
+   cover the former blind provider-key inheritance and policy bypass.
 
-## Deferred follow-ups
+## 2026-08-28 supersession verdict
 
-- Audit and narrow the fail-open branch in `MultiProvider::set_model` without
-  breaking explicitly provider-local custom model IDs.
-- Resolve bare models against the daemon's live route catalog, accepting only a
-  unique match and returning an ambiguity error otherwise.
-- Apply the same resolver contract to the standalone `subagent` path, which
-  currently reconstructs selection from inherited parent route state.
+The planned narrowing of the unknown-model branch in
+`MultiProvider::set_model` is superseded by the resolver fixes that now guard
+the affected path. Swarm and standalone subagent concrete model requests
+resolve or fail before session creation, and headless model-switch failures are
+fatal and roll the new session back. The remaining fallback at
+`crates/jcode-base/src/provider/mod.rs:720-722` stays deliberately
+provider-local: it asks the already active provider to accept a custom model
+ID and cannot select a default or different provider. Removing it would break
+forced providers and configured OpenAI-compatible endpoints that use private
+model names without preventing the provider-confusion incident fixed here.
 
 ## References
 
@@ -131,9 +149,15 @@ route disambiguation problem deferred below.
   header comment explains the runtime moved to
   `jcode-provider-cursor-runtime`.
 - `crates/jcode-app-core/src/server/comm_session.rs` —
-  `selection_for_concrete_model`, `resolve_swarm_spawn_selection`,
+  `catalog_selection_for_model`, `selection_for_concrete_model`,
+  `resolve_swarm_spawn_selection`,
   `explicit_route_for_configured_model` (doc comment documents the intended
   `openai-api:gpt-5.5` prefix behavior).
+- `crates/jcode-app-core/src/server/swarm.rs` —
+  `completion_report_with_identity`, which stores and reports the resolved
+  runtime identity.
+- `crates/jcode-app-core/src/tool/subagent.rs` —
+  `resolve_subagent_selection`, the standalone subagent resolver.
 - Related proposal records: `swarm-lifecycle-remediation` (trusting signals
   that do not hold) and `swarm-session-identity` (name reuse and attachment
   ambiguity from the same incident).
