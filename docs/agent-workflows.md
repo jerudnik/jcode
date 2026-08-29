@@ -63,6 +63,45 @@ scripts/ci_local.sh --list     # print the commands (extracted from fork-ci.yml)
 
 It runs the workflow's exact cargo commands, so a red result is known before any hosted CI minute is spent. The first run for a given profile/target primes a cold cache; warm runs are a few minutes.
 
+## Before opening a pull request
+
+Run the pre-PR gate. It uses CI's path classifier to select the local gate tier
+for the change set and catches locally reproducible failures before hosted CI:
+
+```bash
+just pre-pr
+```
+
+Routing and cost: a docs-only change runs the docs gates (~10s); other changes
+add preflight plus the `check`/`test` recipes (~5-10 min warm); a
+product-impacting change adds the CI full-test mirror (`scripts/ci_local.sh`,
+~5-20 min cache-dependent). Known constraints:
+
+Fork CI reruns `scripts/preflight.sh --ratchets-only --no-branch-handoff`
+before the Rust recipes. Guards wired through that preflight mode, including
+the ambient-roots check, therefore run both locally and in hosted CI.
+
+- This is the local reproducible subset, not a replacement for hosted CI's
+  platform-specific Nix, security, and FreeBSD smoke jobs.
+
+- Python-based recipes need Python 3.11+; `pre-pr` pins Python (and vale)
+  through `nix shell`, so a stale system interpreter cannot false-fail it.
+- The recipe runs preflight with `--no-branch-handoff`: the branch-handoff
+  gate inventories every local branch and would block PR creation on other
+  sessions' in-progress work. Run plain `scripts/preflight.sh` when you want
+  that inventory.
+- Never pass `--update` to `scripts/check_docs_references.py` from a recipe:
+  it is a baseline-maintenance mode that reports success before evaluating
+  any finding.
+- If the fleet builder is not this host's platform, run the mirror leg as
+  `JCODE_REMOTE_CARGO=0 scripts/ci_local.sh`; the e2e leg requires a local
+  release binary, and remote `--target` builds skip binary sync-back.
+
+A companion commit-time layer (path-gated docs checks in the managed
+pre-commit hook) is tracked in the issue backlog; the two layers deliberately
+make opposite tooling choices (hook: PATH tools, degrade with a hint;
+`pre-pr`: nix-pinned, fail closed). Do not "unify" them.
+
 ## Self-development
 
 This repository defaults to the TUI target. In a self-development session:
@@ -168,8 +207,11 @@ Completed and deferred CI optimization decisions:
 
 - **DONE: security.yml split.** The security workflow has an always-running `secret-scan` job and a path-filtered `dependency-audit` job, so docs-only pull requests skip Rust, Nix, and cargo-audit setup.
 - **DECIDED: keep check + clippy separate.** Although Clippy subsumes `cargo check`, the cached time cost is negligible. Separate steps preserve cleaner compile-error output, distinguish compiler failures from lint failures, and retain the explicit Linux mergeability canary.
-- **DEFERRED: self-hosted macOS runner.** No runner hardware is registered. Provision an always-on Apple Silicon Mac mini or equivalent; register it with `./config.sh --url https://github.com/jerudnik/jcode --token <REG_TOKEN>` and labels `self-hosted, macOS, ARM64`; set `MACOS_RUNNER_LABELS` to `["self-hosted", "macOS", "ARM64"]` for a `${{ fromJSON(vars.MACOS_RUNNER_LABELS || '"macos-latest"') }}` fallback; persist `CARGO_TARGET_DIR=/persistent/cargo-target` and the Nix store; and schedule weekly stale Cargo-target cleanup and Nix garbage collection. Use an ephemeral runner or locked-down account, and never store secrets on its filesystem. Expected runtime is ~5 min instead of ~20 min.
-- **DEFERRED: self-hosted Linux runner.** No runner hardware is registered. Use the same registration command with labels `self-hosted, Linux, X64`; set `LINUX_RUNNER_LABELS` to `["self-hosted", "Linux", "X64"]` for a `${{ fromJSON(vars.LINUX_RUNNER_LABELS || '"ubuntu-latest"') }}` fallback; persist Cargo targets and the Nix store; and install mold permanently. Expected Linux test runtime is ~3–4 min instead of ~11 min. Prefer ephemeral runners or locked-down accounts, and never store secrets on the runner filesystem.
+- **RETIRE: self-hosted runner plan.** No macOS or Linux runner hardware is
+  registered, and this repository does not plan or own its provisioning.
+  Hosted GitHub runners and the documented local or fleet-builder checks remain
+  the supported paths. The accepted loss is the projected warm-cache runtime
+  reduction from dedicated runner hardware.
 
 Discover triggers and job names from the workflow files themselves:
 

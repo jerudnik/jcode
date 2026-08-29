@@ -4,7 +4,67 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 
 # Surface contract: PM/tracking must land in notes, not repo docs/.
-"$repo_root/scripts/git-hooks/check-pm-surface.sh"
+"$repo_root/scripts/git-hooks/check-pm-surface.sh" &
+surface_pid="$!"
 
 # Keep prompt-loaded repository instructions lean and internally consistent.
-python3 "$repo_root/scripts/check_agent_instructions.py"
+python3 "$repo_root/scripts/check_agent_instructions.py" &
+instructions_pid="$!"
+
+# WIRE: fast documentation feedback at commit time. CI remains authoritative
+# and keeps its pinned Nix vale invocation; this hook uses vale from PATH.
+# Measured 2026-08-28 over 10 isolated runs: 0.622s median without docs and
+# 1.507s with one Markdown file staged; the slowest docs run took 3.221s.
+staged_markdown=""
+run_docs=0
+if [ "${DOCS_CHECKS_OK:-}" != "1" ]; then
+  staged_markdown="$(mktemp "${TMPDIR:-/tmp}/jcode-staged-markdown.XXXXXX")"
+  trap 'rm -f "$staged_markdown"' EXIT
+
+  # macOS ships bash 3.2, so collect paths without mapfile. Deletions are
+  # omitted from vale input because the file no longer exists, but still open
+  # the repository-wide reference gate below.
+  while IFS= read -r path; do
+    case "$path" in
+      *.md) printf '%s\n' "$path" >>"$staged_markdown" ;;
+    esac
+  done < <(git diff --cached --name-only --diff-filter=ACMR -- 2>/dev/null)
+
+  if [ -s "$staged_markdown" ] \
+     || ! git diff --cached --quiet --diff-filter=DR -- 2>/dev/null; then
+    run_docs=1
+  fi
+fi
+
+# The two existing guards are independent. Finish this first wave before
+# starting the two docs checks; four-way concurrency measured slower because
+# the repository-wide Python scans contended for the same machine.
+status=0
+for pid in "$surface_pid" "$instructions_pid"; do
+  if ! wait "$pid"; then
+    status=1
+  fi
+done
+[ "$status" -eq 0 ] || exit "$status"
+[ "$run_docs" -eq 1 ] || exit 0
+
+lint_pid=""
+if [ -s "$staged_markdown" ]; then
+  if command -v vale >/dev/null 2>&1; then
+    python3 "$repo_root/scripts/lint_docs.py" --files-from "$staged_markdown" &
+    lint_pid="$!"
+  else
+    echo "pre-commit: vale is not on PATH; skipping prose lint (install vale to enable it)" >&2
+  fi
+fi
+
+python3 "$repo_root/scripts/check_docs_references.py" &
+references_pid="$!"
+
+for pid in "$lint_pid" "$references_pid"; do
+  [ -z "$pid" ] && continue
+  if ! wait "$pid"; then
+    status=1
+  fi
+done
+exit "$status"

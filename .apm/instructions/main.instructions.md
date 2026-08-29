@@ -29,6 +29,6 @@ This independent hard fork and its `main` branch are authoritative. Read `docs/a
 
 ## Validation and finishing
 
-- Run narrow checks while iterating and the relevant final gate from `docs/agent-workflows.md`.
+- Run narrow checks while iterating and `just pre-pr` before opening any pull request.
 - Prefer local checks, Nix, remote builders, and public Cachix over routine GitHub CI.
 - Update the nearest authoritative documentation when behavior, architecture, workflow, or ownership changes.

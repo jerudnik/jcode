@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Preflight: run the blocking CI gate set locally before pushing.
+# Status: WIRE. The required `just pre-pr` gate executes this script for every
+# non-docs-only pull request change set.
 #
 # Motivation: the fork's Quality Guardrails / fork-ci rails enforce several
 # ratchets (swallowed-error, panic, code/test size, wildcard re-export, warning
@@ -24,6 +26,9 @@
 #   scripts/preflight.sh --nix           # ratchets + crane clippy (pinned toolchain)
 #   scripts/preflight.sh --ratchets-only # just the fast python/text gates
 #   scripts/preflight.sh --no-clippy     # skip the (slowest) clippy pass
+#   scripts/preflight.sh --no-branch-handoff # for `just pre-pr`: skip the local
+#                                        # branch-inventory gate (fires on other
+#                                        # sessions' in-progress branches)
 #
 # Exit non-zero if any gate fails; a summary lists every gate's status.
 set -uo pipefail
@@ -72,11 +77,13 @@ fi
 use_nix=0
 ratchets_only=0
 run_clippy=1
+run_branch_handoff=1
 for arg in "$@"; do
   case "$arg" in
     --nix) use_nix=1 ;;
     --ratchets-only) ratchets_only=1 ;;
     --no-clippy) run_clippy=0 ;;
+    --no-branch-handoff) run_branch_handoff=0 ;;
     *) printf 'preflight: unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -102,6 +109,9 @@ run() {
 run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.py
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py
+run "env lease drop order"     python3 scripts/check_env_lease_drop_order.py
+run "TUI render lock"          python3 scripts/check_tui_render_lock.py
+run "ambient roots"            bash scripts/check_ambient_roots.sh
 run "agent instructions"       python3 scripts/check_agent_instructions.py
 # Advisory ownership: every ignore in .cargo/audit.toml must be owned,
 # documented, and unexpired in docs/security/advisories.toml. The date is
@@ -113,13 +123,36 @@ run "advisory policy fixtures" python3 -m unittest discover -s tests -p 'test_ad
 run "docs impact advisory"     python3 scripts/test_docs_impact_advisory.py
 run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
+# Docs references: the machine-local / stale-code-path ratchets and the fatal
+# broken-link / retired-rail rules. ~1s, and its failures are usually
+# introduced by commits that MOVE or DELETE source paths, not by docs commits,
+# so it runs unconditionally rather than being gated on markdown changes
+# (docs/issues/precommit-docs-checks-missing.md records the same rule for the
+# commit-time layer). Added after PR #215 went red on a ratchet that no
+# locally-steered gate covered.
+run "docs references"          python3 -I scripts/check_docs_references.py
+# Docs prose lint (vale) is gated on changed markdown: it is style-only, so
+# unlike the reference checker a non-docs change cannot break it, and vale via
+# `nix shell` costs ~1.8s of resolution overhead every caller would pay.
+if git diff --name-only --diff-filter=ACMR "$(git merge-base HEAD main 2>/dev/null || echo HEAD~1)" -- '*.md' 2>/dev/null | grep -q .; then
+  if command -v vale >/dev/null 2>&1; then
+    run "docs lint"            python3 -I scripts/lint_docs.py
+  else
+    run "docs lint"            nix shell nixpkgs#vale --command python3 -I scripts/lint_docs.py
+  fi
+fi
 # Branch handoff: local automation/** work that is not on a path to main. This
 # gate is local-only by nature (a CI checkout has no local branches), and it
 # belongs here because preflight is what runs before pushing -- the exact moment
 # to notice that a previous session's finished work never left this laptop.
 # Added after three branches carrying reviewed, gate-passing work (F24, F25, a
 # wave-scope checkpoint) sat unpushed for two days with no PR.
-run "branch handoff"           python3 scripts/check_branch_handoff.py
+# `--no-branch-handoff` exists for the `just pre-pr` context: on a shared
+# machine this gate fires on OTHER sessions' in-progress branches, and blocking
+# PR creation on unrelated stale work teaches people to skip the gate.
+if [ "$run_branch_handoff" = 1 ]; then
+  run "branch handoff"         python3 scripts/check_branch_handoff.py
+fi
 
 # Unused-dependency gate, mirroring the "Enforce no unused dependencies" step in
 # both ci.yml and fork-ci.yml. This was added after F20c: deleting the release

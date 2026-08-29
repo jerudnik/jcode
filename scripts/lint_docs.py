@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -84,6 +85,17 @@ def main(argv: list[str] | None = None) -> int:
             f"error: the pathspec {PATHSPEC} selected no files under {root}. "
             f"vale would print its usage banner and exit 0, so the lint would "
             f"have passed without reading anything.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if shutil.which(args.vale) is None:
+        # Fail closed with an instruction, not a FileNotFoundError traceback:
+        # both the pre-commit layer and `just pre-pr` call this script, and a
+        # missing binary should read as "install vale", not as a crash.
+        print(
+            f"error: '{args.vale}' is not on PATH. Install vale, or run via "
+            f"`nix shell nixpkgs#vale --command python3 -I scripts/lint_docs.py`.",
             file=sys.stderr,
         )
         return 1

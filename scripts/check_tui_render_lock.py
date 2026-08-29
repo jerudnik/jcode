@@ -18,6 +18,8 @@ Usage:
     check_tui_render_lock.py            # report, exit 1 if any are unlocked
     check_tui_render_lock.py --list     # one `file::test` per line
     check_tui_render_lock.py --baseline N   # fail only if count exceeds N
+
+Status: WIRE. `scripts/preflight.sh` runs this guard through `just pre-pr`.
 """
 
 from __future__ import annotations

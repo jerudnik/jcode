@@ -1,11 +1,11 @@
 {
   "_comment": [
     "Authoritative build matrix for .github/workflows/nix.yml.",
-    "Extracted from the workflow so it is data rather than shell string-building:",
-    "tests/test_nix_distribution_policy.py reads this file to assert that the",
-    "platform support advertised in docs/NIX.md and README.md matches the systems",
-    "CI actually builds, smoke-launches, and pushes to Cachix. Any flake system",
-    "absent from every list here is unverified and must be documented best-effort.",
+    "tests/test_nix_distribution_policy.py parses the workflow and this file",
+    "to assert that each event mode uses the declared system and runner, and that",
+    "platform support advertised in docs/NIX.md matches the systems CI actually",
+    "builds. Any flake system absent from every list here is unverified and must",
+    "be documented best-effort.",
     "Adding a system here without adding a docs row (or vice versa) fails that test."
   ],
   "pull_request": [
