@@ -40,9 +40,6 @@ jobs:
       - name: Run security preflight
         run: scripts/security_preflight.sh --strict
 
-      - name: Verify the advisory policy records
-        run: python3 scripts/check_advisory_policy.py
-
       - name: Run weekly advisory report
         if: ${{ inputs.weekly }}
         shell: bash

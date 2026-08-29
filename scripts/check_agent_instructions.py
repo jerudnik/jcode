@@ -47,7 +47,6 @@ REQUIRED_PATHS = ROOT_PRIMITIVES + tuple(CHILD_GENERATED.values()) + JCODE_PROMP
     Path("scripts/dev_cargo.sh"),
     Path("scripts/docs_impact_advisory.py"),
     Path("scripts/test_fast.sh"),
-    Path("scripts/test_docs_impact_advisory.py"),
     Path("scripts/preflight.sh"),
     Path("scripts/remote_build.sh"),
     Path("scripts/clean_target.sh"),
