@@ -1,5 +1,5 @@
 ---
-title: "Audit: 88 unwired scripts, 16 dormant guards, and 21 undischarged commitments have no decision attached"
+title: "Audit: unwired scripts, dormant guards, and false execution claims need decisions"
 status: open
 priority: high
 owner: maintainers
@@ -15,9 +15,8 @@ related:
 A four-way read-only audit (2026-08-28, four independent agents: script
 wiring, guard registry, execution surfaces, docs commitments) measured how
 much machinery exists in the repository without anything executing it and
-without a recorded decision to keep or kill it. The ratchet retirement merged
-in PR #213 removed four instances of this pattern; this issue holds the rest,
-so each item gets an explicit wire-or-retire decision instead of ambient rot.
+without a recorded decision to keep or kill it. This issue now holds only the
+remaining script, guard, and execution-surface findings.
 
 ## 1. Script wiring (145 scripts audited)
 
@@ -68,39 +67,6 @@ rejection landed in PR #229.
   the headed one has no caller at all.
 - Clean: all 7 justfile recipes wired, all 10 flake checks have live
   subjects.
-
-## 4. Documented commitments never discharged (21 found)
-
-Recorded follow-ups with no implementation or closure evidence, by doc:
-
-- `docs/AGENT_NATIVE_VCS_CORE_BEHAVIOR.md:336`: concrete schemas for the
-  drafted VCS concepts. Nothing beyond the doc exists.
-- `docs/MEMORY_ARCHITECTURE.md:807`: sleep-like memory consolidation still
-  "TODO - Design pending"; runtime only backfills embeddings.
-- `docs/SERVER_LIFECYCLE_INVARIANTS.md:55`: spawner heartbeat for abandoned
-  daemon cleanup.
-- `docs/ASSISTANT_PROFILE_PERSONAS.md:119`: the deferred live stance
-  comparison was never run.
-- `docs/agent-workflows.md:171-172`: self-hosted macOS and Linux runners
-  named nowhere but in that paragraph.
-- `docs/architecture/W1_STORE_SCHEMA_COMPARISON.md:216`: retire the separate
-  coordinators map; it remains a live HashMap with hundreds of references.
-- `docs/architecture/GOVERNANCE_DECISIONS.md:379`: cross-process
-  last-writer-wins protection for background-task fields; only process-wide
-  mutexes exist (`background/store.rs`).
-- `docs/architecture/GOVERNANCE_DECISIONS.md:409-410`: mcp-serve owner
-  liveness vs PID reuse; single-owner ECHILD reaping. Neither exists.
-- `docs/architecture/provider-confusion.md:103,109,119,123`: live-catalog
-  spawn resolution, resolved identity in completion reports, narrowing
-  `set_model`'s fail-open branch, and the subagent tool still inheriting
-  provider key blindly (`tool/subagent.rs:64-70`).
-
-The remaining six commitments live inside already-open issue files
-(`swarm-runaway-growth.md:129-131` capability tiers, cwd enforcement at
-tool-call time, role-aware watchdog; `batch-same-file-edit-race.md:35`;
-`fork-health-false-green.md:47` RULESET_AUDIT_TOKEN lifecycle;
-`cross-session-content-leakage.md:153`). Those are tracked where they are
-and are listed here only for the count.
 
 ## What resolution looks like
 
