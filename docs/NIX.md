@@ -125,23 +125,22 @@ Pull requests consume the cache read-only and do not push. To set up or re-key:
 
 ### Automated maintenance
 
-Each maintenance concern has its own workflow (schedules run from `main`, the
-default branch):
+Everything on a clock lives in `.github/workflows/scheduled.yml` (schedules run
+from `main`, the default branch):
 
-- **Fork health** (`fork-health.yml`) runs daily and enforces the single-rail
-  invariants via `scripts/fork-health.sh`.
-- **flake.lock updates** (`nix-update.yml`) run weekly on Monday and open a PR
-  against `main`.
+- **Fork health** runs daily and enforces the single-rail invariants via
+  `scripts/fork-health.sh`.
+- **flake.lock updates** run weekly on Monday and open a PR against `main`.
 
 There is no upstream sync or review workflow. This is an independent hard fork;
 external fixes are considered only when someone identifies a specific local
 need (see [BRANCHING.md](BRANCHING.md)).
 
-To trigger either of them manually:
+To trigger them manually (`flake_update=true` also runs the lock bump):
 
 ```sh
-gh workflow run "Fork Health" --repo jerudnik/jcode
-gh workflow run "Update flake.lock" --repo jerudnik/jcode
+gh workflow run Scheduled --repo jerudnik/jcode
+gh workflow run Scheduled --repo jerudnik/jcode -f flake_update=true
 ```
 
 ## Use as a flake input

@@ -3,7 +3,7 @@
 # Status: WIRE. The required `just pre-pr` gate executes this script for every
 # non-docs-only pull request change set.
 #
-# Motivation: the fork's Quality Guardrails / fork-ci rails enforce several
+# Motivation: the fork's CI rails enforce several
 # ratchets (swallowed-error, panic, code/test size, wildcard re-export, warning
 # budget) plus rustfmt + a `-D warnings` clippy pass. Discovering a ratchet or
 # clippy failure only after a ~30-minute CI round-trip is expensive, and some of
@@ -145,8 +145,8 @@ if [ "$run_branch_handoff" = 1 ]; then
   run "branch handoff"         python3 scripts/check_branch_handoff.py
 fi
 
-# Unused-dependency gate, mirroring the "Enforce no unused dependencies" step in
-# both ci.yml and fork-ci.yml. This was added after F20c: deleting the release
+# Unused-dependency gate, mirroring the check CI runs via `just check`. This
+# was added after F20c: deleting the release
 # acquisition subsystem orphaned jcode-app-core's flate2/sha2/tar, which every
 # local gate passed over and CI caught only after the PR was opened. cargo
 # machete is a manifest/source text scan, so it is fast and needs no build.
@@ -189,7 +189,7 @@ if [ "$ratchets_only" -eq 1 ]; then
 fi
 
 # ── 2. Rust gates (codegen-free), scoped to THIS change ──────────────────────
-# fork-ci's blocking fmt/clippy gates run the whole-tree check but only FAIL
+# CI's blocking fmt/clippy gates run the whole-tree check but only FAIL
 # when a flagged file is fork-modified relative to the fork-point tag. Locally we
 # scope tighter: files changed by THIS branch/worktree vs origin/main. Rationale:
 #   * It catches anything the current change introduces (the thing a pre-push

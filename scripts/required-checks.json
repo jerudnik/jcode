@@ -14,7 +14,7 @@
   "workflow_contracts": [
     {
       "context": "Governance Root",
-      "file": ".github/workflows/governance-root.yml",
+      "file": ".github/workflows/pr.yml",
       "job_id": "governance-root",
       "if": null,
       "needs": [],
@@ -28,8 +28,12 @@
       "job_id": "pr-gate",
       "if": "always()",
       "needs": [
-        "checks",
-        "classify"
+        "classify",
+        "docs",
+        "rust",
+        "security",
+        "nix",
+        "smoke"
       ],
       "routing": {},
       "pull_request_paths_filter": "forbidden"

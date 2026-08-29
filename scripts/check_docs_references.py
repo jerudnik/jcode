@@ -274,9 +274,9 @@ def moved_or_deleted_paths(root: Path, base: str, head: str) -> list[MovedPath]:
 def check_moved_path_references(root: Path, base: str, head: str = "HEAD") -> list[Finding]:
     """Find current tracked docs that still cite paths removed by this diff.
 
-    Historical records are exempt. The decision log and the red brief cite
-    paths as they were when each entry was written, and their own rules forbid
-    rewriting old entries — a log that cannot name a deleted file cannot record
+    Historical records are exempt. The decision log and the two hardening
+    briefs cite paths as they were when each entry was written, and their own
+    rules forbid rewriting old entries — a log that cannot name a deleted file cannot record
     a deletion. The exemption is the file, not the mention, because history
     and navigation are different contracts: active docs must point at things
     that exist, records must say what happened.
@@ -284,6 +284,7 @@ def check_moved_path_references(root: Path, base: str, head: str = "HEAD") -> li
     historical = {
         "docs/architecture/GOVERNANCE_DECISIONS.md",
         "docs/architecture/FORK_HARDENING_RED_BRIEF.md",
+        "docs/architecture/FORK_HARDENING_BLUE_BRIEF.md",
     }
     moved = moved_or_deleted_paths(root, base, head)
     findings: list[Finding] = []

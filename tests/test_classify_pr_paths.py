@@ -61,14 +61,14 @@ class ProductImpactTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assert_impacting(path)
 
-    def test_a_governance_workflow_edit_does_not_need_the_product_legs(self) -> None:
+    def test_a_workflow_without_product_legs_does_not_need_them(self) -> None:
         self.assert_inert(
-            ".github/workflows/governance-root.yml",
+            ".github/workflows/scheduled.yml",
             "scripts/required-checks.json",
         )
 
     def test_workflows_that_define_the_product_legs_do_need_them(self) -> None:
-        for name in ("ci.yml", "pr.yml", "fork-ci.yml", "nix.yml", "freebsd-smoke.yml"):
+        for name in ("pr.yml", "nix.yml"):
             with self.subTest(workflow=name):
                 self.assert_impacting(f".github/workflows/{name}")
 
@@ -128,7 +128,7 @@ class DocsOnlyTests(unittest.TestCase):
     def test_any_non_prose_path_leaves_the_docs_only_route(self) -> None:
         self.assertFalse(classifier.classify(["README.md", "src/main.rs"])["docs_only"])
         self.assertFalse(
-            classifier.classify([".github/workflows/governance-root.yml"])["docs_only"]
+            classifier.classify([".github/workflows/scheduled.yml"])["docs_only"]
         )
 
 
