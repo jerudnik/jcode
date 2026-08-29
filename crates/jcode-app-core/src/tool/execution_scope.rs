@@ -273,9 +273,11 @@ pub(crate) fn authorize_tool_call(
             authorize_optional_target(input, "file_path", tool_name, &boundary)?;
             // Outline mode reads the file named by 'query', or by the first
             // term, when 'file' is omitted. Those fields are path inputs
-            // there, not search patterns.
+            // there, not search patterns. 'pattern' is a serde alias for
+            // 'query', so the raw JSON may carry the path under either name.
             if input.get("mode").and_then(Value::as_str) == Some("outline") {
                 authorize_optional_target(input, "query", tool_name, &boundary)?;
+                authorize_optional_target(input, "pattern", tool_name, &boundary)?;
                 if let Some(Value::String(term)) = input
                     .get("terms")
                     .and_then(Value::as_array)
@@ -695,6 +697,17 @@ mod tests {
             }),
         )
         .expect_err("outline query escape");
+        // 'pattern' deserializes into the same field as 'query'; the check
+        // runs on raw JSON, so the alias must be covered explicitly.
+        let pattern_escape = authorize_tool_call(
+            &session_id,
+            "agentgrep",
+            &serde_json::json!({
+                "mode": "outline",
+                "pattern": outside.join("secret.rs"),
+            }),
+        )
+        .expect_err("outline pattern alias escape");
         let term_escape = authorize_tool_call(
             &session_id,
             "agentgrep",
@@ -714,6 +727,10 @@ mod tests {
 
         assert!(matches!(
             &query_escape,
+            ExecutionScopeError::OutsideBoundary { .. }
+        ));
+        assert!(matches!(
+            &pattern_escape,
             ExecutionScopeError::OutsideBoundary { .. }
         ));
         assert!(matches!(
