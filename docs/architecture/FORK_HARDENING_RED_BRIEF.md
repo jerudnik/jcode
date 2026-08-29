@@ -173,6 +173,10 @@ came back at scale, undocumented in the sustainability model.
 > repository totals directly against pinned high-water marks. Only
 > `warning_budget.txt` and `wildcard_reexport_budget.json` remain as recorded
 > baselines. See GOVERNANCE_DECISIONS.md.
+>
+> Update (2026-08, later): the critical-path budget checker was itself retired
+> as process apparatus; no size ratchet remains. Oversized files are a review
+> flag, not a gate. See GOVERNANCE_DECISIONS.md.
 
 ### 8. [MED] The patch-ledger does not keep pace with the divergence it governs
 The ledger last moved 2026-07-04 (`4dd64d650`) and is 85 lines / ~19 rows. It

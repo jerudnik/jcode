@@ -58,7 +58,7 @@ Use `scripts/preflight.sh --help` and `scripts/dev_cargo.sh` source/help output 
 
 ```bash
 scripts/ci_local.sh            # macOS job on the local host triple, via the fleet builder
-scripts/ci_local.sh --list     # print the commands (extracted from fork-ci.yml) without running
+scripts/ci_local.sh --list     # print the commands (resolved from the justfile) without running
 ```
 
 It runs the workflow's exact cargo commands, so a red result is known before any hosted CI minute is spent. The first run for a given profile/target primes a cold cache; warm runs are a few minutes.
@@ -190,11 +190,8 @@ the builder.
 
 Current workflow authority:
 
-- `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
-- `.github/workflows/pr.yml` exposes the single required PR result named `PR Gate`; print the maintained required name with `jq -r '.required_checks[].context' scripts/required-checks.json`.
-- `.github/workflows/ci.yml` is the reusable PR Gate orchestrator. It runs docs lint for docs-only PRs and otherwise calls the fork, security, Nix, and smoke helpers.
-- `.github/workflows/fork-ci.yml` is the fork Rust and quality helper. PR Gate reaches it for non-docs PRs, and scheduled or dispatch events may also call it.
-- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper. Its validate job lints fork-owned workflows with the flake-locked `.#actionlint` package and runs `scripts/check_reusable_workflow_calls.py` and `scripts/check_workflow_permissions.py`, which enforce GitHub's same-repository reusable-workflow and permissions rules.
+- `.github/workflows/pr.yml` owns the whole pull-request surface: the classifier routes, the docs lint / Rust / security / Nix / smoke legs run, the advisory DOX packet is produced, and two required results are emitted (`PR Gate` and `Governance Root`); print the maintained required name with `jq -r '.required_checks[].context' scripts/required-checks.json`.
+- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper. Its validate job lints fork-owned workflows with the flake-locked `.#actionlint` package and runs `scripts/check_reusable_workflow_calls.py`, which enforces GitHub's same-repository reusable-workflow rules.
 - `.github/workflows/security.yml` owns secret scanning and the triaged dependency audit as a PR Gate helper and scheduled helper.
 - `.github/workflows/release.yml` owns release artifacts.
 - Inherited or dispatch-only workflows are not substitutes for the fork gates.

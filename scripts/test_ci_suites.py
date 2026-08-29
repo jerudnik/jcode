@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run jcode's CI-style test suites with timing and timeout reporting.
 
-This is intentionally split the same way as `.github/workflows/ci.yml` instead of
+This is intentionally split into suites like `.github/workflows/pr.yml` instead of
 using one monolithic `cargo test --workspace --all-targets`, which is harder to
 interpret locally and can exceed interactive harness command limits. By default
 it uses one Rust test thread for deterministic local runs because several tests

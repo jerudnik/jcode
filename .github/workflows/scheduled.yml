@@ -1,12 +1,30 @@
 name: Scheduled
 
+# Every job that runs on a clock lives here: the weekly broad CI pass, the
+# daily fork-health rail check, and the weekly flake.lock bump. They kept
+# three separate workflow files apart only to hold three cron lines; each job
+# now gates on its own schedule string instead (REGIME.md section 2, workflow
+# consolidation).
+
 on:
   schedule:
+    # Weekly broad CI pass over main.
     - cron: "0 8 * * 1"
+    # Daily fork-health rail invariants.
+    - cron: "37 9 * * *"
+    # Weekly flake.lock update PR.
+    - cron: "47 6 * * 1"
   workflow_dispatch:
+    inputs:
+      flake_update:
+        description: Also run the weekly flake.lock update job.
+        type: boolean
+        default: false
 
 concurrency:
-  group: scheduled-${{ github.ref }}
+  # Keyed by schedule so the daily health run cannot cancel an in-flight
+  # weekly broad pass.
+  group: scheduled-${{ github.event.schedule || 'dispatch' }}
   cancel-in-progress: true
 
 permissions:
@@ -16,15 +34,53 @@ permissions:
   issues: write
 
 jobs:
-  fork-ci:
-    name: Fork CI
-    uses: ./.github/workflows/fork-ci.yml
-    secrets: inherit
-    with:
-      broad: true
+  rust:
+    name: Rust checks
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The suite asks the repository about its own history (fork-point
+          # tag, main ancestry), which a shallow checkout cannot answer.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
+      # Keep test tempdirs outside the runner home; see the same step in
+      # pr.yml for the full story.
+      - name: Keep test tempdirs outside the runner home
+        run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: fork-ci
+
+      - name: Run ratchet preflight
+        run: scripts/preflight.sh --ratchets-only --no-branch-handoff
+
+      - name: Run check recipe
+        run: nix shell nixpkgs#just nixpkgs#python3 -c just check
+
+      - name: Run test recipe
+        run: nix shell nixpkgs#just -c just test
+
+      - name: Run full-test recipe
+        run: nix shell nixpkgs#just -c just full-test
 
   security:
     name: Security
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
     uses: ./.github/workflows/security.yml
     secrets: inherit
     with:
@@ -33,6 +89,7 @@ jobs:
 
   nix:
     name: Nix
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
     uses: ./.github/workflows/nix.yml
     secrets: inherit
     with:
@@ -40,11 +97,24 @@ jobs:
 
   smoke:
     name: Smoke
-    uses: ./.github/workflows/freebsd-smoke.yml
-    secrets: inherit
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-check recipe
+        run: nix shell nixpkgs#just -c just release-check
 
   ci-metrics:
     name: CI metrics summary
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -76,6 +146,7 @@ jobs:
 
   coverage:
     name: Coverage artifact
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -121,6 +192,7 @@ jobs:
 
   performance:
     name: Performance artifacts
+    if: github.event_name != 'schedule' || github.event.schedule == '0 8 * * 1'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
@@ -198,3 +270,175 @@ jobs:
           path: target/scheduled-observability/*.json
           if-no-files-found: warn
           retention-days: 14
+
+  # Enforces the single-rail fork model invariants (see scripts/fork-health.sh):
+  # the fork-point tag still anchors main, and the rail exists. Runs daily and
+  # on demand. Drift opens/updates a single issue instead of failing silently.
+  # The live governance read requires RULESET_AUDIT_TOKEN because GitHub omits
+  # bypass_actors from callers without ruleset write access.
+  health:
+    name: verify rail invariants
+    if: github.event_name != 'schedule' || github.event.schedule == '37 9 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the rail and tags
+        run: git fetch --prune --tags origin main
+
+      - name: Run fork health check
+        id: health
+        env:
+          GH_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
+        run: |
+          set -o pipefail
+          scripts/fork-health.sh --live --repo "$GITHUB_REPOSITORY" \
+            --fork-remote origin | tee health.txt
+          {
+            echo "## Fork health"
+            echo '```'
+            cat health.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the drift issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Fork health: rail invariant violation"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing="$(gh issue list --state open --search "in:title \"Fork health\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still violated: $run_url"
+          else
+            gh issue create --title "$title" \
+              --body "scripts/fork-health.sh found rail drift. See $run_url and run it locally to reproduce." \
+              --label fork-maintenance \
+              || gh issue create --title "$title" \
+                --body "scripts/fork-health.sh found rail drift. See $run_url and run it locally to reproduce."
+          fi
+
+      - name: Close the drift issue on success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing="$(gh issue list --state open --search "in:title \"Fork health\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Invariants hold again: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+  # Weekly dependency bump for the Nix flake inputs. Updates flake.lock on a
+  # temporary branch, validates the bump, and opens or refreshes a PR against
+  # `main`. On manual dispatch it runs only when asked, so dispatching the
+  # broad pass does not also open a bump PR.
+  flake-update:
+    name: Update flake.lock
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '47 6 * * 1')
+      || (github.event_name == 'workflow_dispatch' && inputs.flake_update)
+    permissions:
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Cachix (read-only public binary cache)
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          skipPush: true
+
+      - name: Update flake.lock
+        id: update
+        run: |
+          cp flake.lock "$RUNNER_TEMP/flake.lock.before"
+          nix flake update
+          if git diff --quiet -- flake.lock; then
+            echo "flake.lock is already up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate updated lockfile
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
+          nix flake check --accept-flake-config --no-build --all-systems
+
+      - name: Open pull request against main
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="automation/update-distro-flake-lock"
+          body="$RUNNER_TEMP/update-flake-lock-pr.md"
+
+          {
+            echo "Automated weekly Nix flake input update."
+            echo
+            echo "### Changed inputs"
+            jq -r --slurpfile before "$RUNNER_TEMP/flake.lock.before" '
+              def label($locked):
+                if $locked == null then
+                  "none"
+                elif ($locked.rev? // "") != "" then
+                  $locked.rev[0:12]
+                elif ($locked.ref? // "") != "" then
+                  $locked.ref
+                elif ($locked.version? // "") != "" then
+                  $locked.version
+                else
+                  "unknown"
+                end;
+              .nodes as $after
+              | $before[0].nodes as $beforeNodes
+              | [
+                  (($beforeNodes | keys_unsorted) + ($after | keys_unsorted) | unique[])
+                  | . as $name
+                  | ($beforeNodes[$name].locked // null) as $old
+                  | ($after[$name].locked // null) as $new
+                  | select($old != $new)
+                  | "- \($name): \(label($old)) -> \(label($new))"
+                ]
+              | if length == 0 then ["- No lock input changes detected."] else . end
+              | .[]
+            ' flake.lock
+            echo
+            echo "### Validation"
+            echo "- \`nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs\`"
+            echo "- \`nix flake check --accept-flake-config --no-build --all-systems\`"
+          } > "$body"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add flake.lock
+          git commit -m "chore(nix): update flake.lock"
+          git push --force-with-lease origin "$branch"
+
+          existing_pr="$(gh pr list --head "$branch" --base main --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --base main \
+              --title "chore(nix): update flake.lock" \
+              --body-file "$body"
+          else
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(nix): update flake.lock" \
+              --body-file "$body"
+          fi

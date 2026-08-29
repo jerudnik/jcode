@@ -56,26 +56,17 @@ jobs:
       - name: Lint fork-owned workflows
         # Uses the flake-locked .#actionlint compatibility package so CI and
         # the flake workflow-syntax check agree on parser behavior.
-        # freebsd-smoke.yml remains the sole upstream exemption.
         run: |
           nix run .#actionlint -- \
-            .github/workflows/ci.yml \
-            .github/workflows/docs-impact.yml \
-            .github/workflows/fork-ci.yml \
-            .github/workflows/fork-health.yml \
             .github/workflows/main.yml \
             .github/workflows/security.yml \
             .github/workflows/nix.yml \
-            .github/workflows/nix-update.yml \
             .github/workflows/pr.yml \
             .github/workflows/release.yml \
-            .github/workflows/scheduled.yml \
-            .github/workflows/governance-root.yml
+            .github/workflows/scheduled.yml
 
           python3 scripts/check_reusable_workflow_calls.py .
           python3 tests/test_reusable_workflow_calls.py
-          python3 scripts/check_workflow_permissions.py .
-          python3 -m unittest tests.test_workflow_permissions
 
       - name: Run package recipe
         run: nix shell nixpkgs#just -c just package

@@ -19,7 +19,6 @@ echo "[2/7] Build (debug)"
 echo "[3/7] Compile + budgets"
 run_cargo check -q
 "$repo_root/scripts/check_warning_budget.sh"
-python3 "$repo_root/scripts/check_critical_path_budget.py"
 
 echo "[4/7] Security preflight"
 "$repo_root/scripts/security_preflight.sh"

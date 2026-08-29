@@ -36,7 +36,7 @@
 #
 # Requires: git with the fork remote and tags fetched; python3. Live mode
 # additionally requires `gh` authenticated with a credential that can read
-# ruleset bypass actors (see .github/workflows/fork-health.yml).
+# ruleset bypass actors (see the health job in .github/workflows/scheduled.yml).
 #
 # Usage:
 #   python3 scripts/generate_governance_fixture.py --output target/fork-health/governance-valid.json

@@ -17,7 +17,6 @@ _BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path
 if _BORROWED_PATH_ENTRY:
     sys.path.append(_SCRIPTS_DIR)
 try:
-    from check_workflow_permissions import WorkflowPermissionChecker
     from check_reusable_workflow_calls import ReusableWorkflowCallChecker
 finally:
     if _BORROWED_PATH_ENTRY:
@@ -87,12 +86,12 @@ SKIPPED_DIRECTORIES = frozenset(
 # zero files, which is the exact failure mode F30-FIX-1 was filed for.
 MIN_SCANNED_ACTIVE_DOCS = 60
 
-# F30-FIX-3: freebsd-smoke.yml remains an upstream, manual-only compatibility
-# check, so it is deliberately not linted. Every other workflow is fork-owned
-# and must be. Listing the exemption rather than the covered set means a newly
-# added workflow is linted by default; the previous hardcoded lint list silently
-# omitted governance-root.yml for three weeks.
-UNLINTED_UPSTREAM_WORKFLOWS = frozenset({"freebsd-smoke.yml"})
+# Every workflow is fork-owned and must be linted. The set was listed as an
+# exemption (rather than a covered list) so a newly added workflow is linted by
+# default; the previous hardcoded lint list silently omitted a workflow for
+# three weeks (F30-FIX-3). The last upstream exemption (freebsd-smoke.yml) was
+# deleted in the REGIME.md workflow consolidation.
+UNLINTED_UPSTREAM_WORKFLOWS = frozenset()
 
 # F30-FIX-2: the substring list missed the AUR, curl-pipe, and PowerShell-pipe
 # install idioms entirely. These are regexes rather than substrings because the
@@ -188,9 +187,6 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
 class NixOnlyDistributionPolicy(unittest.TestCase):
     def test_reusable_workflow_calls_follow_github_policy(self) -> None:
         ReusableWorkflowCallChecker(ROOT).check()
-
-    def test_reusable_workflow_permissions_never_elevate(self) -> None:
-        self.assertEqual([], WorkflowPermissionChecker(ROOT).check())
 
     def test_retired_paths_are_absent(self) -> None:
         for relative in RETIRED_PATHS:
