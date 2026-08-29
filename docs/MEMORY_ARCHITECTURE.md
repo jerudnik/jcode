@@ -763,20 +763,13 @@ Lightweight consolidation that runs in the memory sidecar after returning result
 - [x] **Contradiction detection on write** — contradictory memories are superseded during incremental extraction.
 - [x] **Reinforcement provenance** — `MemoryEntry` tracks `Vec<Reinforcement>` breadcrumbs (`session_id`, `message_index`, `timestamp`).
 
-### Phase 8: Deep Memory Consolidation (Ambient Garden) 📋
+### Phase 8: Deep Memory Consolidation
 
-Full graph-wide consolidation that runs during ambient mode background cycles. See [AMBIENT_MODE.md](./AMBIENT_MODE.md) for the ambient mode design.
-
-- [ ] Graph-wide similarity-based memory merging
-- [ ] Redundancy detection and deduplication (beyond sidecar's local scope)
-- [ ] Contradiction resolution (across full graph, not just retrieved set)
-- [ ] Fact verification against codebase (check if factual memories are still true)
-- [ ] Retroactive session extraction (crashed/missed sessions)
-- [ ] Cluster reorganization
-- [ ] Weak memory pruning (confidence < 0.05 AND strength <= 1)
-- [ ] Relationship discovery across sessions
-- [ ] Embedding backfill for memories missing embeddings
-- [ ] Knowledge graph optimization
+**RETIRE.** No ambient or sleep-like graph-wide consolidation phase is planned.
+The maintained boundary is the inline sidecar consolidation described above and
+embedding backfill for missing vectors. The accepted loss is that Jcode does not
+automatically merge similar memories across the full graph, resolve graph-wide
+contradictions, prune weak memories, or reorganize clusters.
 
 ---
 
@@ -799,72 +792,6 @@ Before storing any memory, scan for:
 - CLI for viewing/editing/deleting
 - Option to disable memory entirely
 - Export/import for backup
-
----
-
-## Future: Memory Consolidation (Sleep-Like Processing)
-
-> **Status:** TODO - Design pending
-
-Similar to how humans consolidate memories during sleep, jcode can run background consolidation to optimize the memory graph:
-
-### Concept
-
-```mermaid
-graph LR
-    subgraph "Active Use"
-        A[Raw Memories]
-        B[Redundant Facts]
-        C[Weak Links]
-        D[Scattered Tags]
-    end
-
-    subgraph "Consolidation"
-        E[Merge Similar]
-        F[Detect Contradictions]
-        G[Prune Weak]
-        H[Reorganize Clusters]
-    end
-
-    subgraph "Optimized"
-        I[Unified Facts]
-        J[Resolved Conflicts]
-        K[Strong Connections]
-        L[Clean Taxonomy]
-    end
-
-    A --> E --> I
-    B --> E
-    B --> F --> J
-    C --> G --> K
-    D --> H --> L
-```
-
-### Potential Features
-
-| Feature | Description |
-|---------|-------------|
-| **Similarity Merge** | Combine memories with >0.95 embedding similarity |
-| **Redundancy Detection** | Find memories that express the same fact differently |
-| **Contradiction Resolution** | Surface conflicting memories for user decision |
-| **Weak Pruning** | Remove memories with low confidence + low access |
-| **Cluster Optimization** | Re-run clustering, merge small clusters |
-| **Link Strengthening** | Increase weights on frequently co-accessed pairs |
-| **Tag Cleanup** | Merge similar tags, remove orphans |
-
-### Architecture Options (TBD)
-
-1. **Periodic daemon** - Run consolidation every N hours
-2. **On-idle trigger** - Run when no active sessions for M minutes
-3. **Capacity-based** - Run when memory count exceeds threshold
-4. **Manual command** - User-triggered via `/consolidate`
-
-### Open Questions for Consolidation
-
-- How to handle user confirmation for destructive merges?
-- Should consolidation be reversible?
-- What's the right frequency/trigger?
-- How to balance between "perfect organization" and "keep everything"?
 
 ---
 

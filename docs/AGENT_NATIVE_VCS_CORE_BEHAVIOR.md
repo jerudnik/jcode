@@ -333,11 +333,9 @@ flowchart LR
     Packet --> Policy[Upstream policy]
 ```
 
-## Suggested next step
-Translate this into a concrete schema for:
-- `lane`
-- `draft_patch`
-- `maintenance_packet`
-- `anchor`
-- `publish`
-- `upstream_status`
+## Verdict: RETIRE the concrete schemas
+
+**RETIRE.** This document remains a conceptual model; no concrete schema for
+`lane`, `draft_patch`, `maintenance_packet`, `anchor`, `publish`, or
+`upstream_status` is planned. The accepted loss is that these concepts have no
+machine-readable contract and cannot be implemented from this document alone.

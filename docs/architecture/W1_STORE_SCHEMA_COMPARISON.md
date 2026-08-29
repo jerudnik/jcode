@@ -211,9 +211,13 @@ Design consequences adopted for the implementation:
   merge). `reclaim_stale_plan_assignments` takes its live-member set from
   fold(log); `resync_plan` restores the coordinators map from the DERIVED
   `SwarmControlState::coordinator()` instead of trusting the requester's
-  role string. Scoreboard tests pass unchanged. The coordinators map
-  itself still exists (permission checks read it); full retirement is a
-  follow-up once every coordinator read goes through the fold.
+  role string. Scoreboard tests pass unchanged. The coordinators map still
+  exists because permission checks read it.
+
+  **RETIRE:** full retirement of the coordinators map is no longer part of this
+  plan. The live map remains the accepted permission-checking mechanism while
+  recovery derives its repair value from the fold. The accepted loss is
+  duplicated coordinator state and the need to keep those two views aligned.
 
 ## W2 groundwork (2026-07-05, merged d371b60a8)
 
