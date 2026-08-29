@@ -28,8 +28,8 @@ class PrePrGateWiringTests(unittest.TestCase):
             with self.subTest(guard=guard):
                 self.assertIn(guard, preflight)
 
-    def test_fork_ci_reaches_ambient_roots_through_preflight(self) -> None:
-        workflow = (ROOT / ".github/workflows/fork-ci.yml").read_text(
+    def test_ci_rust_job_reaches_ambient_roots_through_preflight(self) -> None:
+        workflow = (ROOT / ".github/workflows/pr.yml").read_text(
             encoding="utf-8"
         )
         preflight = (ROOT / "scripts/preflight.sh").read_text(encoding="utf-8")

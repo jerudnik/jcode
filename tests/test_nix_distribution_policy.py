@@ -86,12 +86,12 @@ SKIPPED_DIRECTORIES = frozenset(
 # zero files, which is the exact failure mode F30-FIX-1 was filed for.
 MIN_SCANNED_ACTIVE_DOCS = 60
 
-# F30-FIX-3: freebsd-smoke.yml remains an upstream, manual-only compatibility
-# check, so it is deliberately not linted. Every other workflow is fork-owned
-# and must be. Listing the exemption rather than the covered set means a newly
-# added workflow is linted by default; the previous hardcoded lint list silently
-# omitted governance-root.yml for three weeks.
-UNLINTED_UPSTREAM_WORKFLOWS = frozenset({"freebsd-smoke.yml"})
+# Every workflow is fork-owned and must be linted. The set was listed as an
+# exemption (rather than a covered list) so a newly added workflow is linted by
+# default; the previous hardcoded lint list silently omitted a workflow for
+# three weeks (F30-FIX-3). The last upstream exemption (freebsd-smoke.yml) was
+# deleted in the REGIME.md workflow consolidation.
+UNLINTED_UPSTREAM_WORKFLOWS = frozenset()
 
 # F30-FIX-2: the substring list missed the AUR, curl-pipe, and PowerShell-pipe
 # install idioms entirely. These are regexes rather than substrings because the

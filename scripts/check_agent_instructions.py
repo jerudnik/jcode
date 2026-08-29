@@ -52,8 +52,6 @@ REQUIRED_PATHS = ROOT_PRIMITIVES + tuple(CHILD_GENERATED.values()) + JCODE_PROMP
     Path("scripts/clean_target.sh"),
     Path("scripts/prune_incremental.sh"),
     Path("scripts/test_incremental_policy.sh"),
-    Path(".github/workflows/docs-impact.yml"),
-    Path(".github/workflows/fork-ci.yml"),
     Path(".github/workflows/nix.yml"),
     Path(".github/workflows/security.yml"),
     Path(".github/workflows/release.yml"),

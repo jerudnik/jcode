@@ -39,11 +39,8 @@ from typing import Iterable, Sequence
 # the edit. Every other workflow file is inert to them.
 PRODUCT_ROUTE_WORKFLOWS = frozenset(
     {
-        "ci.yml",
         "pr.yml",
-        "fork-ci.yml",
         "nix.yml",
-        "freebsd-smoke.yml",
     }
 )
 

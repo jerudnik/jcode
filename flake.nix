@@ -121,21 +121,12 @@
               ./docs/SWARM_TASK_GRAPH.md
               ./CONTRIBUTING.md
               ./RELEASING.md
-              ./.github/workflows/ci.yml
-              ./.github/workflows/docs-impact.yml
-              ./.github/workflows/fork-ci.yml
-              ./.github/workflows/fork-health.yml
               ./.github/workflows/main.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
-              ./.github/workflows/nix-update.yml
               ./.github/workflows/pr.yml
               ./.github/workflows/release.yml
               ./.github/workflows/scheduled.yml
-              ./.github/workflows/governance-root.yml
-              # Not linted (sole upstream exemption), but ci.yml calls it, so
-              # the reusable-call policy check needs it present.
-              ./.github/workflows/freebsd-smoke.yml
             ];
           };
 
@@ -254,7 +245,7 @@
 
           # CI gates run by `nix flake check`. Keep these cheap, local, and valid
           # on every flake system: Rust clippy/fmt/tests and the package build are
-          # already covered by fork-ci.yml / nix.yml, while security auditing is a
+          # already covered by pr.yml / nix.yml, while security auditing is a
           # separate non-blocking workflow. These checks instead validate the Nix
           # surface, local preflight entry point, fork-owned workflows, and pinned
           # Rust-toolchain contract without network access or another full build.
@@ -336,18 +327,12 @@
                 ''
                   cd "$src"
                   actionlint \
-                    .github/workflows/ci.yml \
-                    .github/workflows/docs-impact.yml \
-                    .github/workflows/fork-ci.yml \
-                    .github/workflows/fork-health.yml \
                     .github/workflows/main.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
-                    .github/workflows/nix-update.yml \
                     .github/workflows/pr.yml \
                     .github/workflows/release.yml \
-                    .github/workflows/scheduled.yml \
-                    .github/workflows/governance-root.yml
+                    .github/workflows/scheduled.yml
 
                   ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py .
                   ${pkgs.python3}/bin/python3 tests/test_reusable_workflow_calls.py
