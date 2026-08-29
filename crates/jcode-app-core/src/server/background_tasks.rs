@@ -625,6 +625,42 @@ pub(super) async fn dispatch_ui_activity(
 mod tests {
     use super::*;
     use crate::bus::{BatchProgress, ToolEvent, ToolStatus};
+    use std::time::Instant;
+    use tokio::sync::mpsc;
+
+    fn swarm_member(
+        session_id: &str,
+        swarm_id: &str,
+    ) -> (SwarmMember, mpsc::UnboundedReceiver<ServerEvent>) {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        (
+            SwarmMember {
+                session_id: session_id.to_string(),
+                event_tx,
+                event_txs: HashMap::new(),
+                working_dir: None,
+                swarm_id: Some(swarm_id.to_string()),
+                swarm_enabled: true,
+                status: "ready".to_string(),
+                detail: None,
+                task_label: None,
+                subagent_type: None,
+                friendly_name: Some(session_id.to_string()),
+                report_back_to_session_id: None,
+                initial_prompt_delivered: None,
+                latest_completion_report: None,
+                role: "agent".to_string(),
+                joined_at: Instant::now(),
+                last_status_change: Instant::now(),
+                is_headless: false,
+                output_tail: None,
+                todo_progress: None,
+                todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
+            },
+            event_rx,
+        )
+    }
 
     fn tool(id: &str, intent: &str, status: ToolStatus) -> ToolEvent {
         ToolEvent {
@@ -815,5 +851,66 @@ mod tests {
             run_plan_liveness_wake(&progress, &completed_status, now, None).is_none(),
             "terminal tasks must not create a queued liveness wake"
         );
+    }
+
+    #[tokio::test]
+    async fn todo_progress_does_not_cross_swarm_boundaries() {
+        let (worker, _worker_rx) = swarm_member("jcode-worker", "jcode-repo");
+        let (coordinator, mut coordinator_rx) = swarm_member("jcode-coordinator", "jcode-repo");
+        let (other_repo, mut other_repo_rx) = swarm_member("nix-session", "nix-repo");
+        let swarm_members = Arc::new(RwLock::new(HashMap::from([
+            (worker.session_id.clone(), worker),
+            (coordinator.session_id.clone(), coordinator),
+            (other_repo.session_id.clone(), other_repo),
+        ])));
+        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([
+            (
+                "jcode-repo".to_string(),
+                HashSet::from(["jcode-worker".to_string(), "jcode-coordinator".to_string()]),
+            ),
+            (
+                "nix-repo".to_string(),
+                HashSet::from(["nix-session".to_string()]),
+            ),
+        ])));
+
+        dispatch_swarm_todo_progress(
+            &crate::bus::TodoEvent {
+                session_id: "jcode-worker".to_string(),
+                todos: vec![crate::todo::TodoItem {
+                    content: "review jcode change".to_string(),
+                    status: "in_progress".to_string(),
+                    priority: "high".to_string(),
+                    id: "review".to_string(),
+                    ..Default::default()
+                }],
+            },
+            &swarm_members,
+            &swarms_by_id,
+        )
+        .await;
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), coordinator_rx.recv())
+            .await
+            .expect("source swarm should receive a status event")
+            .expect("source swarm channel should remain open");
+        let ServerEvent::SwarmStatus { members } = event else {
+            panic!("expected swarm status");
+        };
+        assert!(members.iter().any(|member| {
+            member.session_id == "jcode-worker"
+                && member
+                    .todo_items
+                    .iter()
+                    .any(|todo| todo.content == "review jcode change")
+        }));
+        assert!(matches!(
+            other_repo_rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let members = swarm_members.read().await;
+        assert!(members["nix-session"].todo_items.is_empty());
+        assert!(members["nix-session"].todo_progress.is_none());
     }
 }

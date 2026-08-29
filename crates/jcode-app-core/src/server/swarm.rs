@@ -437,7 +437,6 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
     event_counter: Option<&Arc<std::sync::atomic::AtomicU64>>,
     swarm_event_tx: Option<&tokio_broadcast::Sender<SwarmEvent>>,
 ) {
-    let completion_report = normalize_completion_report(completion_report);
     let detail_present = detail.is_some();
     let (
         swarm_id,
@@ -449,9 +448,15 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
         lifecycle,
         _is_headless,
         report_back_to_session_id,
+        completion_report,
     ) = {
         let mut members = swarm_members.write().await;
         if let Some(member) = members.get_mut(session_id) {
+            // Normalize and stamp identity before deciding whether a report
+            // arrived: a whitespace-only body normalizes away, and the
+            // lifecycle transition should not count it as a delivered report.
+            let completion_report =
+                completion_report_with_identity(completion_report.clone(), &member.runtime);
             let previous_status = member.lifecycle_status().to_string();
             let lifecycle_changed = member.apply_compatibility_lifecycle_status(
                 status,
@@ -499,6 +504,7 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
                 member.lifecycle(),
                 is_headless,
                 report_back_to_session_id,
+                completion_report,
             )
         } else {
             (
@@ -510,6 +516,7 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
                 String::new(),
                 jcode_swarm_core::SwarmLifecycleStatus::default(),
                 false,
+                None,
                 None,
             )
         }
@@ -649,6 +656,33 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
             }
         }
     }
+}
+
+fn completion_report_with_identity(
+    report: Option<String>,
+    runtime: &crate::protocol::SwarmMemberRuntime,
+) -> Option<String> {
+    let report = normalize_completion_report(report)?;
+    let model = runtime
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let provider = runtime
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let identity = match (provider, model) {
+        (Some(provider), Some(model)) => format!("Resolved identity: {provider} / {model}"),
+        (Some(provider), None) => format!("Resolved identity: {provider}"),
+        (None, Some(model)) => format!("Resolved identity: {model}"),
+        (None, None) => return Some(report),
+    };
+    if report.lines().next() == Some(identity.as_str()) {
+        return Some(report);
+    }
+    normalize_completion_report(Some(format!("{identity}\n\n{report}")))
 }
 
 pub(in crate::server) async fn run_swarm_task(

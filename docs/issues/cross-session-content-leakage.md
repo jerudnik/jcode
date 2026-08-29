@@ -1,178 +1,88 @@
 ---
-title: "Cross-session content leakage between concurrent swarm sessions"
+title: "Todo view may bind to the wrong session"
 status: open
 priority: high
 owner: unassigned
 opened: 2026-08-17
 ---
 
-# Cross-session content leakage between concurrent swarm sessions
+# Todo view may bind to the wrong session
 
-Content originating in one session has appeared in other sessions, including a
-session working in a **different repository**. Recorded while three concurrent
-sessions were active against `~/labs/jcode` and one against a separate
-`nix-config` checkout.
+Two reports remain unexplained:
 
-This is deliberately split into what was observed directly and what was
-reported, because the two carry different weight.
+1. A third concurrent jcode session on its own worktree appeared to show content
+   from another session.
+2. A session in a separate `nix-config` checkout appeared to show todo
+   content written by jcode sessions.
 
-## Verified directly
+Neither report has been reproduced. The affected surface is also unknown: it may
+have been a local pane, a remote attachment, an inline todo card, or the swarm
+status panel.
 
-1. **`notify` DMs returned success but never became actionable.** Two DMs sent
-   at `09:16:29Z` and `09:23:39Z` both reported successful delivery. The
-   recipient's next message (`09:31:14Z`) still treated the contents as
-   outstanding, and it separately confirmed its copies had been **truncated
-   twice**.
-2. **Bodies over 240 characters are structurally lossy agent-to-agent.** The
-   tool's own rejection of a 247-character body states that recipients see the
-   `tldr` collapsed behind an expand control. An agent has no way to expand it,
-   so the remainder is unreachable rather than merely unread.
-3. **The workaround succeeds.** Writing the full content to a file and sending a
-   short `interrupt` DM pointing at that path produced a correct acknowledgement
-   naming the file's actual sections. Modality, not content length, was the
-   difference.
+## Todo storage and fan-out are excluded for the recorded cross-repository case
 
-Detail lived in `docs/issues/swarm-dm-delivery-investigation.md` (deleted when
-its mechanism was resolved; `git log` retains it).
+The todo tool stores and reads state by the exact `ToolContext.session_id`. A
+successful write publishes `TodoUpdated` with the same session ID.
 
-Items 1-3 are resolved. PR #194 made notify and broadcast messages queue their
-full bodies for the recipient's next turn boundary. Structured completion
-reports use the same queue and are no longer cut at 4,000 characters. The
-collapsed `tldr` is presentation metadata, not the receiving agent's only copy.
+Both consumers preserve that identity:
 
-The 220-character swarm event-history stub remains the only server-side archive
-of DM bodies. Reconstructing a long message later from swarm context therefore
-stays lossy by design; this change does not claim to repair that archive.
+- `crates/jcode-tui/src/tui/app/local.rs` ignores `TodoUpdated` unless
+  `event.session_id == app.session.id`.
+- `dispatch_swarm_todo_progress` in
+  `crates/jcode-app-core/src/server/background_tasks.rs` first looks up the exact
+  `event.session_id`. It updates only that `SwarmMember`, then asks
+  `broadcast_swarm_status` to notify that member's swarm. The broadcast obtains
+  recipients only from `swarms_by_id[source_swarm_id]`, and
+  `fanout_session_event` sends only to attachments registered under each exact
+  recipient session ID.
 
-## Reported, not yet reproduced here
+Swarm IDs normally come from the repository's Git common directory. An explicit
+`JCODE_SWARM_ID` can intentionally join sessions from different directories, but
+that did not happen in the recorded incident. The preserved control logs show:
 
-4. **A third concurrent session** on its own worktree appeared to leak content
-   into the others. Not observed first-hand; no reproduction attempted.
-5. **Todo content crossed repositories.** A session working in the user's
-   `nix-config` checkout received todo messages originating from the `jcode`
-   sessions. This is the most serious item, because it crosses a project
-   boundary and not merely a session boundary.
+- `session_tulip_1786957837407_383165b29b9720d0` joined
+  the `nix-config` Git common directory at `09:10:38.124Z`.
+- `session_rose_1786957987850_ed471b6456696972` joined
+  the `jcode` Git common directory at `09:13:08.181Z`.
+- The suspected jcode todo write was at `09:30:36Z`, and the operator noticed
+  the nix-config display at `09:34:43Z`. Neither session changed swarms during
+  that interval.
 
-## First lead on (5)
+A regression test, `todo_progress_does_not_cross_swarm_boundaries`, models the
+same two-swarm case. It requires the source swarm to receive the todo snapshot
+and the other swarm to receive no event and no cached todo state.
 
-Storage looks correctly scoped, so suspicion falls on delivery/fan-out rather
-than persistence:
+The reported cross-repository display therefore did not come from todo storage,
+the process-wide `TodoUpdated` bus, or swarm status fan-out as currently
+implemented. Do not add a delivery fix without new evidence that contradicts
+this routing proof.
 
-    crates/jcode-app-core/src/tool/todo.rs:801   load_todos(session)
+## Remaining lead: the view may select the wrong session
 
-The read path is keyed by session, so a shared-store explanation is unlikely on
-its face. The remaining candidates are a notification or broadcast path that
-resolves recipients more widely than the originating session, or a shared UI
-surface that renders another session's state. Not investigated further; see the
-hard constraints in the companion brief before testing, since the live sessions
-must not be disturbed.
+Remote todo views load from `App::active_client_session_id`, which returns
+`remote_session_id` in remote mode. Local views use `app.session.id`. If a client
+is attached to the wrong session, or retains a stale remote pointer or
+session-derived cache, it can correctly load another session's todos and still
+present them in the wrong pane.
 
-## Follow-up evidence for item 5 (2026-08-17, nix-config session, read-only)
+This fits both reports without requiring cross-session storage or delivery. It
+is not yet proved because the original report did not identify the surface or
+capture the view's bound session ID.
 
-The nix-config session the operator was looking at supplies timestamps that
-narrow item 5 considerably. All file paths under `~/.jcode/`.
+## Reproduction needed
 
-1. **The affected session's store was provably empty at question time.** The
-   operator asked "are those your ToDos?" at `09:34:43Z`. The session's todo
-   file (`todos/session_tulip_1786957837407_383165b29b9720d0.json`) did not
-   exist yet — its first write is `09:38:52Z` — and the todo tool read back
-   `[]` at `09:34:58Z`, fifteen seconds after the question. The sibling
-   nix-config session (`session_sunflower_*`, spawned 0.6 s earlier) has never
-   had a todo file. No nix-config session had todo state to render.
-2. **The only freshly-written todos matching the observation were from a jcode
-   session.** `todos/session_rose_1786957987850_ed471b6456696972.json`
-   (mtime `09:30:36Z`, 4 min 7 s before the question; session cwd
-   `$WORKTREE_PRIMARY`) contains an "adversarial review" plan for
-   D033/F23/D034 — unmistakably jcode-repo work. Older sessions (piglet, crab,
-   cactus) also predate the question but by 20+ minutes.
-3. **Storage and agent-tool paths verified correctly scoped.**
-   `jcode-base/src/todo.rs:239` `todo_path()` resolves
-   `~/.jcode/todos/<session_id>.json`; the tool reads and writes via
-   `ctx.session_id` (`tool/todo.rs:343,372`). A storage-side explanation is
-   now excluded by direct inspection, not just "unlikely on its face."
-4. **The render path contains two pointers that can disagree with the actual
-   session.** `state_ui.rs:81-87` `active_client_session_id()` returns
-   `self.remote_session_id` whenever `self.is_remote` — a stale or misrouted
-   remote pointer silently switches whose todos are loaded
-   (`todos_view.rs:42-44`). Separately, `note_client_focus`
-   (`state_ui.rs:89-104`) persists a *global* "last focused session"
-   (`dictation::remember_last_focused_session`). And
-   `build_todos_view_markdown` (`todos_view.rs:296-304`) labels whatever it
-   renders as "this session", so a misrouted render is indistinguishable from
-   a correct one at the UI. This upgrades "a shared UI surface" from
-   speculation to the only remaining code path consistent with facts 1-3.
+Run at least three concurrent sessions: two jcode worktrees and one unrelated
+repository. Give each a unique todo marker. For every pane or attachment under
+test, capture:
 
-Not pinned: which surface the operator was actually looking at (local pane vs
-remote-attached), so the remote-pointer vs last-focused-pointer split is still
-open. Requires the operator's recollection of the pane or a repro before
-assigning blame between the two candidates.
+1. the local session ID;
+2. the remote session ID, if any;
+3. the repository working directory and derived swarm ID;
+4. the session ID embedded in the rendered todo payload;
+5. which server attachment receives each session event.
 
-## Item 5 implementation finding (2026-08-20)
-
-The server-side inspection confirms that an accepted client retry is persisted
-inside `Agent::run_once_streaming_mpsc` before the provider call. That explains
-duplicate history turns, but not cross-session todo storage: the todo read and
-write paths remain keyed by `ctx.session_id` and
-`~/.jcode/todos/<session_id>.json`.
-
-The remaining client-side risk is the remote render pointer. Todo cards now
-include both `session_id` and the friendly name derived by
-`extract_session_name` in their payload and header. Both card display and live
-refresh log one info line when `is_remote` and the remote pointer differs from
-the local `session.id`, including an explicit `<none>` value for a missing
-pointer. This makes a stale or misrouted remote card identifiable without
-changing the session selection behavior.
-
-## Why these are grouped
-
-All five are the same failure shape: a message is *delivered* by the system's own
-account while not *arriving* in the place that would act on it, or arriving
-somewhere with no business receiving it. Success is reported by the sender's
-side, so nothing in either session's view indicates a problem. Note that item 1
-was only caught because the recipient happened to restate its outstanding items;
-a less chatty recipient would have left the sender believing the exchange had
-landed.
-
-## Related
-
-- The DM delivery investigation and its fix history: PR #194 and
-  `git log -- docs/issues/notify-delivery-reaches-no-agent.md
-  docs/issues/swarm-dm-delivery-investigation.md` (both deleted when solved).
-- `git log -- docs/issues/shared-git-hooks-couples-worktrees.md` — a
-  non-messaging instance of concurrent sessions sharing state they appear not
-  to share (fixed by f459a65c6, deleted when solved).
-
-## Design direction: immutable session identity and observation boundaries
-
-Carried from a proposal that is otherwise retired. Its name-ambiguity item
-already shipped: direct messages fail closed on an ambiguous name. The
-diagram-registry half is now session-scoped (`bind_diagram_scope` /
-`diagram_scope_for_session` in `crates/jcode-tui/src/tui/mermaid.rs`):
-registrations are stamped with the session id that produced them and reads are
-filtered to the bound session, so a session switch hides the prior session's
-diagrams without dropping them. Switching back re-reveals them without a
-re-render, because body-cache prefix reuse skips re-rendering retained
-messages. Other session-derived render caches (status snapshots, focus state)
-still need the same treatment.
-
-Every operator-facing view must bind to one immutable `session_id`. A viewer
-may show a friendly name as a convenience, but it must never select, retarget,
-or continue rendering a session by name, list position, recent activity, or a
-global last-focused pointer. If the bound session terminates, the view must
-show its terminal state rather than silently switching to another session.
-
-Session switches must clear or namespace every session-derived render cache,
-including diagrams, todo views, status snapshots, and focus state. Incoming
-events must be checked against the bound session before they update a view.
-Actions must use the exact session id; a friendly name matching more than one
-relevant session must fail with the candidate ids.
-
-Observation and execution must be separate. Opening a viewer must not claim a
-member, overwrite its recorded working directory, interrupt its turn, or make
-coordinator status and summary requests unavailable.
-
-Acceptance tests should prove that a session switch cannot display an earlier
-session's diagram, todo, transcript, or status; that a namesake cannot replace
-a terminated bound session; that ambiguous actions fail closed; and that
-attaching a viewer preserves the observed session's working directory and
-coordinator visibility.
+A reproduction must show that a view whose immutable bound session is B renders
+A's marker. If the bound ID has already changed to A, the defect is session
+selection or attachment routing, not todo fan-out. The final fix must bind every
+session-derived view and cache to one immutable session ID and reject incoming
+updates for any other ID.
