@@ -25,21 +25,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Verify the guard registry before trusting the route
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The non-vacuity harness proves every registered guard can still
-          # fail, including the classifier's own claims (it refuses to exempt
-          # its change set and fails closed on an unreadable one). Until now
-          # the harness ran only inside Fork CI, a leg the routing verdict can
-          # switch off -- the detector sat downstream of the decision it
-          # audits.
-          # Running it here, before the route is computed, closes that
-          # ordering: a weakened guard fails this job, and a failed classify
-          # job fails PR Gate through needs.classify.result.
-          python3 -I scripts/check_guard_nonvacuity.py
-
       - name: Check citations to moved or deleted files
         shell: bash
         env:

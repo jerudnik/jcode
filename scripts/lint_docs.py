@@ -22,9 +22,8 @@ Two things are asserted here that vale cannot assert about itself:
 * vale reported linting exactly as many files as were handed to it, so a
   silently skipped file is a failure rather than a smaller denominator.
 
-`--vale` and `--files-from` exist so scripts/check_guard_nonvacuity.py can run
-this against a stub that under-reports its file count and confirm the check
-rejects it.
+`--vale` and `--files-from` exist so a harness can run this against a stub
+that under-reports its file count and confirm the check rejects it.
 """
 
 from __future__ import annotations

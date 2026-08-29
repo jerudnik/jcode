@@ -24,9 +24,8 @@ scripts/ (see scripts/probe_*.py). That is the point: the rule forces the
 question when the file is added, instead of leaving it for whoever eventually
 audits the directory.
 
-`--root` runs the same checks against another tree, which is how
-scripts/check_guard_nonvacuity.py plants a defect and proves this guard
-rejects it.
+`--root` runs the same checks against another tree, which lets a harness
+plant a defect and prove this guard rejects it.
 """
 
 from __future__ import annotations

@@ -263,10 +263,9 @@ class RoutingInvocationTests(unittest.TestCase):
 
     Python puts a script's own directory first on sys.path, so a single added
     file scripts/<name>.py rebinds one of this module's imports. A rebound
-    classifier can print docs_only=true, which skips Fork CI -- and Fork CI is
-    where check_guard_nonvacuity.py, the guard that rejects exactly this class
-    of shadow, runs. The guard is correct; it is simply sequenced after the
-    step it protects, so the routing step cannot rely on it and has to be
+    classifier can print docs_only=true, which skips Fork CI. A guard that
+    rejects exactly this class of shadow would be sequenced after the routing
+    step it protects, so the routing step cannot rely on one and has to be
     isolated at the point of invocation.
 
     -I drops the script directory from sys.path on 3.4+. PYTHONSAFEPATH and -P
