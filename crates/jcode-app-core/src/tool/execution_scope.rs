@@ -466,20 +466,49 @@ fn codex_patch_targets(patch: &str) -> Vec<String> {
         "*** Update File: ",
         "*** Move to: ",
     ];
+    // Read each header exactly as `parse_apply_patch` does: trim the line end
+    // before matching the prefix, then trim the path. Authorizing the raw
+    // suffix instead lets a second space hide the target from this check while
+    // the executor still trims it back to an absolute or `../` path.
     patch
         .lines()
         .filter_map(|line| {
+            let line = line.trim_end();
             PREFIXES
                 .iter()
                 .find_map(|prefix| line.strip_prefix(prefix))
-                .map(str::to_string)
+                .map(|path| path.trim().to_string())
         })
+        .filter(|path| !path.is_empty())
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn patch_headers_are_read_the_way_the_executor_reads_them() {
+        // `parse_apply_patch` trims the extracted path, so padding after the
+        // prefix must not hide an escaping target from authorization.
+        let patch = concat!(
+            "*** Begin Patch\n",
+            "*** Add File:  /etc/passwd\n",
+            "+owned\n",
+            "*** Delete File: \t../sibling/notes.md\n",
+            "*** Update File: inside.txt   \n",
+            "*** End Patch\n",
+        );
+
+        assert_eq!(
+            codex_patch_targets(patch),
+            vec![
+                "/etc/passwd".to_string(),
+                "../sibling/notes.md".to_string(),
+                "inside.txt".to_string(),
+            ]
+        );
+    }
 
     #[cfg(unix)]
     #[test]
