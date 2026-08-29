@@ -133,6 +133,6 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
     );
     assert_eq!(
         app.status_notice(),
-        Some("🐝 ant done · 1/2 active".to_string())
+        Some("🐝 ant succeeded · 1/2 active".to_string())
     );
 }

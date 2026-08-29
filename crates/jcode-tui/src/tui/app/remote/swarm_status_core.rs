@@ -7,6 +7,7 @@
 //! "Swarm plan synced" notice from [`super::swarm_plan_core`].
 
 use crate::protocol::SwarmMemberStatus;
+use jcode_swarm_core::MemberLifecycleState;
 use jcode_tui_render::swarm_gallery::is_active_status;
 
 /// How many member names to list per transition category before collapsing
@@ -45,15 +46,22 @@ fn member_label(member: &SwarmMemberStatus) -> String {
 /// Transitions into active states and startup transitions (`starting` →
 /// `ready`) are intentionally silent: spawning is user-initiated and already
 /// visible.
+///
+/// Compare lifecycle states rather than the raw strings. The wire still
+/// carries older spellings of the same state, so matching literals here would
+/// drop a real completion reported as `completed` and would announce a
+/// spurious transition when a member's spelling changed but its state did not.
 fn classify(prev_status: &str, next_status: &str) -> Option<Transition> {
-    if prev_status == next_status {
+    let prev = MemberLifecycleState::from_compatibility_status(prev_status);
+    let next = MemberLifecycleState::from_compatibility_status(next_status);
+    if prev == next {
         return None;
     }
-    match next_status {
-        "succeeded" => Some(Transition::Succeeded),
-        "failed" => Some(Transition::Failed),
-        "stopped" => Some(Transition::Stopped),
-        "lost" => Some(Transition::Lost),
+    match next {
+        MemberLifecycleState::Succeeded => Some(Transition::Succeeded),
+        MemberLifecycleState::Failed => Some(Transition::Failed),
+        MemberLifecycleState::Stopped => Some(Transition::Stopped),
+        MemberLifecycleState::Lost => Some(Transition::Lost),
         _ => None,
     }
 }
@@ -70,7 +78,7 @@ fn format_names(mut names: Vec<String>) -> String {
 }
 
 /// Diff two swarm snapshots and build a status notice describing member
-/// lifecycle transitions, e.g. `🐝 bat done · 2/7 active` or
+/// lifecycle transitions, e.g. `🐝 bat succeeded · 2/7 active` or
 /// `🐝 crab failed · hen blocked · all 7 finished`. Returns `None` when
 /// nothing announceable changed.
 pub(in crate::tui::app) fn swarm_status_transition_notice(
@@ -153,6 +161,28 @@ mod tests {
         assert_eq!(
             swarm_status_transition_notice(&prev, &next).as_deref(),
             Some("🐝 ant succeeded · 1/2 active")
+        );
+    }
+
+    #[test]
+    fn older_spellings_of_success_are_still_announced() {
+        let prev = vec![member("ant", "running"), member("bat", "running")];
+        let next = vec![member("ant", "completed"), member("bat", "running")];
+        assert_eq!(
+            swarm_status_transition_notice(&prev, &next).as_deref(),
+            Some("🐝 ant succeeded · 1/2 active"),
+            "the wire still carries `completed` for a succeeded member"
+        );
+    }
+
+    #[test]
+    fn respelling_the_same_state_is_silent() {
+        let prev = vec![member("ant", "completed"), member("bat", "running")];
+        let next = vec![member("ant", "succeeded"), member("bat", "running")];
+        assert_eq!(
+            swarm_status_transition_notice(&prev, &next),
+            None,
+            "the member did not transition, only its spelling did"
         );
     }
 
