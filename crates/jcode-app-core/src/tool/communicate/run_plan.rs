@@ -34,6 +34,14 @@ fn graph_wall_clock(summary: &PlanGraphStatus) -> Result<(u64, u64)> {
     Ok((started.parse()?, limit.parse()?))
 }
 
+/// Hard wall-clock verdict for a running task graph. Pure so the budget
+/// boundary is unit-testable without a live swarm: a mutation probe deleted
+/// the previous inline comparison in the scheduler loop and zero tests went
+/// red, so the boundary now lives here where a test pins it.
+pub(super) fn wall_clock_exhausted(elapsed_ms: u64, limit_ms: u64) -> bool {
+    elapsed_ms > limit_ms
+}
+
 /// Decide how many swarm workers `run_plan` keeps active at once.
 ///
 /// Policy:
@@ -658,7 +666,7 @@ pub(super) async fn run_swarm_plan_loop(
         }
 
         let elapsed_ms = unix_now_ms().saturating_sub(graph_started_at_unix_ms);
-        if elapsed_ms > graph_wall_clock_limit_ms {
+        if wall_clock_exhausted(elapsed_ms, graph_wall_clock_limit_ms) {
             let message = format!(
                 "Task graph paused: hard wall-clock budget exceeded (limit {}s, observed {}s). The scheduler rejected further coordination and froze graph growth. Inspect the plan and start a smaller replacement graph; ordinary unfreeze cannot bypass the exhausted budget.",
                 graph_wall_clock_limit_ms / 1_000,
@@ -1053,5 +1061,13 @@ mod safety_tests {
             "1234:5678".to_string(),
         );
         assert_eq!(graph_wall_clock(&summary).unwrap(), (1234, 5678));
+    }
+
+    #[test]
+    fn wall_clock_budget_holds_at_limit_and_exhausts_past_it() {
+        assert!(!wall_clock_exhausted(0, 1_000));
+        assert!(!wall_clock_exhausted(1_000, 1_000));
+        assert!(wall_clock_exhausted(1_001, 1_000));
+        assert!(wall_clock_exhausted(u64::MAX, 1_000));
     }
 }
