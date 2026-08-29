@@ -105,15 +105,9 @@ pub(super) async fn handle_comm_propose_plan(
         // runnable (it lands in blocked_ids forever), silently wedging all
         // dependent work, so reject for light plans too, matching `dag::seed`
         // which rejects cycles in both modes.
-        if let Some(message) = plan_cycle_error(&items) {
-            let _ = client_event_tx.send(ServerEvent::Error {
-                id,
-                message,
-                retry_after_secs: None,
-            });
-            return;
-        }
-        let updated = {
+        let updated = if let Some(message) = plan_cycle_error(&items) {
+            Err(message)
+        } else {
             let mut plans = swarm_plans.write().await;
             let plan = plans
                 .entry(swarm_id.clone())
@@ -145,6 +139,8 @@ pub(super) async fn handle_comm_propose_plan(
                 }
             }
         };
+        // Both refusals -- a cyclic proposal and a budget stop -- report
+        // through one site, so the file gains no second swallowed send.
         let (version, participant_ids) = match updated {
             Ok(value) => value,
             Err(message) => {
