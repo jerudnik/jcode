@@ -784,9 +784,10 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
     );
     assert_eq!(
         loaded.members.get("worker-1").map(|m| m.status.as_str()),
-        Some("completed"),
+        Some("succeeded"),
         "post-snapshot terminal status must survive restart (terminal states \
-         are exempt from the crash-recovery rewrite)"
+         are exempt from the crash-recovery rewrite); the control log still \
+         spells this \"completed\" and reads back as the same state"
     );
 }
 
