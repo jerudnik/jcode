@@ -1844,3 +1844,22 @@ restore payload exactly after stripping response-only keys, the ruleset is
 `active` with empty bypass actors and both required contexts restored, and
 `scripts/fork-health.sh --live` reported every invariant green. The window
 was open for roughly four seconds and nothing else merged inside it.
+
+## Maintenance window: PR #243 merged under the recorded procedure
+
+**2026-08-29.** PR #243 consolidated fourteen workflows into six and moved
+both required contexts' defining jobs into `.github/workflows/pr.yml`, so it
+changed protected paths — workflow files and
+`scripts/required-checks.json` — and `Governance Root` stayed red by design
+while every other check was green. The window procedure above was executed.
+
+The live ruleset digest matched the recorded baseline before anything was
+touched, and the pull request head's `scripts/required-checks.json` blob was
+verified identical to the reviewed local commit. The window payload removed
+only the `Governance Root` context, the pull request was merged through the
+REST endpoint as merge commit `1dce3d14a`, and the writable contract was put
+back verbatim. A fresh read then reproduced the baseline digest exactly, and
+`scripts/fork-health.sh --live` reported every invariant green, including
+that `Governance Root` and `PR Gate` are now each uniquely defined in
+`pr.yml`. The context names never changed, only their defining workflow. The
+window was open for roughly three seconds and nothing else merged inside it.
