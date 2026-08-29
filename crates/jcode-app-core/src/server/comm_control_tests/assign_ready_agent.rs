@@ -57,6 +57,7 @@ async fn assign_task_without_target_picks_ready_agent() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(

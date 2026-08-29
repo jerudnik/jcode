@@ -37,6 +37,7 @@ async fn task_control_wake_returns_structured_response_with_plan_summary() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -130,6 +131,7 @@ async fn task_control_resume_without_task_id_uses_unique_target_assignment() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -219,6 +221,7 @@ async fn task_control_without_task_id_rejects_ambiguous_target_assignments() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -318,6 +321,7 @@ async fn task_control_resume_busy_agent_rejects_without_mutating_plan() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -422,6 +426,7 @@ async fn requeue_existing_assignment_preserves_prior_progress_history() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
@@ -518,6 +523,7 @@ async fn task_control_retry_re_dispatches_after_recent_identical_retry() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
