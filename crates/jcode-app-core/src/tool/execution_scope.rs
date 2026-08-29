@@ -294,6 +294,12 @@ pub(crate) fn authorize_tool_call(
                 boundary,
             });
         }
+        "swarm" => {
+            // Spawning is the one way a bound session can reach the filesystem
+            // without naming a file: a child rooted outside the boundary would
+            // inherit no scope of its own and could read and write anywhere.
+            authorize_optional_target(input, "working_dir", tool_name, &boundary)?;
+        }
         "batch"
         | "bg"
         | "conversation_search"
@@ -302,7 +308,6 @@ pub(crate) fn authorize_tool_call(
         | "memory"
         | "session_search"
         | "skill_manage"
-        | "swarm"
         | "todo"
         | "webfetch"
         | "websearch" => {}
@@ -604,5 +609,51 @@ mod tests {
                 .to_string()
                 .contains(&boundary.display().to_string())
         );
+    }
+
+    #[test]
+    fn scoped_spawn_cannot_root_a_child_session_outside_the_boundary() {
+        // A child session inherits no scope of its own, so a spawn rooted
+        // outside the boundary would hand the caller unrestricted file tools.
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let inside = temp.path().join("inside");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&inside).expect("inside dir");
+        std::fs::create_dir_all(&outside).expect("outside dir");
+
+        let swarm_id = format!("spawn-scope-{}", temp.path().display());
+        let session_id = format!("spawn-session-{}", temp.path().display());
+        let boundary = record_plan_execution_scope(&swarm_id, 1, &inside).expect("record scope");
+        bind_session_execution_scope(&session_id, &swarm_id, 1).expect("bind scope");
+
+        let escape = authorize_tool_call(
+            &session_id,
+            "swarm",
+            &serde_json::json!({"action": "spawn", "working_dir": outside.to_string_lossy()}),
+        )
+        .expect_err("spawn outside the boundary");
+        let allowed = authorize_tool_call(
+            &session_id,
+            "swarm",
+            &serde_json::json!({"action": "spawn", "working_dir": inside.to_string_lossy()}),
+        );
+        let unrooted = authorize_tool_call(
+            &session_id,
+            "swarm",
+            &serde_json::json!({"action": "list"}),
+        );
+        clear_session_execution_scope(&session_id);
+
+        assert!(matches!(
+            &escape,
+            ExecutionScopeError::OutsideBoundary { .. }
+        ));
+        assert!(
+            escape
+                .to_string()
+                .contains(&boundary.display().to_string())
+        );
+        assert_eq!(allowed.expect("spawn inside the boundary"), Some(boundary.clone()));
+        assert_eq!(unrooted.expect("swarm call without a directory"), Some(boundary));
     }
 }
