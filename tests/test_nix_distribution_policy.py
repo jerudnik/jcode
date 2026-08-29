@@ -452,11 +452,50 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         while `aarch64-linux` had never been built by any workflow.
         """
         matrix = json.loads((ROOT / ".github/workflows/build-matrix.json").read_text())
-        built = {
-            entry["system"]
+        declared = {
+            key: {(entry["system"], entry["runner"]) for entry in entries}
             for key, entries in matrix.items()
             if not key.startswith("_")
-            for entry in entries
+        }
+
+        workflow = (ROOT / ".github/workflows/nix.yml").read_text()
+        build_job = re.search(
+            r"^  build:\n(?P<body>.*?)(?=^  [a-z0-9_-]+:\n|\Z)",
+            workflow,
+            re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(build_job, "nix.yml lost its build job")
+        build_body = build_job.group("body")
+        self.assertIn("runs-on: ${{ matrix.runner }}", build_body)
+        workflow_matrix = re.search(
+            r"matrix:\s*\$\{\{\s*fromJSON\(\s*"
+            r"github\.event_name == 'pull_request'\s*&&\s*'([^']+)'\s*"
+            r"\|\|\s*'([^']+)'\s*\)\s*\}\}",
+            build_body,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            workflow_matrix,
+            "could not parse the pull-request and default build matrices from nix.yml",
+        )
+        actual = {
+            mode: {
+                (entry["system"], entry["runner"])
+                for entry in json.loads(raw)["include"]
+            }
+            for mode, raw in zip(
+                ("pull_request", "default"), workflow_matrix.groups(), strict=True
+            )
+        }
+        self.assertEqual(
+            declared,
+            actual,
+            "build-matrix.json and the nix.yml build job disagree",
+        )
+        built = {
+            system
+            for entries in actual.values()
+            for system, _runner in entries
         }
         flake = (ROOT / "flake.nix").read_text()
         systems_block = re.search(r"systems\s*=\s*\[(.*?)\]", flake, re.DOTALL)

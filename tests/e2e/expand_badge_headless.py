@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Headless E2E regression for the edit expand badge shortcut.
 
+Verdict: KEEP-MANUAL. TUI maintainers run this after changing expand-badge
+input handling. It requires a built jcode binary and a live self-development
+debug daemon, so CI does not collect it.
+
 This starts a real jcode TUI client inside a pseudo-terminal, prepares a real
 rendered edit-diff expand-badge fixture through the client debug command, sends
 terminal key bytes to the PTY, and asserts the live TUI state changed.

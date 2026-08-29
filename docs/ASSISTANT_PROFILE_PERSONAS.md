@@ -114,8 +114,8 @@ off the details.
   Proves: `mode` parses, persona text is composed deterministically (stance then
   reminder), default `execute`/no-reminder injects nothing, and persona lands in
   the dynamic part without forking the cache.
-  Limit: does not prove the live conversational stance differs per profile; that
-  is a human-in-the-loop session check (run `jcode assistant infra` vs
-  `jcode assistant scratch` and compare the opening stance) deferred to a
-  John-driven session, since reloading the live daemon here would clobber the
-  running orchestration session.
+  Limit: does not prove the live conversational stance differs per profile.
+- **RETIRE:** the deferred live comparison between `jcode assistant infra` and
+  `jcode assistant scratch` will not be run as a release or documentation gate.
+  The accepted loss is that this document claims deterministic persona
+  composition, not an empirically measured difference in model behavior.

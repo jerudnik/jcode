@@ -490,6 +490,14 @@ pub struct AgentsConfig {
     /// string only when you deliberately want every swarm worker pinned to a
     /// specific model regardless of which model spawned them.
     pub swarm_model: Option<String>,
+    /// Exact model identities that swarm spawns must refuse.
+    ///
+    /// Entries may include a route prefix, such as
+    /// `"cursor:gpt-5.6-sol-high"`. Matching is exact after trimming, so a
+    /// route-prefixed identity and a bare model name remain distinct. Empty by
+    /// default, which leaves spawn behavior unchanged until the operator sets a
+    /// policy.
+    pub swarm_denied_models: Vec<String>,
     /// Default terminal mode for swarm-created agents.
     pub swarm_spawn_mode: SwarmSpawnMode,
     /// Maximum percentage (1-90) of the chat column height the inline swarm
@@ -617,6 +625,7 @@ impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
             swarm_model: None,
+            swarm_denied_models: Vec::new(),
             swarm_spawn_mode: SwarmSpawnMode::default(),
             swarm_gallery_max_pct: None,
             swarm_strip_layout: SwarmStripLayout::default(),

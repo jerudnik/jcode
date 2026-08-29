@@ -312,6 +312,20 @@ fn is_inherit_sentinel(model: &str) -> bool {
     trimmed.eq_ignore_ascii_case("inherit") || trimmed.eq_ignore_ascii_case("coordinator")
 }
 
+/// Enforce the operator's explicit swarm model policy before provider
+/// resolution. This is deliberately separate from the correctness gate in
+/// `validate_concrete_spawn_selection`: a model can resolve successfully and
+/// still be denied by policy.
+fn validate_swarm_model_policy(model: &str, denied_models: &[String]) -> anyhow::Result<()> {
+    let identity = model.trim();
+    if denied_models.iter().any(|denied| denied.trim() == identity) {
+        anyhow::bail!(
+            "Swarm model '{identity}' is denied by policy in `agents.swarm_denied_models`."
+        );
+    }
+    Ok(())
+}
+
 /// Selection that inherits the coordinator's model, provider key, and route.
 fn inherit_coordinator_selection(coordinator: &CoordinatorSpawnIdentity) -> SwarmSpawnSelection {
     SwarmSpawnSelection {
@@ -458,6 +472,7 @@ fn resolve_swarm_spawn_selection(
     configured_swarm_model: Option<String>,
     coordinator: &CoordinatorSpawnIdentity,
     routes: &[ModelRoute],
+    denied_models: &[String],
 ) -> anyhow::Result<SwarmSpawnSelection> {
     // A per-spawn requested model (the `model` param on `swarm spawn`) takes
     // precedence over the `agents.swarm_model` config pin. An explicit
@@ -470,6 +485,7 @@ fn resolve_swarm_spawn_selection(
         if is_inherit_sentinel(&requested) {
             return Ok(inherit_coordinator_selection(coordinator));
         }
+        validate_swarm_model_policy(&requested, denied_models)?;
         return selection_for_concrete_model(requested, coordinator, routes);
     }
 
@@ -482,7 +498,10 @@ fn resolve_swarm_spawn_selection(
         .filter(|model| !model.trim().is_empty() && !is_inherit_sentinel(model));
 
     match configured_swarm_model {
-        Some(model) => selection_for_concrete_model(model, coordinator, routes),
+        Some(model) => {
+            validate_swarm_model_policy(&model, denied_models)?;
+            selection_for_concrete_model(model, coordinator, routes)
+        }
         None => Ok(inherit_coordinator_selection(coordinator)),
     }
 }
@@ -766,6 +785,7 @@ pub(super) async fn spawn_swarm_agent(
         configured_swarm_model.clone(),
         &coordinator,
         &spawn_routes,
+        &agents_config.swarm_denied_models,
     )?;
     let spawn_model = selection.model.clone();
     let spawn_provider_key = selection.provider_key.clone();

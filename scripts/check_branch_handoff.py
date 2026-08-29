@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Verdict: KEEP-MANUAL
+# Operator: the session coordinator runs this at local closeout, before opening
+# or merging pull requests. It inspects workstation-local refs and GitHub state,
+# so a shared CI checkout cannot own its result.
 """Report `automation/**` work that is not on a path to `main`.
 
 Work in this repository lands through a PR from an `automation/**` branch;

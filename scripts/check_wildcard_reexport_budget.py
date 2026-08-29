@@ -20,6 +20,8 @@ Policy:
 The long-term goal is to drive this budget to zero as the migration-era
 re-export spine (base -> app-core -> tui -> root) is dismantled. See
 docs/CRATE_OWNERSHIP_BOUNDARIES.md.
+
+Status: WIRE. `scripts/preflight.sh` runs this guard through `just pre-pr`.
 """
 
 from __future__ import annotations

@@ -376,9 +376,13 @@ protection, task-ID collision policy documented and tested, and the F05
 verification matrix (cross-instance concurrency, crash-interruption/torn
 write, malformed-file matrix, orphan re-verification).
 
-Review follow-ups (nonblocking): F05-I1 cross-process last-writer-wins on
-non-terminal fields remains an honest deferral (production topology is a
-single global manager); test naming could be tightened.
+**WIRE:** cross-process write ordering for background-task fields remains a
+durability requirement, tracked in
+[`background-task-cross-process-write-order.md`](../issues/background-task-cross-process-write-order.md).
+Atomic replacement prevents torn JSON, and the path-keyed mutex serializes
+writers only within one process; neither prevents a stale writer in another
+process from replacing newer terminal state. Test naming could still be
+tightened, but that is not tracked work.
 
 Process note: the DAG driver's deep-mode gate auto-expanded the review node
 into 30+ analysis children after the implementation completed; per the D012
@@ -406,9 +410,12 @@ model IDs on the Cursor route in headless sessions. The review therefore
 fell to Anthropic `claude-opus-4-8`, the only currently working reviewer in
 the rotation.
 
-Nonblocking follow-ups from review: PID-reuse hardening for mcp-serve
-owner-liveness (start-time/token cross-check) and single-reaper routing for
-the ECHILD fallback; both are F07/F08-window candidates.
+**RETIRE:** no start-time/token cross-check for PID reuse and no single-reaper
+routing for the ECHILD fallback are planned. `mcp-serve` continues to poll the
+configured owner PID every 250 ms, exits only when that owner is definitively
+dead, and fails safe on unknown status. The accepted loss is that PID reuse can
+delay owner-death detection and concurrent reapers may still reach the ECHILD
+fallback.
 
 **Reopen trigger:** F08's integrated gate finding a descendant-survival
 case.

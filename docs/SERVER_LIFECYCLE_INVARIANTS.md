@@ -51,8 +51,9 @@ That means `getppid() == 1` becomes true as soon as the user quits normally.
 Raw `getppid()` is therefore not a safe "abandoned daemon" signal: using it
 would collapse the warm-reconnect window for every normal session.
 
-Faster abandoned-daemon cleanup than the 300-second idle timeout needs a real
-spawner heartbeat. That mechanism is deferred.
+**RETIRE:** no spawner heartbeat is planned. The 300-second idle timeout remains
+the cleanup contract for an abandoned persistent daemon. The accepted loss is
+that abandonment is not detected faster when no client remains connected.
 
 ## Caps table
 

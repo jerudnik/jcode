@@ -96,12 +96,11 @@ jobs:
     # A tag push carries no inputs, so it is spelled out rather than left to
     # an undefined input evaluating false and skipping the release build.
     if: ${{ github.event_name == 'push' || inputs.build_package }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
-      matrix:
-        system: [x86_64-linux]
+      matrix: ${{ fromJSON(github.event_name == 'pull_request' && '{"include":[{"system":"x86_64-linux","runner":"ubuntu-latest"}]}' || '{"include":[{"system":"x86_64-linux","runner":"ubuntu-latest"},{"system":"aarch64-darwin","runner":"macos-latest"}]}') }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -138,4 +137,3 @@ jobs:
           useDaemon: false
           pathsToPush: ./result ./result-deps
           cachixArgs: -j2
-
