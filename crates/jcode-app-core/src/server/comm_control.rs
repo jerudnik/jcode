@@ -60,7 +60,7 @@ fn filter_swarm_agent_candidates<'a>(
             member.session_id != req_session_id
                 && member.swarm_id.as_deref() == Some(swarm_id)
                 && member.role == "agent"
-                && matches!(member.status.as_str(), "ready" | "completed")
+                && matches!(member.status.as_str(), "ready" | "succeeded")
                 && is_drivable_auto_worker(member, req_session_id)
         })
         .collect()

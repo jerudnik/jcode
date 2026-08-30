@@ -595,7 +595,7 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
             && ((status == "succeeded")
                 || (report_back_to_session_id.is_some()
                     && old_status == "running"
-                    && matches!(status, "succeeded" | "failed" | "stopped"))
+                    && matches!(status, "ready" | "succeeded" | "failed" | "stopped"))
                 // A lost worker is never routine: notify whoever is responsible
                 // (owner, else coordinator) whenever a member dies while it
                 // was doing or holding work, so worker deaths cannot pass

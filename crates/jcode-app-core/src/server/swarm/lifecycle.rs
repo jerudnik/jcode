@@ -826,40 +826,45 @@ pub(in crate::server) async fn refresh_swarm_task_staleness(
 
 #[cfg(test)]
 mod lifecycle_consistency_tests {
-    use jcode_swarm_core::SwarmLifecycleStatus;
+    use jcode_swarm_core::MemberLifecycleState;
 
+    /// Every surface that accepts legacy status strings funnels them through
+    /// `from_compatibility_status` (await targets, persistence recovery, the
+    /// member registry), so this mapping is the single vocabulary authority.
     #[test]
-    fn terminal_worker_surfaces_use_one_vocabulary() {
+    fn compatibility_inputs_collapse_to_canonical_states() {
         let cases = [
-            ("ready", "succeeded"),
-            ("failed", "failed"),
-            ("stopped", "stopped"),
-            ("crashed", "lost"),
+            ("ready", MemberLifecycleState::Ready),
+            ("completed", MemberLifecycleState::Succeeded),
+            ("done", MemberLifecycleState::Succeeded),
+            ("succeeded", MemberLifecycleState::Succeeded),
+            ("error", MemberLifecycleState::Failed),
+            ("failed", MemberLifecycleState::Failed),
+            ("cancelled", MemberLifecycleState::Stopped),
+            ("stopped", MemberLifecycleState::Stopped),
+            ("crashed", MemberLifecycleState::Lost),
+            ("lost", MemberLifecycleState::Lost),
         ];
 
-        for (legacy_status, expected) in cases {
-            let surfaces = [
-                ("await_members", legacy_status.to_string()),
-                ("swarm list", legacy_status.to_string()),
-                ("TUI", legacy_status.to_string()),
-                (
-                    "persisted session",
-                    format!("{:?}", crate::session::SessionStatus::Active).to_ascii_lowercase(),
-                ),
-                (
-                    "durable swarm record",
-                    SwarmLifecycleStatus::from(legacy_status.to_string())
-                        .as_str()
-                        .into_owned(),
-                ),
-            ];
+        for (input, expected) in cases {
+            assert_eq!(
+                MemberLifecycleState::from_compatibility_status(input),
+                expected,
+                "compatibility input {input} must parse to {expected:?}"
+            );
+        }
+    }
 
-            for (surface, actual) in surfaces {
-                assert_eq!(
-                    actual, expected,
-                    "{surface} disagreed for terminal compatibility input {legacy_status}"
-                );
-            }
+    /// "ready" is a live state (a worker awaiting more work), never a
+    /// completion, while every terminal alias classifies as terminal.
+    #[test]
+    fn terminal_classification_follows_canonical_states() {
+        assert!(!MemberLifecycleState::from_compatibility_status("ready").is_terminal());
+        for input in ["completed", "done", "failed", "stopped", "crashed"] {
+            assert!(
+                MemberLifecycleState::from_compatibility_status(input).is_terminal(),
+                "compatibility input {input} must classify as terminal"
+            );
         }
     }
 }
