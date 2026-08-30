@@ -33,6 +33,7 @@ fn member_for(swarm_id: &str, session_id: &str, role: &str, status: &str) -> Swa
         swarm_id: Some(swarm_id.to_string()),
         swarm_enabled: true,
         status: status.to_string(),
+        lifecycle: Default::default(),
         detail: None,
         task_label: None,
         subagent_type: None,
@@ -653,6 +654,7 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         swarm_id: Some(swarm_id.to_string()),
         swarm_enabled: true,
         status: status.to_string(),
+        lifecycle: Default::default(),
         detail: None,
         task_label: None,
         subagent_type: None,
@@ -790,7 +792,8 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
             .map(|m| jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&m.status)),
         Some(jcode_swarm_core::MemberLifecycleState::Succeeded),
         "post-snapshot terminal status must survive restart (terminal states \
-         are exempt from the crash-recovery rewrite)"
+         are exempt from the crash-recovery rewrite); the control log still \
+         spells this \"completed\" and reads back as the same state"
     );
 }
 
@@ -813,6 +816,7 @@ fn recovery_with_legacy_snapshot_replays_whole_log_idempotently() {
         swarm_id: Some(swarm_id.to_string()),
         swarm_enabled: true,
         status: "ready".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         task_label: None,
         subagent_type: None,

@@ -34,64 +34,6 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 static BACKGROUND_TOOL_SIGNALS: LazyLock<StdMutex<HashMap<String, InterruptSignal>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 
-/// Canonical assignment lifecycle for every live or retained swarm member.
-/// Legacy `SwarmMember::status` remains a compatibility input while callers
-/// migrate, but no output surface should read it directly.
-static SWARM_MEMBER_LIFECYCLES: LazyLock<
-    StdMutex<HashMap<String, SwarmLifecycleStatus>>,
-> = LazyLock::new(|| StdMutex::new(HashMap::new()));
-
-pub(super) fn swarm_member_lifecycle(
-    session_id: &str,
-    compatibility_status: &str,
-) -> SwarmLifecycleStatus {
-    let mut lifecycles = SWARM_MEMBER_LIFECYCLES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let lifecycle = lifecycles
-        .entry(session_id.to_string())
-        .or_insert_with(|| SwarmLifecycleStatus::from(compatibility_status.to_string()));
-    let compatibility_state =
-        jcode_swarm_core::MemberLifecycleState::from_compatibility_status(compatibility_status);
-    if lifecycle.revision == 0 && lifecycle.state != compatibility_state {
-        lifecycle.state = compatibility_state;
-    }
-    lifecycle.clone()
-}
-
-pub(super) fn store_swarm_member_lifecycle(
-    session_id: &str,
-    lifecycle: SwarmLifecycleStatus,
-) {
-    SWARM_MEMBER_LIFECYCLES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(session_id.to_string(), lifecycle);
-}
-
-pub(super) fn remove_swarm_member_lifecycle(session_id: &str) {
-    SWARM_MEMBER_LIFECYCLES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(session_id);
-}
-
-pub(super) fn rename_swarm_member_lifecycle(
-    old_session_id: &str,
-    new_session_id: &str,
-    compatibility_status: &str,
-) {
-    let lifecycle = {
-        let mut lifecycles = SWARM_MEMBER_LIFECYCLES
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        lifecycles.remove(old_session_id).unwrap_or_else(|| {
-            SwarmLifecycleStatus::from(compatibility_status.to_string())
-        })
-    };
-    store_swarm_member_lifecycle(new_session_id, lifecycle);
-}
-
 /// Register (or replace) the background-tool signal for a session.
 pub(super) fn register_background_tool_signal(session_id: &str, signal: InterruptSignal) {
     if let Ok(mut map) = BACKGROUND_TOOL_SIGNALS.lock() {
@@ -272,6 +214,11 @@ pub struct SwarmMember {
     pub swarm_enabled: bool,
     /// Lifecycle status (ready, running, completed, failed, stopped, etc.)
     pub status: String,
+    /// Canonical assignment lifecycle. Legacy `status` remains a
+    /// compatibility mirror while callers migrate, but no output surface
+    /// should read it directly. A default (revision 0) value tracks whatever
+    /// `status` says until the first real lifecycle event arrives.
+    pub lifecycle: SwarmLifecycleStatus,
     /// Optional detail (current task, error, etc.)
     pub detail: Option<String>,
     /// Stable, human-readable label of the task/role this member was spawned
@@ -317,7 +264,13 @@ pub struct SwarmMember {
 
 impl SwarmMember {
     pub fn lifecycle(&self) -> SwarmLifecycleStatus {
-        swarm_member_lifecycle(&self.session_id, &self.status)
+        let mut lifecycle = self.lifecycle.clone();
+        let compatibility_state =
+            jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&self.status);
+        if lifecycle.revision == 0 && lifecycle.state != compatibility_state {
+            lifecycle.state = compatibility_state;
+        }
+        lifecycle
     }
 
     pub fn lifecycle_status(&self) -> &'static str {
@@ -334,7 +287,7 @@ impl SwarmMember {
             return false;
         }
         self.status = lifecycle.state.as_str().to_string();
-        store_swarm_member_lifecycle(&self.session_id, lifecycle);
+        self.lifecycle = lifecycle;
         true
     }
 
@@ -467,8 +420,8 @@ impl SwarmMember {
         record: SwarmMemberRecord,
         event_tx: mpsc::UnboundedSender<ServerEvent>,
     ) -> Self {
-        store_swarm_member_lifecycle(&record.session_id, record.status.clone());
         Self {
+            lifecycle: record.status.clone(),
             session_id: record.session_id,
             event_tx,
             event_txs: HashMap::new(),

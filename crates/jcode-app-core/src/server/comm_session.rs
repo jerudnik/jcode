@@ -697,6 +697,7 @@ async fn register_visible_spawned_member(
                 working_dir: working_dir.map(PathBuf::from),
                 swarm_id: Some(swarm_id.to_string()),
                 swarm_enabled: true,
+                lifecycle: jcode_swarm_core::SwarmLifecycleStatus::from(status.clone()),
                 status,
                 detail,
                 task_label: None,

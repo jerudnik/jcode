@@ -99,6 +99,7 @@ async fn handle_resume_session_warns_both_clients_on_refused_takeover() -> Resul
             swarm_id: None,
             swarm_enabled: false,
             status: "ready".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             task_label: None,
             subagent_type: None,

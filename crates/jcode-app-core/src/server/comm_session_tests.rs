@@ -69,6 +69,7 @@ fn member(
             swarm_id: swarm_id.map(|id| id.to_string()),
             swarm_enabled: true,
             status: "ready".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             friendly_name: Some(session_id.to_string()),
             report_back_to_session_id: None,

@@ -135,6 +135,7 @@ mod transcript_routing_tests {
             swarm_id: None,
             swarm_enabled: false,
             status: "ready".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             friendly_name: None,
             report_back_to_session_id: None,

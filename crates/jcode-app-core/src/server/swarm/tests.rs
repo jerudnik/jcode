@@ -180,6 +180,7 @@ fn swarm_member(
             swarm_id: Some("swarm-1".to_string()),
             swarm_enabled: true,
             status: "ready".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             task_label: None,
             subagent_type: None,
@@ -1578,7 +1579,7 @@ async fn update_member_status_notifies_owner_when_worker_crashes_mid_task() {
             ServerEvent::Notification { message, .. }
                 if message.contains("was lost while working")
         )),
-        "owner should be notified of the crash, got {owner_events:?}"
+        "owner should be notified that the worker was lost, got {owner_events:?}"
     );
 }
 

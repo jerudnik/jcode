@@ -98,6 +98,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
         swarm_id: Some("swarm-alpha".to_string()),
         swarm_enabled: true,
         status: "running".to_string(),
+        lifecycle: Default::default(),
         detail: Some("writing tests".to_string()),
         friendly_name: Some("fox".to_string()),
         report_back_to_session_id: Some("session-2".to_string()),
@@ -182,6 +183,7 @@ fn ready_headless_member_with_report_stops_without_losing_report() {
         swarm_id: Some("swarm-gamma".to_string()),
         swarm_enabled: true,
         status: "ready".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         friendly_name: Some("pig".to_string()),
         report_back_to_session_id: Some("session-coordinator".to_string()),
@@ -225,6 +227,7 @@ fn terminal_member_retention_preserves_recent_reports_and_prunes_expired_records
         swarm_id: Some("swarm-terminal".to_string()),
         swarm_enabled: true,
         status: "completed".to_string(),
+        lifecycle: Default::default(),
         detail: Some("done".to_string()),
         friendly_name: Some("otter".to_string()),
         report_back_to_session_id: Some("session-coordinator".to_string()),
@@ -275,6 +278,7 @@ fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
         swarm_id: Some("swarm-legacy".to_string()),
         swarm_enabled: true,
         status: "failed".to_string(),
+        lifecycle: Default::default(),
         detail: Some("old failure".to_string()),
         friendly_name: Some("badger".to_string()),
         report_back_to_session_id: None,
@@ -318,6 +322,7 @@ fn recovery_induced_terminal_status_starts_retention_at_load_time() {
         swarm_id: Some("swarm-recovery".to_string()),
         swarm_enabled: true,
         status: "ready".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         friendly_name: Some("hare".to_string()),
         report_back_to_session_id: None,
@@ -362,6 +367,7 @@ fn startup_gc_removes_expired_terminal_members_from_durable_snapshot() {
         swarm_id: Some("swarm-expired".to_string()),
         swarm_enabled: true,
         status: "completed".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         friendly_name: Some("fox".to_string()),
         report_back_to_session_id: None,
@@ -997,6 +1003,7 @@ fn persisted_swarm_state_without_plan_still_restores_coordinator_and_members() {
         swarm_id: Some("swarm-gamma".to_string()),
         swarm_enabled: true,
         status: "ready".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         friendly_name: Some("owl".to_string()),
         report_back_to_session_id: None,
@@ -1084,5 +1091,54 @@ fn empty_persist_dissolution_removes_backup_and_cannot_resurrect() {
     assert!(
         !loaded.coordinators.contains_key("swarm-dissolve"),
         "a dissolved swarm must not be restored on the next load"
+    );
+}
+
+#[test]
+fn reload_recovery_reads_a_persisted_status_by_state() {
+    // A status read back from disk carries the epoch, revision and timestamp
+    // it was last written with. Recovery must classify it by lifecycle state;
+    // comparing whole values against the zero-valued aliases matches only a
+    // freshly constructed constant, so every persisted member would fall
+    // through to the crashed branch.
+    let persisted = |state| jcode_swarm_core::SwarmLifecycleStatus {
+        state,
+        assignment_epoch: 4,
+        revision: 9,
+        reason: None,
+        updated_at_unix_ms: 1_787_900_000_000,
+    };
+    use jcode_swarm_core::MemberLifecycleState as State;
+    const RECOVERED_AT: u64 = 1_787_903_000_000;
+
+    let (status, detail) = recover_member_status(persisted(State::Succeeded), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Succeeded, "{detail:?}");
+    assert_eq!(status.assignment_epoch, 4, "recovery keeps the assignment");
+
+    let (status, _) = recover_member_status(persisted(State::Failed), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Failed);
+
+    let (status, detail) = recover_member_status(persisted(State::Running), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Lost);
+    assert!(
+        detail.unwrap_or_default().contains("while running"),
+        "a member running at reload is reported as lost in flight"
+    );
+    assert_eq!(
+        status.assignment_epoch, 4,
+        "the assignment epoch survives recovery so a late report is still recognised as stale"
+    );
+    assert_eq!(status.revision, 10, "recovery is a lifecycle transition");
+    assert_eq!(status.updated_at_unix_ms, RECOVERED_AT);
+
+    let (status, detail) = recover_member_status(persisted(State::Ready), None, true, RECOVERED_AT);
+    assert_eq!(status.state, State::Stopped);
+    assert!(detail.unwrap_or_default().contains("idle worker"));
+
+    let (status, _) = recover_member_status(persisted(State::Starting), None, true, RECOVERED_AT);
+    assert_eq!(
+        status.state,
+        State::Lost,
+        "a nonterminal headless member did not survive the reload"
     );
 }
