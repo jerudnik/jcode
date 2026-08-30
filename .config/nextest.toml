@@ -1,3 +1,13 @@
+# A hung test must become a red test, not a stalled run. Every test is
+# marked SLOW at 60s and terminated -- reported as a timeout failure that
+# names the test -- at 300s. The slowest known test (the desktop
+# state-space walk) takes ~102s, so anything past 300s is a hang. Before
+# this cap, a deadlocked test stalled CI until the job-level timeout
+# killed the whole run with no culprit named (PR #237's 90-minute runs,
+# root-caused and fixed in #245).
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 # Tests that boot a real jcode server (socket, session recovery, swarm
 # workers) carry internal 5s deadlines that starve when dozens of such
 # processes contend for the machine alongside the rest of the suite.
