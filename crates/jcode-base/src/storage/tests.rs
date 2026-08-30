@@ -93,6 +93,54 @@ fn opportunistic_fixture_lease_skips_foreign_writer_child_without_blocking() {
 }
 
 #[test]
+fn reader_joins_active_generation_while_writer_waits() {
+    // Regression: read leases live as long as their owning fixture, and one
+    // fixture's test may need further read leases (on other threads) before it
+    // can finish. If a queued writer barred those dependent readers, the
+    // process deadlocked. New readers must join an active read generation even
+    // while a writer waits.
+    let lock = test_env_lock_inner();
+    let first = acquire_test_env_read(Arc::clone(&lock));
+
+    let writer_lock = Arc::clone(&lock);
+    let writer = std::thread::spawn(move || {
+        let _write = acquire_test_env_write(writer_lock);
+    });
+    // Wait until the writer is queued.
+    loop {
+        let state = lock
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.waiting_writers > 0 {
+            break;
+        }
+        drop(state);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    let reader_lock = Arc::clone(&lock);
+    let dependent_reader = std::thread::spawn(move || {
+        let _read = acquire_test_env_read(reader_lock);
+    });
+    dependent_reader
+        .join()
+        .expect("dependent reader must be admitted while a writer waits");
+
+    drop(first);
+    writer
+        .join()
+        .expect("writer must acquire once readers drain");
+
+    // At quiescence a queued writer still beats a newly arriving reader: the
+    // writer barrier applies when no readers are active.
+    let write = lock_test_env_write();
+    drop(write);
+    let read = lock_test_env_read();
+    drop(read);
+}
+
+#[test]
 #[should_panic(expected = "cannot acquire a test environment write lease")]
 fn test_env_write_rejects_read_upgrade() {
     let _read = lock_test_env_read();
