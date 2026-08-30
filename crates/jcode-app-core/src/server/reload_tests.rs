@@ -29,6 +29,7 @@ fn member(session_id: &str, status: &str) -> SwarmMember {
         swarm_id: None,
         swarm_enabled: false,
         status: status.to_string(),
+        lifecycle: Default::default(),
         detail: None,
         task_label: None,
         subagent_type: None,

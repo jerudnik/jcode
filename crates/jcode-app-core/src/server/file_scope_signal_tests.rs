@@ -26,6 +26,7 @@ fn member(
         swarm_id: Some("scope-signal-test".to_string()),
         swarm_enabled: true,
         status: "ready".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         task_label: None,
         subagent_type: None,

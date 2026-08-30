@@ -244,13 +244,9 @@ pub(super) async fn handle_clear_session(
         let mut members = swarm_members.write().await;
         if let Some(mut member) = members.remove(client_session_id) {
             let swarm_id = member.swarm_id.clone();
-            super::state::remove_swarm_member_lifecycle(client_session_id);
             member.session_id = new_id.clone();
             member.status = "ready".to_string();
-            super::state::store_swarm_member_lifecycle(
-                &new_id,
-                jcode_swarm_core::SwarmLifecycleStatus::Ready,
-            );
+            member.lifecycle = jcode_swarm_core::SwarmLifecycleStatus::Ready;
             member.detail = None;
             members.insert(new_id.clone(), member);
             swarm_id
@@ -370,6 +366,7 @@ async fn ensure_client_swarm_member(
                     swarm_id: derived_swarm_id.clone(),
                     swarm_enabled,
                     status: "ready".to_string(),
+                    lifecycle: jcode_swarm_core::SwarmLifecycleStatus::Ready,
                     detail: None,
                     task_label: None,
                     subagent_type: None,
@@ -1350,11 +1347,6 @@ pub(super) async fn handle_resume_session(
                             swarm.insert(session_id.clone());
                         }
                     }
-                    super::state::rename_swarm_member_lifecycle(
-                        &old_session_id,
-                        &session_id,
-                        &member.status,
-                    );
                     member.session_id = session_id.clone();
                     member.status = member.lifecycle_status().to_string();
                     member.detail = None;

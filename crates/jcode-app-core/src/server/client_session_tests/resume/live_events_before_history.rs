@@ -56,6 +56,7 @@ async fn handle_resume_session_registers_live_events_before_history_replay() -> 
             swarm_id: None,
             swarm_enabled: false,
             status: "ready".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             task_label: None,
             subagent_type: None,

@@ -599,6 +599,7 @@ mod r01_tests {
             swarm_id: Some("swarm-r01".to_string()),
             swarm_enabled: true,
             status: status.to_string(),
+            lifecycle: Default::default(),
             detail: None,
             task_label: None,
             subagent_type: None,

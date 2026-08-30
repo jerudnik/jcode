@@ -642,6 +642,7 @@ mod tests {
                 swarm_id: Some(swarm_id.to_string()),
                 swarm_enabled: true,
                 status: "ready".to_string(),
+                lifecycle: Default::default(),
                 detail: None,
                 task_label: None,
                 subagent_type: None,
