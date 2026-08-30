@@ -105,28 +105,52 @@ pub(super) async fn handle_comm_propose_plan(
         // runnable (it lands in blocked_ids forever), silently wedging all
         // dependent work, so reject for light plans too, matching `dag::seed`
         // which rejects cycles in both modes.
-        if let Some(message) = plan_cycle_error(&items) {
-            let _ = client_event_tx.send(ServerEvent::Error {
-                id,
-                message,
-                retry_after_secs: None,
-            });
-            return;
-        }
-        let (version, participant_ids) = {
+        let updated = if let Some(message) = plan_cycle_error(&items) {
+            Err(message)
+        } else {
             let mut plans = swarm_plans.write().await;
             let plan = plans
                 .entry(swarm_id.clone())
                 .or_insert_with(VersionedPlan::new);
-            plan.participants.insert(req_session_id.clone());
-            for item in &items {
-                if let Some(owner) = &item.assigned_to {
-                    plan.participants.insert(owner.clone());
+            // A plan proposed directly (not seeded as a DAG) still needs a
+            // budget clock, or `run_plan` will fail closed when it tries to
+            // drive it. Minting that clock is also the moment to honour one
+            // already running: this path replaces `plan.items` wholesale rather
+            // than growing a graph, so it never reaches the graph mutation gate.
+            // Left ungated it reopened every stop that gate exists to enforce,
+            // because assignment schedules from `plan.items` without consulting
+            // the ledger.
+            match super::comm_graph::direct_plan_update_refusal(
+                plan,
+                items.len(),
+                super::comm_graph::unix_now_ms(),
+            ) {
+                Some(message) => Err(message),
+                None => {
+                    plan.participants.insert(req_session_id.clone());
+                    for item in &items {
+                        if let Some(owner) = &item.assigned_to {
+                            plan.participants.insert(owner.clone());
+                        }
+                    }
+                    plan.items = items.clone();
+                    plan.version += 1;
+                    Ok((plan.version, plan.participants.clone()))
                 }
             }
-            plan.items = items.clone();
-            plan.version += 1;
-            (plan.version, plan.participants.clone())
+        };
+        // Both refusals -- a cyclic proposal and a budget stop -- report
+        // through one site, so the file gains no second swallowed send.
+        let (version, participant_ids) = match updated {
+            Ok(value) => value,
+            Err(message) => {
+                let _ = client_event_tx.send(ServerEvent::Error {
+                    id,
+                    message,
+                    retry_after_secs: None,
+                });
+                return;
+            }
         };
 
         let members = swarm_members.read().await;

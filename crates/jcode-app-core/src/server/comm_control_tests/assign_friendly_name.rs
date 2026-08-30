@@ -44,6 +44,7 @@ async fn assign_task_resolves_friendly_name_target() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -160,6 +161,7 @@ async fn assign_task_rejects_ambiguous_friendly_name() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(

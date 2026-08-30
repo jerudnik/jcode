@@ -9,7 +9,8 @@ use super::journal::{PersistVectorMode, SessionJournalEntry, metadata_requires_s
 use super::storage_paths::{file_len_or_zero, session_journal_path_from_snapshot, session_path};
 use super::{
     AssistantSessionMeta, MAX_SESSION_JOURNAL_BYTES, Session, SessionImproveMode,
-    SessionStartupStub, SessionStatus, StoredCompactionState, StoredMessage, WorkingDirSetBy,
+    SessionStartupStub, SessionStatus, StoredCompactionState, StoredMessage,
+    StoredSwarmLifecycleStatus, WorkingDirSetBy,
 };
 use crate::storage;
 
@@ -194,6 +195,29 @@ fn replay_journal_lines(
 }
 
 impl Session {
+    /// Update only the swarm lifecycle field in the durable session snapshot.
+    ///
+    /// The append journal intentionally remains untouched. Reading and writing
+    /// the raw checkpoint instead of calling `Session::save` avoids replaying
+    /// journal entries into the checkpoint and then duplicating them on the
+    /// next load.
+    pub fn persist_swarm_lifecycle(
+        session_id: &str,
+        lifecycle: StoredSwarmLifecycleStatus,
+    ) -> Result<()> {
+        let path = session_path(session_id)?;
+        let mut session: Session = storage::read_json(&path)?;
+        if session
+            .swarm_lifecycle
+            .as_ref()
+            .is_some_and(|stored| stored.revision > lifecycle.revision)
+        {
+            return Ok(());
+        }
+        session.swarm_lifecycle = Some(lifecycle);
+        storage::write_json_fast(&path, &session)
+    }
+
     fn apply_journal_entry(&mut self, entry: SessionJournalEntry) {
         self.apply_journal_meta(entry.meta);
         self.messages.extend(entry.append_messages);

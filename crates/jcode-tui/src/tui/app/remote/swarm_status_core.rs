@@ -7,6 +7,7 @@
 //! "Swarm plan synced" notice from [`super::swarm_plan_core`].
 
 use crate::protocol::SwarmMemberStatus;
+use jcode_swarm_core::MemberLifecycleState;
 use jcode_tui_render::swarm_gallery::is_active_status;
 
 /// How many member names to list per transition category before collapsing
@@ -16,19 +17,19 @@ const MAX_NAMES_PER_CATEGORY: usize = 3;
 /// Lifecycle buckets worth announcing when a member newly enters them.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Transition {
-    Done,
+    Succeeded,
     Failed,
-    Blocked,
     Stopped,
+    Lost,
 }
 
 impl Transition {
     fn verb(self) -> &'static str {
         match self {
-            Transition::Done => "done",
+            Transition::Succeeded => "succeeded",
             Transition::Failed => "failed",
-            Transition::Blocked => "blocked",
             Transition::Stopped => "stopped",
+            Transition::Lost => "lost",
         }
     }
 }
@@ -42,24 +43,25 @@ fn member_label(member: &SwarmMemberStatus) -> String {
 
 /// Classify a status change into an announceable transition, if any.
 ///
-/// Transitions into active states and startup transitions (`spawned` →
+/// Transitions into active states and startup transitions (`starting` →
 /// `ready`) are intentionally silent: spawning is user-initiated and already
-/// visible, and active churn (running ↔ thinking) is animation-level noise.
+/// visible.
+///
+/// Compare lifecycle states rather than the raw strings. The wire still
+/// carries older spellings of the same state, so matching literals here would
+/// drop a real completion reported as `completed` and would announce a
+/// spurious transition when a member's spelling changed but its state did not.
 fn classify(prev_status: &str, next_status: &str) -> Option<Transition> {
-    if prev_status == next_status {
+    let prev = MemberLifecycleState::from_compatibility_status(prev_status);
+    let next = MemberLifecycleState::from_compatibility_status(next_status);
+    if prev == next {
         return None;
     }
-    match next_status {
-        "completed" | "done" => Some(Transition::Done),
-        // `ready` is the default completion-report status, but it is also the
-        // idle state a fresh agent enters on startup. Only count it as "done"
-        // when the agent was actually working (or stuck) before.
-        "ready" if is_active_status(prev_status) || prev_status == "blocked" => {
-            Some(Transition::Done)
-        }
-        "failed" | "crashed" => Some(Transition::Failed),
-        "blocked" | "waiting_network" => Some(Transition::Blocked),
-        "stopped" => Some(Transition::Stopped),
+    match next {
+        MemberLifecycleState::Succeeded => Some(Transition::Succeeded),
+        MemberLifecycleState::Failed => Some(Transition::Failed),
+        MemberLifecycleState::Stopped => Some(Transition::Stopped),
+        MemberLifecycleState::Lost => Some(Transition::Lost),
         _ => None,
     }
 }
@@ -76,7 +78,7 @@ fn format_names(mut names: Vec<String>) -> String {
 }
 
 /// Diff two swarm snapshots and build a status notice describing member
-/// lifecycle transitions, e.g. `🐝 bat done · 2/7 active` or
+/// lifecycle transitions, e.g. `🐝 bat succeeded · 2/7 active` or
 /// `🐝 crab failed · hen blocked · all 7 finished`. Returns `None` when
 /// nothing announceable changed.
 pub(in crate::tui::app) fn swarm_status_transition_notice(
@@ -155,32 +157,51 @@ mod tests {
     #[test]
     fn agent_completing_is_announced_with_active_tally() {
         let prev = vec![member("ant", "running"), member("bat", "running")];
+        let next = vec![member("ant", "succeeded"), member("bat", "running")];
+        assert_eq!(
+            swarm_status_transition_notice(&prev, &next).as_deref(),
+            Some("🐝 ant succeeded · 1/2 active")
+        );
+    }
+
+    #[test]
+    fn older_spellings_of_success_are_still_announced() {
+        let prev = vec![member("ant", "running"), member("bat", "running")];
         let next = vec![member("ant", "completed"), member("bat", "running")];
         assert_eq!(
             swarm_status_transition_notice(&prev, &next).as_deref(),
-            Some("🐝 ant done · 1/2 active")
+            Some("🐝 ant succeeded · 1/2 active"),
+            "the wire still carries `completed` for a succeeded member"
         );
     }
 
     #[test]
-    fn ready_after_working_counts_as_done() {
-        let prev = vec![member("ant", "running"), member("bat", "thinking")];
-        let next = vec![member("ant", "ready"), member("bat", "thinking")];
+    fn respelling_the_same_state_is_silent() {
+        let prev = vec![member("ant", "completed"), member("bat", "running")];
+        let next = vec![member("ant", "succeeded"), member("bat", "running")];
         assert_eq!(
-            swarm_status_transition_notice(&prev, &next).as_deref(),
-            Some("🐝 ant done · 1/2 active")
+            swarm_status_transition_notice(&prev, &next),
+            None,
+            "the member did not transition, only its spelling did"
         );
     }
 
     #[test]
-    fn ready_on_startup_is_silent() {
-        let prev = vec![member("ant", "spawned"), member("bat", "running")];
+    fn ready_after_working_is_not_reinterpreted_as_success() {
+        let prev = vec![member("ant", "running"), member("bat", "running")];
         let next = vec![member("ant", "ready"), member("bat", "running")];
         assert_eq!(swarm_status_transition_notice(&prev, &next), None);
     }
 
     #[test]
-    fn failure_and_block_are_announced_together() {
+    fn ready_on_startup_is_silent() {
+        let prev = vec![member("ant", "starting"), member("bat", "running")];
+        let next = vec![member("ant", "ready"), member("bat", "running")];
+        assert_eq!(swarm_status_transition_notice(&prev, &next), None);
+    }
+
+    #[test]
+    fn failure_and_loss_are_announced_together() {
         let prev = vec![
             member("ant", "running"),
             member("bat", "running"),
@@ -188,44 +209,44 @@ mod tests {
         ];
         let next = vec![
             member("ant", "failed"),
-            member("bat", "blocked"),
+            member("bat", "lost"),
             member("crab", "running"),
         ];
         assert_eq!(
             swarm_status_transition_notice(&prev, &next).as_deref(),
-            Some("🐝 ant failed · bat blocked · 1/3 active")
+            Some("🐝 ant failed · bat lost · 1/3 active")
         );
     }
 
     #[test]
     fn last_agent_finishing_reports_all_finished() {
-        let prev = vec![member("ant", "completed"), member("bat", "running")];
-        let next = vec![member("ant", "completed"), member("bat", "completed")];
+        let prev = vec![member("ant", "succeeded"), member("bat", "running")];
+        let next = vec![member("ant", "succeeded"), member("bat", "succeeded")];
         assert_eq!(
             swarm_status_transition_notice(&prev, &next).as_deref(),
-            Some("🐝 bat done · all 2 finished")
+            Some("🐝 bat succeeded · all 2 finished")
         );
     }
 
     #[test]
     fn unchanged_snapshot_is_silent() {
-        let prev = vec![member("ant", "running"), member("bat", "completed")];
+        let prev = vec![member("ant", "running"), member("bat", "succeeded")];
         assert_eq!(swarm_status_transition_notice(&prev, &prev.clone()), None);
     }
 
     #[test]
-    fn active_churn_and_new_members_are_silent() {
+    fn unchanged_active_member_and_new_member_are_silent() {
         let prev = vec![member("ant", "running")];
         let next = vec![
-            member("ant", "thinking"), // running -> thinking: animation noise
-            member("bat", "spawned"),  // new member: spawn already visible
+            member("ant", "running"),  // no lifecycle transition
+            member("bat", "starting"), // new member: spawn already visible
         ];
         assert_eq!(swarm_status_transition_notice(&prev, &next), None);
     }
 
     #[test]
     fn first_snapshot_is_silent() {
-        let next = vec![member("ant", "completed")];
+        let next = vec![member("ant", "succeeded")];
         assert_eq!(swarm_status_transition_notice(&[], &next), None);
     }
 
@@ -237,11 +258,11 @@ mod tests {
             .collect();
         let next: Vec<_> = ["ant", "bat", "crab", "dove", "elk"]
             .iter()
-            .map(|id| member(id, "completed"))
+            .map(|id| member(id, "succeeded"))
             .collect();
         assert_eq!(
             swarm_status_transition_notice(&prev, &next).as_deref(),
-            Some("🐝 ant, bat, crab +2 done · all 5 finished")
+            Some("🐝 ant, bat, crab +2 succeeded · all 5 finished")
         );
     }
 
@@ -249,11 +270,11 @@ mod tests {
     fn unnamed_member_falls_back_to_session_id_prefix() {
         let mut prev_member = member("session-long-identifier", "running");
         prev_member.friendly_name = None;
-        let mut next_member = member("session-long-identifier", "completed");
+        let mut next_member = member("session-long-identifier", "succeeded");
         next_member.friendly_name = None;
         assert_eq!(
             swarm_status_transition_notice(&[prev_member], &[next_member]).as_deref(),
-            Some("🐝 session- done · all 1 finished")
+            Some("🐝 session- succeeded · all 1 finished")
         );
     }
 }

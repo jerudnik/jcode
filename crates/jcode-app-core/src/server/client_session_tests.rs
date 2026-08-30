@@ -35,6 +35,7 @@ fn test_swarm_member(session_id: &str, status: &str) -> SwarmMember {
         swarm_id: Some("swarm-test".to_string()),
         swarm_enabled: true,
         status: status.to_string(),
+        lifecycle: Default::default(),
         detail: None,
         task_label: None,
         subagent_type: None,

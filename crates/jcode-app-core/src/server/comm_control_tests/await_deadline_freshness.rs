@@ -118,7 +118,7 @@ async fn deadline_still_times_out_and_reports_the_status_at_the_deadline() {
     let (client_tx, mut client_rx) = mpsc::unbounded_channel();
     let swarm_members = Arc::new(RwLock::new(HashMap::from([
         (requester.to_string(), member(requester, swarm_id, "ready")),
-        (worker.to_string(), member(worker, swarm_id, "running")),
+        (worker.to_string(), member(worker, swarm_id, "starting")),
     ])));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
         swarm_id.to_string(),
@@ -182,9 +182,10 @@ async fn deadline_still_times_out_and_reports_the_status_at_the_deadline() {
                 "no target status was reached; this must remain a timeout"
             );
             assert!(
-                summary.contains("blocked"),
+                summary.contains("running"),
                 "the timeout must describe the member at the deadline, not at \
-                 creation (expected 'blocked', got {summary:?})"
+                 creation (the mid-await 'blocked' write reads back as the \
+                 canonical 'running' state; expected 'running', got {summary:?})"
             );
         }
         other => panic!("expected CommAwaitMembersResponse, got {other:?}"),

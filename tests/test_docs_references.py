@@ -81,13 +81,16 @@ class DocsReferencesTest(unittest.TestCase):
         doc_after: str | None = None,
         *,
         delete: bool = False,
+        doc_path: str = "docs/a.md",
     ) -> list[mod.Finding]:
         """Create two real commits and run the reverse check across the move."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "docs").mkdir()
             (root / "src").mkdir()
-            (root / "docs/a.md").write_text(doc_before, encoding="utf-8")
+            doc = root / doc_path
+            doc.parent.mkdir(parents=True, exist_ok=True)
+            doc.write_text(doc_before, encoding="utf-8")
             (root / "src/old.rs").write_text("fn old() {}\n", encoding="utf-8")
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
@@ -112,7 +115,7 @@ class DocsReferencesTest(unittest.TestCase):
                     ["git", "mv", "src/old.rs", "src/new/old.rs"], cwd=root, check=True
                 )
             if doc_after is not None:
-                (root / "docs/a.md").write_text(doc_after, encoding="utf-8")
+                (root / doc_path).write_text(doc_after, encoding="utf-8")
             subprocess.run(["git", "add", "-A"], cwd=root, check=True)
             subprocess.run(["git", "commit", "-qm", "move"], cwd=root, check=True)
 
@@ -183,6 +186,24 @@ class DocsReferencesTest(unittest.TestCase):
         findings = self.run_move_check("See old.rs for the implementation.\n", delete=True)
         self.assertEqual(self.rules(findings), {"moved-path-reference"})
         self.assertIn("matched 'old.rs'", findings[0].detail)
+
+    def test_delete_check_exempts_the_historical_records(self):
+        """The decision log records deletions by naming the deleted path, and
+        its own rules forbid rewriting old entries. Without this exemption the
+        PR that deletes a checker cannot also record the deletion, which is
+        exactly backwards."""
+        for record in (
+            "docs/architecture/GOVERNANCE_DECISIONS.md",
+            "docs/architecture/FORK_HARDENING_RED_BRIEF.md",
+            "docs/architecture/FORK_HARDENING_BLUE_BRIEF.md",
+        ):
+            with self.subTest(record=record):
+                findings = self.run_move_check(
+                    "See src/old.rs, deleted by this entry.\n",
+                    delete=True,
+                    doc_path=record,
+                )
+                self.assertEqual(findings, [])
 
     def test_default_scan_leaves_path_shaped_prose_unchecked(self):
         findings = self.run_on_git_tree(

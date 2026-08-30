@@ -286,7 +286,11 @@ pub(super) async fn handle_comm_status(
 
         let activity = {
             let connections = client_connections.read().await;
-            live_activity_snapshot(&connections, &target_session, member.status == "running")
+            live_activity_snapshot(
+                &connections,
+                &target_session,
+                member.lifecycle_status() == "running",
+            )
         };
 
         let (provider_name, provider_model) = {
@@ -306,7 +310,7 @@ pub(super) async fn handle_comm_status(
             session_id: member.session_id.clone(),
             friendly_name: member.friendly_name.clone(),
             swarm_id: member.swarm_id.clone(),
-            status: Some(member.status.clone()),
+            status: Some(member.lifecycle_status().to_string()),
             detail: member.detail.clone(),
             role: Some(member.role.clone()),
             is_headless: Some(member.is_headless),

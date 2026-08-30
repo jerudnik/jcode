@@ -98,8 +98,8 @@ use crate::transport::Listener;
 use anyhow::Result;
 use jcode_agent_runtime::{InterruptSignal, SoftInterruptSource};
 use jcode_swarm_core::{
-    append_swarm_completion_report_instructions, format_structured_completion_report,
-    summarize_plan_items, truncate_detail,
+    MemberLifecycleState, append_swarm_completion_report_instructions,
+    format_structured_completion_report, summarize_plan_items, truncate_detail,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -209,11 +209,19 @@ pub(super) async fn remove_persisted_swarm_state_for(swarm_id: &str, swarm_state
     let _ = remove_swarm_state_if_version(swarm_id, &file_version);
 }
 
+/// A headless member is worth reloading only if it may still be holding
+/// unfinished work. `Lost` is terminal yet restorable: the process died without
+/// reporting an outcome, so its session may hold an interrupted turn. The other
+/// terminal states reported their outcome, and `Ready` never started one.
 fn headless_member_should_restore(status: &str, is_headless: bool) -> bool {
+    let state = MemberLifecycleState::from_compatibility_status(status);
     is_headless
-        && !matches!(
-            status,
-            "ready" | "completed" | "done" | "failed" | "stopped"
+        && matches!(
+            state,
+            MemberLifecycleState::Starting
+                | MemberLifecycleState::Assigned
+                | MemberLifecycleState::Running
+                | MemberLifecycleState::Lost
         )
 }
 

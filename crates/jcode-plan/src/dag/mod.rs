@@ -31,6 +31,9 @@ pub use schedule::{
 /// auto-generated gate ids derive deterministically from their parent.
 pub type NodeId = String;
 
+/// Reserved plan metadata projected to scheduler status for durable safety data.
+pub const PLAN_SAFETY_STATUS_META_ID: &str = "__jcode_plan_safety_v1";
+
 /// Engine mode. One engine, two presets (see doc section 1a). The data model,
 /// scheduler, and dataflow are identical; the mode only controls whether the
 /// rigor machinery (mandatory gates + strict artifact validation) is engaged.
@@ -416,6 +419,82 @@ pub struct NodeSpec {
     pub priority: u8,
 }
 
+/// A hard graph-growth budget enforced by the DAG engine before mutation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphBudget {
+    Nodes,
+    LineageDepth,
+    GateInjections,
+    WallClock,
+}
+
+/// Typed evidence for a rejected graph-growth admission. The live scheduler uses
+/// this to pause the persisted plan and wake its coordinator instead of treating
+/// a hard budget like an ordinary model-correctable validation error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BudgetViolation {
+    pub budget: GraphBudget,
+    pub limit: u64,
+    pub observed: u64,
+    pub operation: String,
+}
+
+/// The growth limits a plan is held to for its whole life.
+///
+/// Resolved once from configuration and then carried on the plan, so a running
+/// plan keeps the budget it started under even if the process is reconfigured
+/// underneath it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanSafetyPolicy {
+    pub max_nodes: usize,
+    pub max_lineage_depth: usize,
+    pub max_gate_injections_per_gate: usize,
+    pub max_wall_clock_ms: u64,
+}
+
+impl PlanSafetyPolicy {
+    pub fn apply_to(&self, graph: &mut TaskGraph) {
+        graph.max_nodes = Some(self.max_nodes);
+        graph.max_lineage_depth = self.max_lineage_depth;
+        graph.max_gate_injections_per_gate = self.max_gate_injections_per_gate;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanSafetyStatus {
+    Running,
+    PausedBudgetExceeded,
+}
+
+/// A plan's budget accounting: the limits it runs under, when its clock
+/// started, and whether a budget has already stopped it.
+///
+/// This lives in its own field rather than in `task_progress` because the two
+/// have opposite lifetimes. Per-node progress is stale the moment the graph is
+/// replaced and is cleared then; the ledger is plan-level and must outlive any
+/// single graph, or a plan could be handed a fresh allowance simply by being
+/// reseeded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanSafetyLedger {
+    pub policy: PlanSafetyPolicy,
+    pub started_at_unix_ms: u64,
+    pub status: PlanSafetyStatus,
+    pub pause: Option<BudgetViolation>,
+}
+
+impl PlanSafetyLedger {
+    pub fn started(policy: PlanSafetyPolicy, now_unix_ms: u64) -> Self {
+        Self {
+            policy,
+            started_at_unix_ms: now_unix_ms,
+            status: PlanSafetyStatus::Running,
+            pause: None,
+        }
+    }
+}
+
 impl NodeSpec {
     pub fn new(id: impl Into<String>, content: impl Into<String>, kind: NodeKind) -> Self {
         Self {
@@ -469,6 +548,8 @@ pub enum DagError {
     StaleGateScope { gate: NodeId, pending: Vec<NodeId> },
     /// A gate kind was supplied as user work, or vice versa.
     GateMisuse(String),
+    /// A hard graph budget denied the mutation before any node was stored.
+    BudgetExceeded(BudgetViolation),
 }
 
 impl std::fmt::Display for DagError {
@@ -528,6 +609,11 @@ impl std::fmt::Display for DagError {
                 )
             }
             DagError::GateMisuse(msg) => write!(f, "gate misuse: {msg}"),
+            DagError::BudgetExceeded(violation) => write!(
+                f,
+                "graph {:?} budget exceeded: limit {}, observed {} while {}",
+                violation.budget, violation.limit, violation.observed, violation.operation
+            ),
         }
     }
 }
@@ -537,9 +623,19 @@ impl std::error::Error for DagError {}
 /// The task DAG: a mode plus a set of nodes. Insertion order is preserved for
 /// deterministic iteration; lookups are by id.
 pub const DEFAULT_MAX_GRAPH_NODES: usize = 64;
+pub const DEFAULT_MAX_LINEAGE_DEPTH: usize = 2;
+pub const DEFAULT_MAX_GATE_INJECTIONS_PER_GATE: usize = 3;
 
 fn default_graph_node_budget() -> Option<usize> {
     Some(DEFAULT_MAX_GRAPH_NODES)
+}
+
+fn default_lineage_depth_budget() -> usize {
+    DEFAULT_MAX_LINEAGE_DEPTH
+}
+
+fn default_gate_injection_budget() -> usize {
+    DEFAULT_MAX_GATE_INJECTIONS_PER_GATE
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -547,6 +643,10 @@ pub struct TaskGraph {
     pub mode: Mode,
     #[serde(default = "default_graph_node_budget")]
     pub max_nodes: Option<usize>,
+    #[serde(default = "default_lineage_depth_budget")]
+    pub max_lineage_depth: usize,
+    #[serde(default = "default_gate_injection_budget")]
+    pub max_gate_injections_per_gate: usize,
     nodes: Vec<TaskNode>,
 }
 
@@ -555,6 +655,8 @@ impl TaskGraph {
         Self {
             mode,
             max_nodes: default_graph_node_budget(),
+            max_lineage_depth: default_lineage_depth_budget(),
+            max_gate_injections_per_gate: default_gate_injection_budget(),
             nodes: Vec::new(),
         }
     }

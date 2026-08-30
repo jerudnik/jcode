@@ -506,7 +506,8 @@ pub struct SwarmMemberStatus {
     pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub friendly_name: Option<String>,
-    /// Lifecycle status (ready, running, completed, failed, stopped, etc.)
+    /// Canonical lifecycle state: starting, ready, assigned, running,
+    /// succeeded, failed, stopped, or lost.
     pub status: String,
     /// Optional detail (task, error, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]

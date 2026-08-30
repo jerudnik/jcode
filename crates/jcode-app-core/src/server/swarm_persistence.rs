@@ -2,7 +2,9 @@ use super::{SwarmMember, SwarmTaskProgress, VersionedPlan};
 use crate::protocol::ServerEvent;
 use crate::storage;
 use jcode_swarm_core::control_log::{SwarmControlEvent, read_from as read_control_log_from};
-use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
+use jcode_swarm_core::{
+    MemberLifecycleEvent, MemberLifecycleState, SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole,
+};
 use std::collections::{HashMap, HashSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -99,6 +101,11 @@ struct PersistedVersionedPlan {
     max_nodes: Option<usize>,
     #[serde(default)]
     frozen: bool,
+    /// Plan-level budget accounting. Persisted so a restart cannot hand a plan a
+    /// fresh allowance: dropping this on reload would reset every budget clock
+    /// and turn a restart into an unlimited-spend loophole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    safety_ledger: Option<jcode_plan::dag::PlanSafetyLedger>,
 }
 
 fn default_plan_mode() -> String {
@@ -487,6 +494,7 @@ fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64
         node_meta: std::mem::take(&mut plan.node_meta),
         max_nodes: plan.max_nodes,
         frozen: plan.frozen,
+        safety_ledger: plan.safety_ledger.take(),
     };
     mark_running_items_stale(&mut plan, updated_at_unix_ms);
     plan
@@ -519,6 +527,7 @@ fn to_persisted_plan(plan: &VersionedPlan) -> PersistedVersionedPlan {
         node_meta: plan.node_meta.clone(),
         max_nodes: plan.max_nodes,
         frozen: plan.frozen,
+        safety_ledger: plan.safety_ledger.clone(),
     }
 }
 
@@ -544,40 +553,59 @@ fn recover_member_status(
     status: SwarmLifecycleStatus,
     detail: Option<String>,
     is_headless: bool,
+    recovered_at_unix_ms: u64,
 ) -> (SwarmLifecycleStatus, Option<String>) {
-    if status == SwarmLifecycleStatus::Running {
-        return (
-            SwarmLifecycleStatus::Crashed,
-            append_recovery_detail(detail, "recovered after reload while running"),
+    // Compare the lifecycle state, not the whole status. A status read back
+    // from disk carries the epoch, revision and timestamp it was written with,
+    // so it never equals one of the zero-valued named constants; comparing
+    // whole values here silently matched nothing and left crashed members
+    // recorded as still running. Transitions go through `reduce` for the same
+    // reason: it keeps the assignment epoch a coordinator needs to tell a
+    // stale report from a live one.
+    let mut status = status;
+    if status.state == MemberLifecycleState::Running {
+        let detail = append_recovery_detail(detail, "recovered after reload while running");
+        status.reduce(
+            MemberLifecycleEvent::ProcessLost {
+                reason: detail.clone(),
+            },
+            recovered_at_unix_ms,
         );
+        return (status, detail);
     }
 
     // An idle headless worker has no process to drive it after a server restart.
     // Keep its completion report, but mark it stopped instead of eagerly loading
     // its full session history and tool registry forever. Coordinators can spawn
     // a fresh worker when more work arrives.
-    if is_headless && status == SwarmLifecycleStatus::Ready {
-        return (
-            SwarmLifecycleStatus::Stopped,
-            append_recovery_detail(detail, "idle worker not restored after server restart"),
+    if is_headless && status.state == MemberLifecycleState::Ready {
+        let detail = append_recovery_detail(detail, "idle worker not restored after server restart");
+        status.reduce(
+            MemberLifecycleEvent::StopConfirmed {
+                epoch: status.assignment_epoch,
+                reason: detail.clone(),
+            },
+            recovered_at_unix_ms,
         );
+        return (status, detail);
     }
 
     // Done headless members finished their work before the reload. Nothing
     // in-flight was lost and their completion report remains available.
-    if is_headless
-        && !matches!(
-            status,
-            SwarmLifecycleStatus::Completed
-                | SwarmLifecycleStatus::Done
-                | SwarmLifecycleStatus::Failed
-                | SwarmLifecycleStatus::Stopped
-        )
-    {
-        return (
-            SwarmLifecycleStatus::Crashed,
-            append_recovery_detail(detail, "headless session did not survive reload"),
+    // Ask the state machine rather than listing status constants: several old
+    // names now share one state (`Completed` and `Done` are both `Succeeded`),
+    // so an alias list reads as if it covers more than it does and leaves arms
+    // the compiler can prove dead. `is_terminal` also covers `Lost`, which was
+    // missing here and is already the state this branch would assign.
+    if is_headless && !status.is_terminal() {
+        let detail = append_recovery_detail(detail, "headless session did not survive reload");
+        status.reduce(
+            MemberLifecycleEvent::ProcessLost {
+                reason: detail.clone(),
+            },
+            recovered_at_unix_ms,
         );
+        return (status, detail);
     }
 
     (status, detail)
@@ -599,7 +627,12 @@ fn from_persisted_member(
     let original_status = record.status.as_str();
     let was_terminal_before_recovery =
         super::swarm::member_status_is_terminal(original_status.as_ref());
-    let (status, detail) = recover_member_status(record.status, record.detail, record.is_headless);
+    let (status, detail) = recover_member_status(
+        record.status,
+        record.detail,
+        record.is_headless,
+        loaded_at_unix_ms,
+    );
     let status_text = status.as_str();
     let terminal_since_unix_ms = super::swarm::member_status_is_terminal(status_text.as_ref())
         .then(|| {

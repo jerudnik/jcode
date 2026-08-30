@@ -1,0 +1,44 @@
+---
+description: Testing contract for Rust crates — tests must be able to fail.
+applyTo: "crates/**"
+---
+
+# Testing contract
+
+A test that cannot go red is worse than no test. Read the `testing` skill
+before writing, changing, or repairing any test.
+
+## Prove it can fail
+
+Never keep a test you have not watched fail. Write it, break the code it
+covers, run it and confirm it goes red for the right reason, then restore the
+code and confirm it goes green. If it passed while the code was broken, it is
+tautological: delete it. Report which assertion you forced to fail.
+
+## Rejected
+
+1. Asserting a mock returns what you configured it to return.
+2. Assertions inside `try`/`catch` that swallow the error, or inside a callback
+   that may never fire. Use `#[should_panic]`, `expect_err`, or
+   `assert!(matches!(r, Err(_)))`.
+3. Snapshot tests unless asked for by name.
+4. `assert!(true)`, or `is_some()`/`is_ok()` with no check of the payload.
+5. Asserting on prose. `message.contains("finished their work")` pins wording,
+   not behavior.
+
+## Required
+
+- Assert structure: the enum variant, the type, the exact field value. Pin
+  fields, not whole objects. Check that unexpected events are absent.
+- When a string is the contract, compare against the constant production uses,
+  so a rename breaks the build rather than the test.
+- Assert public return values and side effects, never private state.
+- Fixtures use values production actually emits. Grep before inventing one.
+- For every positive assertion, write the matching negative.
+- At most three cases per function. Volume is not coverage.
+
+## When a test fails
+
+It found a defect until you prove otherwise. Read the production path before
+touching the assertion. Changing an expectation changes the contract: say in
+the commit why the old one was wrong.

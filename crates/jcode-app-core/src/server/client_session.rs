@@ -246,6 +246,7 @@ pub(super) async fn handle_clear_session(
             let swarm_id = member.swarm_id.clone();
             member.session_id = new_id.clone();
             member.status = "ready".to_string();
+            member.lifecycle = jcode_swarm_core::SwarmLifecycleStatus::Ready;
             member.detail = None;
             members.insert(new_id.clone(), member);
             swarm_id
@@ -365,6 +366,7 @@ async fn ensure_client_swarm_member(
                     swarm_id: derived_swarm_id.clone(),
                     swarm_enabled,
                     status: "ready".to_string(),
+                    lifecycle: jcode_swarm_core::SwarmLifecycleStatus::Ready,
                     detail: None,
                     task_label: None,
                     subagent_type: None,
@@ -711,7 +713,7 @@ async fn subscribe_should_mark_ready(
     let members = swarm_members.read().await;
     members
         .get(client_session_id)
-        .is_none_or(|member| member.status != "running")
+        .is_none_or(|member| member.lifecycle_status() != "running")
 }
 
 pub(super) async fn handle_reload(
@@ -1346,7 +1348,7 @@ pub(super) async fn handle_resume_session(
                         }
                     }
                     member.session_id = session_id.clone();
-                    member.status = "ready".to_string();
+                    member.status = member.lifecycle_status().to_string();
                     member.detail = None;
                     members.insert(session_id.clone(), member);
                 }

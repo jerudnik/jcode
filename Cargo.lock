@@ -4262,6 +4262,7 @@ dependencies = [
  "jcode-provider-core",
  "jcode-selfdev-types",
  "jcode-session-types",
+ "jcode-swarm-core",
  "jcode-terminal-image",
  "jcode-tui-account-picker",
  "jcode-tui-anim",

@@ -8,20 +8,18 @@
 # ("unknown field `owner`, expected one of `ignore`, `informational_warnings`,
 # `severity_threshold`"), so ownership metadata cannot live beside the ignore
 # list. Comments there are not machine-readable. This file carries the
-# structure; `.cargo/audit.toml` carries only the IDs cargo-audit acts on, and
-# `scripts/check_advisory_policy.py` proves the two agree.
+# structure; `.cargo/audit.toml` carries only the IDs cargo-audit acts on.
 #
-# Enforcement (scripts/check_advisory_policy.py, run by
-# .github/workflows/security.yml and scripts/security_preflight.sh):
-#   - every ID ignored in .cargo/audit.toml MUST have a record here
-#     (an undocumented ignore fails the gate);
-#   - every record here MUST still be ignored in .cargo/audit.toml
-#     (a stale record fails the gate, so retired ignores get cleaned up);
-#   - every record MUST carry a non-empty id, owner, rationale,
+# Record rules (maintained by review; the automated cross-check gate was
+# retired in 2026-08):
+#   - every ID ignored in .cargo/audit.toml should have a record here
+#     (an undocumented ignore is review-rejected);
+#   - every record here should still be ignored in .cargo/audit.toml
+#     (delete stale records so retired ignores get cleaned up);
+#   - every record carries a non-empty id, owner, rationale,
 #     affected_surface, expires, and retire_when;
-#   - `expires` is an ISO `YYYY-MM-DD` date; an expired record fails the gate.
-#     The checker takes the current date from --today (deterministic in tests)
-#     or ADVISORY_POLICY_TODAY, defaulting to the system date in CI;
+#   - `expires` is an ISO `YYYY-MM-DD` date; a past-due record in the weekly
+#     report means nobody has re-argued the acceptance;
 #   - `expires` may be at most `max_expiry_days` beyond the record's
 #     `accepted` date, so acceptance cannot be parked indefinitely.
 #

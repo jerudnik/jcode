@@ -49,7 +49,7 @@ async fn dead_pid_sweep_marks_swarm_member_crashed_without_picker() {
     assert_eq!(changed, vec!["swarm-1".to_string()]);
     let members = swarm_members.read().await;
     let member = members.get("dead-visible-worker").expect("member");
-    assert_eq!(member.status, "crashed");
+    assert_eq!(member.status, "lost");
     assert_eq!(member.detail.as_deref(), Some("client process exited"));
 }
 
@@ -106,6 +106,7 @@ async fn dead_pid_sweep_then_salvage_requeues_once_without_duplicate_assignment(
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let (coord, mut coord_rx) = swarm_member("coord", "coordinator", false);
@@ -123,7 +124,7 @@ async fn dead_pid_sweep_then_salvage_requeues_once_without_duplicate_assignment(
     {
         let members = swarm_members.read().await;
         let member = members.get(worker_id).expect("member");
-        assert_eq!(member.status, "crashed");
+        assert_eq!(member.status, "lost");
         assert_eq!(member.detail.as_deref(), Some("client process exited"));
     }
 

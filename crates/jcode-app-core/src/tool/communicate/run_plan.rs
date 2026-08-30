@@ -1,6 +1,99 @@
 use super::run_plan_errors::*;
 use super::*;
 
+fn unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+const RUN_PLAN_LIVENESS_INTERVAL_SECS: u64 = 5 * 60;
+
+#[derive(Debug, Clone, Copy)]
+struct RunPlanBudget {
+    graph_started_at_unix_ms: u64,
+    graph_wall_clock_limit_ms: u64,
+}
+
+fn compact_run_plan_duration(secs: u64) -> String {
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    if secs < 60 * 60 {
+        return format!("{}m", secs / 60);
+    }
+    let hours = secs / (60 * 60);
+    let minutes = (secs % (60 * 60)) / 60;
+    if minutes == 0 {
+        format!("{hours}h")
+    } else {
+        format!("{hours}h {minutes}m")
+    }
+}
+
+fn run_plan_progress_message(
+    message: String,
+    total_nodes: usize,
+    driver_elapsed_secs: u64,
+    now_unix_ms: u64,
+    budget: Option<RunPlanBudget>,
+) -> String {
+    let interval = driver_elapsed_secs / RUN_PLAN_LIVENESS_INTERVAL_SECS;
+    if interval == 0 {
+        return message;
+    }
+
+    let mut message = format!(
+        "{message} · liveness {}",
+        compact_run_plan_duration(interval * RUN_PLAN_LIVENESS_INTERVAL_SECS)
+    );
+    if let Some(budget) = budget {
+        let graph_elapsed_secs =
+            now_unix_ms.saturating_sub(budget.graph_started_at_unix_ms) / 1_000;
+        message.push_str(&format!(
+            " · graph size: {total_nodes} nodes · budget: wall clock {}/{}",
+            compact_run_plan_duration(graph_elapsed_secs),
+            compact_run_plan_duration(budget.graph_wall_clock_limit_ms / 1_000),
+        ));
+    }
+    message
+}
+
+/// Read the plan's wall-clock window: when its budget clock started and how
+/// long it may run.
+///
+/// A plan with no persisted safety ledger predates budgets or was seeded
+/// through a path that does not write one. Treat that as a plan starting its
+/// clock now under current configuration rather than refusing to schedule it:
+/// the budget exists to stop runaway growth, and declining to run a plan at all
+/// is a strictly worse failure than running it under a freshly derived limit.
+fn graph_wall_clock(summary: &PlanGraphStatus) -> Result<(u64, u64)> {
+    // Fail closed. Deriving a fresh window here instead would restart the clock
+    // on every call, so a graph missing its ledger could never age out at all.
+    // A seed path that does not persist a ledger is the bug to fix; refusing is
+    // the safe response to one that slips through.
+    let raw = summary
+        .phases_by_id
+        .get(jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID)
+        .ok_or_else(|| {
+            anyhow::anyhow!("run_plan refused to schedule a graph without a persisted safety ledger")
+        })?;
+    let (started, limit) = raw.split_once(':').ok_or_else(|| {
+        anyhow::anyhow!("run_plan refused a graph with an invalid persisted safety ledger")
+    })?;
+    Ok((started.parse()?, limit.parse()?))
+}
+
+/// Hard wall-clock verdict for a running task graph. Pure so the budget
+/// boundary is unit-testable without a live swarm: a mutation probe deleted
+/// the previous inline comparison in the scheduler loop and zero tests went
+/// red, so the boundary now lives here where a test pins it.
+pub(super) fn wall_clock_exhausted(elapsed_ms: u64, limit_ms: u64) -> bool {
+    elapsed_ms > limit_ms
+}
+
 /// Decide how many swarm workers `run_plan` keeps active at once.
 ///
 /// Policy:
@@ -200,6 +293,8 @@ pub(super) fn task_id_from_output_path(path: &std::path::Path) -> Option<&str> {
 pub(super) struct RunPlanReporter {
     pub(super) task_id: Option<String>,
     output_path: Option<std::path::PathBuf>,
+    started_at: std::time::Instant,
+    budget: std::sync::OnceLock<RunPlanBudget>,
 }
 
 impl RunPlanReporter {
@@ -207,6 +302,8 @@ impl RunPlanReporter {
         Self {
             task_id: None,
             output_path: None,
+            started_at: std::time::Instant::now(),
+            budget: std::sync::OnceLock::new(),
         }
     }
 
@@ -214,6 +311,8 @@ impl RunPlanReporter {
         Self {
             task_id: task_id_from_output_path(output_path).map(str::to_string),
             output_path: Some(output_path.to_path_buf()),
+            started_at: std::time::Instant::now(),
+            budget: std::sync::OnceLock::new(),
         }
     }
 
@@ -221,6 +320,13 @@ impl RunPlanReporter {
     /// reporters are no-ops, so refresh polling would be wasted requests).
     pub(super) fn is_background(&self) -> bool {
         self.task_id.is_some()
+    }
+
+    fn set_budget(&self, graph_started_at_unix_ms: u64, graph_wall_clock_limit_ms: u64) {
+        let _ = self.budget.set(RunPlanBudget {
+            graph_started_at_unix_ms,
+            graph_wall_clock_limit_ms,
+        });
     }
 
     pub(super) async fn log(&self, line: &str) {
@@ -242,6 +348,13 @@ impl RunPlanReporter {
         let Some(task_id) = &self.task_id else {
             return;
         };
+        let message = run_plan_progress_message(
+            message,
+            total,
+            self.started_at.elapsed().as_secs(),
+            unix_now_ms(),
+            self.budget.get().copied(),
+        );
         let progress = crate::bus::BackgroundTaskProgress {
             kind: crate::bus::BackgroundTaskProgressKind::Determinate,
             percent: None,
@@ -581,6 +694,8 @@ pub(super) async fn run_swarm_plan_loop(
     reporter: &RunPlanReporter,
 ) -> Result<ToolOutput> {
     let initial_summary = fetch_plan_status(&ctx.session_id).await?;
+    let (graph_started_at_unix_ms, graph_wall_clock_limit_ms) = graph_wall_clock(&initial_summary)?;
+    reporter.set_budget(graph_started_at_unix_ms, graph_wall_clock_limit_ms);
     let is_deep = initial_summary.mode.eq_ignore_ascii_case("deep");
     let initial_seed_count = if initial_summary.seeded_count > 0 {
         initial_summary.seeded_count
@@ -621,6 +736,37 @@ pub(super) async fn run_swarm_plan_loop(
                 "run_plan exceeded {} coordination loops; leaving workers untouched for inspection",
                 max_loops
             ));
+        }
+
+        let elapsed_ms = unix_now_ms().saturating_sub(graph_started_at_unix_ms);
+        if wall_clock_exhausted(elapsed_ms, graph_wall_clock_limit_ms) {
+            let message = format!(
+                "Task graph paused: hard wall-clock budget exceeded (limit {}s, observed {}s). The scheduler rejected further coordination and froze graph growth. Inspect the plan and start a smaller replacement graph; ordinary unfreeze cannot bypass the exhausted budget.",
+                graph_wall_clock_limit_ms / 1_000,
+                elapsed_ms / 1_000
+            );
+            let response = send_request(Request::CommTaskControl {
+                id: REQUEST_ID,
+                session_id: ctx.session_id.clone(),
+                action: "freeze".to_string(),
+                task_id: String::new(),
+                target_session: None,
+                message: Some(message.clone()),
+            })
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Failed to pause wall-clock-exhausted plan: {error}")
+            })?;
+            ensure_success(&response)?;
+            reporter.checkpoint(&message).await;
+            if let Err(error) = broadcast_plan_alert(ctx, &message).await {
+                reporter
+                    .log(&format!(
+                        "failed to broadcast wall-clock budget pause to the swarm: {error}"
+                    ))
+                    .await;
+            }
+            return Err(anyhow::anyhow!(message));
         }
 
         let summary = fetch_plan_status(&ctx.session_id).await?;
@@ -972,5 +1118,73 @@ pub(super) async fn assign_task_to_session(
             target_session,
             e
         )),
+    }
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+
+    #[test]
+    fn graph_start_comes_from_persisted_status_and_missing_data_fails_closed() {
+        let mut summary = PlanGraphStatus::empty_for_swarm("durable-clock");
+        assert!(graph_wall_clock(&summary).is_err());
+        summary.phases_by_id.insert(
+            jcode_plan::dag::PLAN_SAFETY_STATUS_META_ID.to_string(),
+            "1234:5678".to_string(),
+        );
+        assert_eq!(graph_wall_clock(&summary).unwrap(), (1234, 5678));
+    }
+
+    #[test]
+    fn stable_plan_progress_changes_once_per_liveness_interval_with_graph_budget() {
+        let budget = RunPlanBudget {
+            graph_started_at_unix_ms: 1_000,
+            graph_wall_clock_limit_ms: 2 * 60 * 60 * 1_000,
+        };
+        let before = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS - 1,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+        let first = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+        let duplicate = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS + 30,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+        let second = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS * 2,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+
+        assert_eq!(before, "completed 2 of 8");
+        assert_eq!(first, duplicate);
+        assert_ne!(first, second);
+        assert!(first.contains("liveness 5m"), "{first}");
+        assert!(first.contains("graph size: 8 nodes"), "{first}");
+        assert!(first.contains("budget: wall clock 10m/2h"), "{first}");
+        assert!(second.contains("liveness 10m"), "{second}");
+    }
+
+    #[test]
+    fn wall_clock_budget_holds_at_limit_and_exhausts_past_it() {
+        assert!(!wall_clock_exhausted(0, 1_000));
+        assert!(!wall_clock_exhausted(1_000, 1_000));
+        assert!(wall_clock_exhausted(1_001, 1_000));
+        assert!(wall_clock_exhausted(u64::MAX, 1_000));
     }
 }

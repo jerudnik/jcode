@@ -58,7 +58,7 @@ Use `scripts/preflight.sh --help` and `scripts/dev_cargo.sh` source/help output 
 
 ```bash
 scripts/ci_local.sh            # macOS job on the local host triple, via the fleet builder
-scripts/ci_local.sh --list     # print the commands (extracted from fork-ci.yml) without running
+scripts/ci_local.sh --list     # print the commands (resolved from the justfile) without running
 ```
 
 It runs the workflow's exact cargo commands, so a red result is known before any hosted CI minute is spent. The first run for a given profile/target primes a cold cache; warm runs are a few minutes.
@@ -191,11 +191,8 @@ the builder.
 
 Current workflow authority:
 
-- `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
-- `.github/workflows/pr.yml` exposes the single required PR result named `PR Gate`; print the maintained required name with `jq -r '.required_checks[].context' scripts/required-checks.json`.
-- `.github/workflows/ci.yml` is the reusable PR Gate orchestrator. It runs docs lint for docs-only PRs and otherwise calls the fork, security, Nix, and smoke helpers.
-- `.github/workflows/fork-ci.yml` is the fork Rust and quality helper. PR Gate reaches it for non-docs PRs, and scheduled or dispatch events may also call it.
-- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper. Its validate job lints fork-owned workflows with the flake-locked `.#actionlint` package and runs `scripts/check_reusable_workflow_calls.py` and `scripts/check_workflow_permissions.py`, which enforce GitHub's same-repository reusable-workflow and permissions rules.
+- `.github/workflows/pr.yml` owns the whole pull-request surface: the classifier routes, the docs lint / Rust / security / Nix / smoke legs run, the advisory DOX packet is produced, and two required results are emitted (`PR Gate` and `Governance Root`); print the maintained required name with `jq -r '.required_checks[].context' scripts/required-checks.json`.
+- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper. Its validate job lints fork-owned workflows with the flake-locked `.#actionlint` package and runs `scripts/check_reusable_workflow_calls.py`, which enforces GitHub's same-repository reusable-workflow rules.
 - `.github/workflows/security.yml` owns secret scanning and the triaged dependency audit as a PR Gate helper and scheduled helper.
 - `.github/workflows/release.yml` owns release artifacts.
 - Inherited or dispatch-only workflows are not substitutes for the fork gates.
@@ -208,8 +205,11 @@ Completed and deferred CI optimization decisions:
 
 - **DONE: security.yml split.** The security workflow has an always-running `secret-scan` job and a path-filtered `dependency-audit` job, so docs-only pull requests skip Rust, Nix, and cargo-audit setup.
 - **DECIDED: keep check + clippy separate.** Although Clippy subsumes `cargo check`, the cached time cost is negligible. Separate steps preserve cleaner compile-error output, distinguish compiler failures from lint failures, and retain the explicit Linux mergeability canary.
-- **DEFERRED: self-hosted macOS runner.** No runner hardware is registered. Provision an always-on Apple Silicon Mac mini or equivalent; register it with `./config.sh --url https://github.com/jerudnik/jcode --token <REG_TOKEN>` and labels `self-hosted, macOS, ARM64`; set `MACOS_RUNNER_LABELS` to `["self-hosted", "macOS", "ARM64"]` for a `${{ fromJSON(vars.MACOS_RUNNER_LABELS || '"macos-latest"') }}` fallback; persist `CARGO_TARGET_DIR=/persistent/cargo-target` and the Nix store; and schedule weekly stale Cargo-target cleanup and Nix garbage collection. Use an ephemeral runner or locked-down account, and never store secrets on its filesystem. Expected runtime is ~5 min instead of ~20 min.
-- **DEFERRED: self-hosted Linux runner.** No runner hardware is registered. Use the same registration command with labels `self-hosted, Linux, X64`; set `LINUX_RUNNER_LABELS` to `["self-hosted", "Linux", "X64"]` for a `${{ fromJSON(vars.LINUX_RUNNER_LABELS || '"ubuntu-latest"') }}` fallback; persist Cargo targets and the Nix store; and install mold permanently. Expected Linux test runtime is ~3–4 min instead of ~11 min. Prefer ephemeral runners or locked-down accounts, and never store secrets on the runner filesystem.
+- **RETIRE: self-hosted runner plan.** No macOS or Linux runner hardware is
+  registered, and this repository does not plan or own its provisioning.
+  Hosted GitHub runners and the documented local or fleet-builder checks remain
+  the supported paths. The accepted loss is the projected warm-cache runtime
+  reduction from dedicated runner hardware.
 
 Discover triggers and job names from the workflow files themselves:
 

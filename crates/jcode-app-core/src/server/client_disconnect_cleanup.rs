@@ -663,6 +663,7 @@ mod tests {
             swarm_id: Some("swarm-r04".to_string()),
             swarm_enabled: true,
             status: "running".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             task_label: None,
             subagent_type: None,

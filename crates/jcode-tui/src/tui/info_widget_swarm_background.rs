@@ -69,14 +69,14 @@ fn swarm_member_label(member: &SwarmMemberStatus) -> String {
 
 fn swarm_status_style(status: &str) -> (Color, &'static str) {
     match status {
-        "spawned" => (rgb(140, 140, 150), "○"),
+        "starting" => (rgb(140, 140, 150), "○"),
         "ready" => (rgb(120, 180, 120), "●"),
+        "assigned" => (rgb(180, 160, 255), "◆"),
         "running" => (rgb(255, 200, 100), "▶"),
-        "blocked" => (rgb(255, 170, 80), "⏸"),
         "failed" => (rgb(255, 100, 100), "✗"),
-        "completed" => (rgb(100, 200, 100), "✓"),
+        "succeeded" => (rgb(100, 200, 100), "✓"),
         "stopped" => (rgb(140, 140, 150), "■"),
-        "crashed" => (rgb(255, 80, 80), "!"),
+        "lost" => (rgb(255, 80, 80), "!"),
         _ => (rgb(140, 140, 150), "·"),
     }
 }

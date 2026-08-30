@@ -250,6 +250,7 @@ fn attached_swarm_member(
         swarm_id: None,
         swarm_enabled: false,
         status: "ready".to_string(),
+        lifecycle: Default::default(),
         detail: None,
         friendly_name: Some("otter".to_string()),
         report_back_to_session_id: None,
@@ -283,6 +284,7 @@ fn persisted_headless_member(
         swarm_id: Some(swarm_id.to_string()),
         swarm_enabled: true,
         status: status.to_string(),
+        lifecycle: Default::default(),
         detail: Some(detail.to_string()),
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: None,
@@ -477,13 +479,15 @@ async fn wake_turn_tracks_member_status_and_emits_terminal_done() {
         "member status should be running while the wake turn streams"
     );
 
-    // After completion the member returns to ready with a completion report.
+    // After completion the delivered report lands the member on the terminal
+    // "succeeded" state (ready-with-report maps to Succeeded in the lifecycle
+    // machine, same as report-back turns).
     let (final_status, report) = timeout(Duration::from_secs(2), async {
         loop {
             {
                 let members = swarm_members.read().await;
                 if let Some(member) = members.get(&session_id)
-                    && member.status == "ready"
+                    && member.status == "succeeded"
                 {
                     return (
                         member.status.clone(),
@@ -495,8 +499,8 @@ async fn wake_turn_tracks_member_status_and_emits_terminal_done() {
         }
     })
     .await
-    .expect("member should return to ready after the wake turn");
-    assert_eq!(final_status, "ready");
+    .expect("member should settle terminal after the wake turn");
+    assert_eq!(final_status, "succeeded");
     assert!(
         report.is_some_and(|report| report.contains("Wake turn finished.")),
         "completion report should capture the wake turn's assistant text"
@@ -689,12 +693,12 @@ async fn startup_recovery_resumes_interrupted_headless_sessions_after_reload() -
             members
                 .get(&initiator.id)
                 .map(|member| member.status.as_str()),
-            Some("crashed"),
-            "persisted running headless sessions should load as crashed before recovery"
+            Some("lost"),
+            "persisted running headless sessions should load as lost (crashed) before recovery"
         );
         assert_eq!(
             members.get(&peer.id).map(|member| member.status.as_str()),
-            Some("crashed")
+            Some("lost")
         );
     }
 
@@ -809,8 +813,10 @@ async fn startup_recovery_does_not_keep_idle_headless_sessions_active() -> Resul
             .await
             .get(&idle.id)
             .map(|member| member.status.as_str()),
-        Some("ready"),
-        "swarm metadata remains ready even though live ownership was cleared"
+        Some("lost"),
+        "skipped idle recovery leaves the terminal lost state in place (the \
+         legacy 'ready' write is rejected by the lifecycle machine; only a \
+         new assignment revives a lost worker)"
     );
 
     Ok(())

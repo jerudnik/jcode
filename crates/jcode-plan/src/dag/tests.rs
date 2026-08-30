@@ -614,15 +614,52 @@ fn gate_injection_quota_rejects_after_max() {
         vec![spec("gap-3", NodeKind::Explore)],
     )
     .expect_err("a gate must not inject beyond its quota");
-    let message = err.to_string();
-    assert!(
-        message.contains("open_questions"),
-        "unexpected error: {message}"
+    assert_eq!(
+        err,
+        DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::GateInjections,
+            limit: 3,
+            observed: 4,
+            operation: format!("injecting gap children from gate '{gate_id}'"),
+        })
     );
-    assert!(
-        message.contains("coordinator"),
-        "unexpected error: {message}"
+    assert!(!g.contains("gap-3"), "quota denial must be atomic");
+}
+
+#[test]
+fn gate_injection_counts_generated_lineage_depth() {
+    let mut g = dag(Mode::Deep, vec![spec("root", NodeKind::Explore)]);
+    g.max_lineage_depth = 1;
+    dispatch(&mut g, "root", "planner");
+    let outcome = expand_node(
+        &mut g,
+        "root",
+        "planner",
+        vec![spec("child", NodeKind::Explore)],
+    )
+    .unwrap();
+    let gate_id = outcome.gate_id.unwrap();
+
+    dispatch(&mut g, "child", "worker");
+    complete_node(&mut g, "child", "worker", sim::deep_artifact("child done")).unwrap();
+    dispatch(&mut g, &gate_id, "critic");
+    let err = inject_from_gate(
+        &mut g,
+        &gate_id,
+        "critic",
+        vec![spec("gap", NodeKind::Explore)],
+    )
+    .expect_err("a gate at depth one must not inject a depth-two child");
+    assert_eq!(
+        err,
+        DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::LineageDepth,
+            limit: 1,
+            observed: 2,
+            operation: format!("injecting gap children from gate '{gate_id}'"),
+        })
     );
+    assert!(!g.contains("gap"), "depth denial must be atomic");
 }
 
 #[test]
@@ -1138,6 +1175,24 @@ fn deep_seed_inserts_root_gate_over_all_roots() {
 }
 
 #[test]
+fn deep_seed_rejects_root_gate_past_lineage_budget() {
+    let mut g = TaskGraph::new(Mode::Deep);
+    g.max_lineage_depth = 0;
+    let err = seed(&mut g, vec![spec("root", NodeKind::Explore)])
+        .expect_err("the generated root gate is depth one");
+    assert_eq!(
+        err,
+        DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::LineageDepth,
+            limit: 0,
+            observed: 1,
+            operation: "seeding the task graph".to_string(),
+        })
+    );
+    assert!(g.is_empty(), "seed depth denial must be atomic");
+}
+
+#[test]
 fn deep_seed_of_pure_code_plan_gets_verify_root_gate() {
     let g = dag(
         Mode::Deep,
@@ -1204,6 +1259,35 @@ fn reseed_widens_and_reopens_root_gate() {
     )
     .unwrap();
     assert!(g.all_terminal());
+}
+
+#[test]
+fn seed_replay_remains_idempotent_after_gate_injection() {
+    let root_spec = spec("root", NodeKind::Explore);
+    let mut g = dag(Mode::Deep, vec![root_spec.clone()]);
+    dispatch(&mut g, "root", "planner");
+    let outcome = expand_node(
+        &mut g,
+        "root",
+        "planner",
+        vec![spec("child", NodeKind::Explore)],
+    )
+    .unwrap();
+    let gate_id = outcome.gate_id.unwrap();
+    dispatch(&mut g, "child", "worker");
+    complete_node(&mut g, "child", "worker", sim::deep_artifact("child done")).unwrap();
+    dispatch(&mut g, &gate_id, "critic");
+    inject_from_gate(
+        &mut g,
+        &gate_id,
+        "critic",
+        vec![spec("gap", NodeKind::Explore)],
+    )
+    .unwrap();
+
+    seed(&mut g, vec![root_spec]).expect("generated gap edges are not seed declarations");
+    assert_eq!(g.nodes().iter().filter(|node| node.id == "root").count(), 1);
+    assert_eq!(g.nodes().iter().filter(|node| node.id == "gap").count(), 1);
 }
 
 /// The coverage-debt rule: a passing gate must account for EVERY done node in
@@ -1503,10 +1587,14 @@ fn expansion_depth_cap_blocks_recursive_decomposition() {
         vec![spec("root.a.x.deep", NodeKind::Explore)],
     )
     .expect_err("depth-2 node must not expand further");
-    let message = format!("{err:?}");
-    assert!(
-        message.contains("decomposition depth"),
-        "unexpected error: {message}"
+    assert_eq!(
+        err,
+        DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::LineageDepth,
+            limit: 2,
+            observed: 3,
+            operation: "expanding 'root.a.x'".to_string(),
+        })
     );
 }
 
@@ -1558,13 +1646,13 @@ fn node_budget_rejects_expansion_past_cap() {
         vec![spec("other.child", NodeKind::Explore)],
     )
     .expect_err("expansion past the graph budget must be rejected");
-    let message = err.to_string();
-    assert!(
-        message.contains("0 nodes remaining"),
-        "unexpected error: {message}"
-    );
-    assert!(
-        message.contains("Do the work directly"),
-        "unexpected error: {message}"
+    assert_eq!(
+        err,
+        DagError::BudgetExceeded(BudgetViolation {
+            budget: GraphBudget::Nodes,
+            limit: 10,
+            observed: 11,
+            operation: "expanding 'other'".to_string(),
+        })
     );
 }

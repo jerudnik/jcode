@@ -60,6 +60,7 @@ fn member(session_id: &str, swarm_id: &str, status: &str) -> SwarmMember {
         swarm_id: Some(swarm_id.to_string()),
         swarm_enabled: true,
         status: status.to_string(),
+        lifecycle: Default::default(),
         detail: None,
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: None,

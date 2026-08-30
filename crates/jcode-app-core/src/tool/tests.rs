@@ -488,6 +488,199 @@ async fn registry_execute_enforces_session_tool_policy_after_alias_resolution() 
     );
 }
 
+#[tokio::test]
+async fn scoped_worker_write_to_another_worktree_is_refused_with_boundary() {
+    fn git(repo: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let repo = temp.path().join("repo");
+    let assigned_worktree = temp.path().join("assigned");
+    let other_worktree = temp.path().join("other");
+    std::fs::create_dir(&repo).expect("repo dir");
+    git(&repo, &["init"]);
+    git(
+        &repo,
+        &["config", "user.email", "scope-test@example.invalid"],
+    );
+    git(&repo, &["config", "user.name", "Scope Test"]);
+    std::fs::write(repo.join("owned.txt"), "original\n").expect("seed file");
+    git(&repo, &["add", "owned.txt"]);
+    git(&repo, &["commit", "-m", "seed"]);
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "scope-assigned",
+            assigned_worktree.to_str().expect("assigned path"),
+        ],
+    );
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "scope-other",
+            other_worktree.to_str().expect("other path"),
+        ],
+    );
+
+    let session_id = "test-cross-worktree-scope";
+    let boundary =
+        record_plan_execution_scope("test-swarm", 1, &assigned_worktree).expect("record scope");
+    bind_session_execution_scope(session_id, "test-swarm", 1).expect("bind scope");
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let target = other_worktree.join("owned.txt");
+    let git_control_path = assigned_worktree.join(".git");
+    let git_control_before =
+        std::fs::read_to_string(&git_control_path).expect("worktree Git control file");
+    let outside_result = registry
+        .execute(
+            "write",
+            serde_json::json!({
+                "file_path": target,
+                "content": "unauthorized\n"
+            }),
+            ToolContext {
+                session_id: session_id.to_string(),
+                message_id: "test".to_string(),
+                tool_call_id: "test".to_string(),
+                working_dir: Some(assigned_worktree.clone()),
+                stdin_request_tx: None,
+                graceful_shutdown_signal: None,
+                execution_mode: ToolExecutionMode::Direct,
+            },
+        )
+        .await;
+    let git_result = registry
+        .execute(
+            "write",
+            serde_json::json!({
+                "file_path": ".git",
+                "content": "unauthorized Git metadata change\n"
+            }),
+            ToolContext {
+                session_id: session_id.to_string(),
+                message_id: "test".to_string(),
+                tool_call_id: "test-git-control".to_string(),
+                working_dir: Some(assigned_worktree.clone()),
+                stdin_request_tx: None,
+                graceful_shutdown_signal: None,
+                execution_mode: ToolExecutionMode::Direct,
+            },
+        )
+        .await;
+    let inside_result = registry
+        .execute(
+            "write",
+            serde_json::json!({
+                "file_path": "allowed.txt",
+                "content": "authorized\n"
+            }),
+            ToolContext {
+                session_id: session_id.to_string(),
+                message_id: "test".to_string(),
+                tool_call_id: "test-inside".to_string(),
+                // Simulate a worker process launched from the wrong worktree.
+                working_dir: Some(other_worktree.clone()),
+                stdin_request_tx: None,
+                graceful_shutdown_signal: None,
+                execution_mode: ToolExecutionMode::Direct,
+            },
+        )
+        .await;
+    let outside_content = std::fs::read_to_string(&target).expect("control file");
+    let inside_content =
+        std::fs::read_to_string(assigned_worktree.join("allowed.txt")).expect("authorized file");
+    let git_control_after =
+        std::fs::read_to_string(&git_control_path).expect("unchanged Git control file");
+    clear_session_execution_scope(session_id);
+
+    let error = outside_result.expect_err("outside-worktree write must be refused");
+    let message = error.to_string();
+    assert!(
+        message.contains(&format!(
+            "execution directory boundary '{}'",
+            boundary.display()
+        )),
+        "refusal must name the boundary: {message}"
+    );
+    assert_eq!(
+        outside_content, "original\n",
+        "outside file must remain unchanged"
+    );
+    let git_error = git_result.expect_err("Git control file write must be refused");
+    assert!(git_error.to_string().contains(&format!(
+        "execution directory boundary '{}'",
+        boundary.display()
+    )));
+    assert_eq!(
+        git_control_after, git_control_before,
+        "worktree Git control file must remain unchanged"
+    );
+    inside_result.expect("inside-boundary write must remain allowed");
+    assert_eq!(inside_content, "authorized\n");
+    assert!(
+        !other_worktree.join("allowed.txt").exists(),
+        "worker launch cwd must not override the assigned boundary"
+    );
+}
+
+#[tokio::test]
+async fn scoped_worker_unknown_effect_tool_is_refused_before_invocation() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let session_id = format!("unknown-effect-session-{}", temp.path().display());
+    let swarm_id = format!("unknown-effect-swarm-{}", temp.path().display());
+    let boundary = record_plan_execution_scope(&swarm_id, 1, temp.path()).expect("record scope");
+    bind_session_execution_scope(&session_id, &swarm_id, 1).expect("bind scope");
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    registry
+        .register("bare_schema".to_string(), Arc::new(BareSchemaTool))
+        .await;
+
+    let result = registry
+        .execute(
+            "bare_schema",
+            serde_json::json!({"command": "would run without the guard"}),
+            ToolContext {
+                session_id: session_id.clone(),
+                message_id: "test".to_string(),
+                tool_call_id: "test-unknown-effect".to_string(),
+                working_dir: None,
+                stdin_request_tx: None,
+                graceful_shutdown_signal: None,
+                execution_mode: ToolExecutionMode::Direct,
+            },
+        )
+        .await;
+    clear_session_execution_scope(&session_id);
+
+    let message = result
+        .expect_err("unknown-effect tool must be refused")
+        .to_string();
+    assert!(message.contains("filesystem effects are not classified"));
+    assert!(message.contains(&boundary.display().to_string()));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn registry_execute_pre_tool_hook_blocks_and_allows() {

@@ -812,6 +812,7 @@ async fn client_initiated_turn_fans_out_stream_and_terminal_events_to_live_attac
             swarm_id: None,
             swarm_enabled: false,
             status: "ready".to_string(),
+            lifecycle: Default::default(),
             detail: None,
             task_label: None,
             friendly_name: None,

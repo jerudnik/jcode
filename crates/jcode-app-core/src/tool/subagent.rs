@@ -1,6 +1,6 @@
 use super::{Registry, Tool, ToolContext, ToolOutput};
 use crate::agent::Agent;
-use crate::provider::Provider;
+use crate::provider::{ModelRoute, Provider};
 use crate::session::Session;
 use crate::tool::ambient::AmbientSessionGuard;
 use anyhow::{Context, Result};
@@ -51,6 +51,119 @@ impl SubagentParent {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SubagentSelection {
+    model: String,
+    provider_key: Option<String>,
+    route_api_method: Option<String>,
+}
+
+fn inherited_selection(parent: &SubagentParent) -> SubagentSelection {
+    SubagentSelection {
+        model: parent.model.clone(),
+        provider_key: parent.provider_key.clone(),
+        route_api_method: parent.route_api_method.clone(),
+    }
+}
+
+fn is_inherit_sentinel(model: &str) -> bool {
+    model.eq_ignore_ascii_case("inherit") || model.eq_ignore_ascii_case("coordinator")
+}
+
+fn validate_subagent_model_policy(model: &str, denied_models: &[String]) -> Result<()> {
+    if denied_models.iter().any(|denied| denied.trim() == model) {
+        anyhow::bail!(
+            "Subagent model '{model}' is denied by policy in `agents.swarm_denied_models`."
+        );
+    }
+    Ok(())
+}
+
+fn explicit_dual_auth_selection(model: &str) -> Option<SubagentSelection> {
+    let resolved = crate::provider::resolve_model_spec(model, crate::config::config());
+    let prefix = resolved.explicit_prefix.as_deref()?;
+    if !matches!(
+        prefix,
+        "openai-api" | "openai-oauth" | "claude-api" | "claude-oauth"
+    ) {
+        return None;
+    }
+    let route = jcode_provider_core::AuthRoute::parse_explicit_credential_prefix(prefix)?;
+    let route_id = route.route_api_method().to_string();
+    Some(SubagentSelection {
+        model: resolved.bare_model,
+        provider_key: Some(route_id.clone()),
+        route_api_method: Some(route_id),
+    })
+}
+
+fn catalog_selection_for_model(
+    model: &str,
+    routes: &[ModelRoute],
+) -> Option<Result<SubagentSelection>> {
+    let mut matched = routes
+        .iter()
+        .filter(|route| route.model == model)
+        .peekable();
+    matched.peek()?;
+    let Some(route) = matched.clone().find(|route| route.available) else {
+        let detail = matched
+            .map(|route| route.detail.trim())
+            .find(|detail| !detail.is_empty())
+            .unwrap_or("route unavailable");
+        return Some(Err(anyhow::anyhow!(
+            "Subagent model '{model}' is listed but currently unavailable: {detail}"
+        )));
+    };
+    let selection = crate::provider::RouteSelection::from_model_route(route);
+    Some(Ok(SubagentSelection {
+        model: selection.model,
+        provider_key: Some(selection.runtime_key.stable_id()),
+        route_api_method: Some(selection.api_method),
+    }))
+}
+
+fn resolve_subagent_selection(
+    parent: &SubagentParent,
+    requested_model: Option<&str>,
+    routes: &[ModelRoute],
+    denied_models: &[String],
+) -> Result<SubagentSelection> {
+    let requested_model = requested_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+    let Some(model) = requested_model else {
+        return Ok(inherited_selection(parent));
+    };
+    if is_inherit_sentinel(model) {
+        return Ok(inherited_selection(parent));
+    }
+    validate_subagent_model_policy(model, denied_models)?;
+    if model == parent.model {
+        return Ok(inherited_selection(parent));
+    }
+    if let Some(selection) = explicit_dual_auth_selection(model) {
+        return Ok(selection);
+    }
+
+    let resolved = crate::provider::resolve_model_spec(model, crate::config::config());
+    if resolved.explicit_prefix.is_none()
+        && let Some(selection) = catalog_selection_for_model(model, routes)
+    {
+        return selection;
+    }
+    let Some(provider_key) = resolved.provider_key else {
+        anyhow::bail!(
+            "Subagent model '{model}' could not be resolved to a provider or route. Run `swarm list_models` and retry with a listed model, or use an explicit route prefix such as `openai-oauth:`."
+        );
+    };
+    Ok(SubagentSelection {
+        model: model.to_string(),
+        provider_key: Some(provider_key),
+        route_api_method: None,
+    })
+}
+
 pub(crate) async fn run_subagent_worker(
     provider: Arc<dyn Provider>,
     registry: Registry,
@@ -60,14 +173,28 @@ pub(crate) async fn run_subagent_worker(
     prompt: &str,
     model: Option<&str>,
 ) -> Result<String> {
-    let parent_session_id = parent.session_id;
+    let parent_session_id = parent.session_id.clone();
+    let routes = if model.is_some_and(|model| {
+        let model = model.trim();
+        !model.is_empty() && !is_inherit_sentinel(model) && model != parent.model.as_str()
+    }) {
+        provider.model_routes()
+    } else {
+        Vec::new()
+    };
+    let selection = resolve_subagent_selection(
+        &parent,
+        model,
+        &routes,
+        &crate::config::config().agents.swarm_denied_models,
+    )?;
     let mut session = Session::create(
         Some(parent_session_id.clone()),
         Some(format!("{} (@{} swarm)", description, subagent_type)),
     );
-    session.model = Some(model.unwrap_or(&parent.model).to_string());
-    session.provider_key = parent.provider_key;
-    session.route_api_method = parent.route_api_method;
+    session.model = Some(selection.model);
+    session.provider_key = selection.provider_key;
+    session.route_api_method = selection.route_api_method;
     if let Some(dir) = parent.working_dir {
         session.working_dir = Some(dir.display().to_string());
     }
@@ -157,5 +284,61 @@ impl Tool for SubagentTool {
         } else {
             Ok(ToolOutput::new(output))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parent() -> SubagentParent {
+        SubagentParent {
+            session_id: "parent".to_string(),
+            working_dir: None,
+            model: "claude-opus-5".to_string(),
+            provider_key: Some("claude-oauth".to_string()),
+            route_api_method: Some("anthropic-oauth".to_string()),
+        }
+    }
+
+    #[test]
+    fn model_override_resolves_against_live_catalog_instead_of_inheriting_parent_route() {
+        let routes = [ModelRoute {
+            model: "gpt-5.6-sol-xhigh-fast".to_string(),
+            provider: "Cursor".to_string(),
+            api_method: "cursor".to_string(),
+            available: true,
+            detail: String::new(),
+            cheapness: None,
+        }];
+
+        let selection =
+            resolve_subagent_selection(&parent(), Some("gpt-5.6-sol-xhigh-fast"), &routes, &[])
+                .expect("listed model should resolve");
+
+        assert_eq!(selection.model, "gpt-5.6-sol-xhigh-fast");
+        assert_eq!(selection.provider_key.as_deref(), Some("cursor"));
+        assert_eq!(selection.route_api_method.as_deref(), Some("cursor"));
+    }
+
+    #[test]
+    fn unresolved_model_override_fails_closed_instead_of_inheriting_parent_route() {
+        let error = resolve_subagent_selection(&parent(), Some("definitely-not-a-model"), &[], &[])
+            .expect_err("unknown model must fail before the worker session is created");
+
+        assert!(error.to_string().contains("could not be resolved"));
+    }
+
+    #[test]
+    fn denied_model_override_fails_before_inheriting_the_same_parent_model() {
+        let error = resolve_subagent_selection(
+            &parent(),
+            Some("claude-opus-5"),
+            &[],
+            &["claude-opus-5".to_string()],
+        )
+        .expect_err("a concrete denied model must not bypass policy through inheritance");
+
+        assert!(error.to_string().contains("agents.swarm_denied_models"));
     }
 }

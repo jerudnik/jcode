@@ -12,6 +12,7 @@ mod conversation_search;
 mod debug_socket;
 mod discover;
 mod edit;
+mod execution_scope;
 mod gmail;
 mod goal;
 mod invalid;
@@ -47,6 +48,14 @@ use std::sync::Arc;
 use std::sync::{LazyLock, RwLock as StdRwLock};
 use tokio::sync::RwLock;
 
+#[allow(
+    unused_imports,
+    reason = "scope lifecycle functions are a handoff API for the graph and assignment owners"
+)]
+pub(crate) use execution_scope::{
+    authorize_tool_call, bind_session_execution_scope, clear_session_execution_scope,
+    record_plan_execution_scope,
+};
 pub(crate) use jcode_tool_core::intent_schema_property;
 pub use jcode_tool_core::{StdinInputRequest, Tool, ToolContext, ToolExecutionMode};
 pub use jcode_tool_types::{ToolImage, ToolOutput};
@@ -562,7 +571,12 @@ impl Registry {
     const SINGLE_OUTPUT_MAX_FRACTION: f32 = 0.30;
 
     /// Execute a tool by name
-    pub async fn execute(&self, name: &str, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
+    pub async fn execute(
+        &self,
+        name: &str,
+        input: Value,
+        mut ctx: ToolContext,
+    ) -> Result<ToolOutput> {
         let tools = self.tools.read().await;
         let resolved_name = Self::resolve_tool_name(name);
         if let Some(policy) = session_tool_policy(&ctx.session_id) {
@@ -598,6 +612,22 @@ impl Registry {
 
         // Drop the lock before executing
         drop(tools);
+
+        match authorize_tool_call(&ctx.session_id, resolved_name, &input) {
+            Ok(Some(execution_root)) => {
+                // A worker's launch cwd is not authority. Relative paths must
+                // resolve from the directory recorded for the assignment.
+                ctx.working_dir = Some(execution_root);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let mut fields =
+                    Self::tool_lifecycle_fields("scope_blocked", name, resolved_name, &input, &ctx);
+                fields.push(("block_reason".to_string(), error.to_string()));
+                crate::logging::event_warn("TOOL_LIFECYCLE", fields);
+                return Err(error.into());
+            }
+        }
 
         // User-configured pre_tool gate: external policy hook that can block
         // this call (exit 2). Skipped entirely when not configured.

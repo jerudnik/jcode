@@ -250,6 +250,7 @@ pub(super) async fn create_headless_session(
                 swarm_id: swarm_id.clone(),
                 swarm_enabled,
                 status: "ready".to_string(),
+                lifecycle: jcode_swarm_core::SwarmLifecycleStatus::Ready,
                 detail: None,
                 task_label: None,
                 subagent_type: None,

@@ -29,7 +29,7 @@ async fn broadcast_swarm_status_now(
                 .map(|m| crate::protocol::SwarmMemberStatus {
                     session_id: m.session_id.clone(),
                     friendly_name: m.friendly_name.clone(),
-                    status: m.status.clone(),
+                    status: m.lifecycle_status().to_string(),
                     detail: m.detail.clone(),
                     task_label: m.task_label.clone(),
                     subagent_type: m.subagent_type.clone(),
@@ -48,8 +48,8 @@ async fn broadcast_swarm_status_now(
                         auth_method: m.runtime.auth_method.clone(),
                         effort: m.runtime.effort.clone(),
                         elapsed_secs: if matches!(
-                            m.status.as_str(),
-                            "running" | "streaming" | "thinking"
+                            m.lifecycle_status(),
+                            "running"
                         ) {
                             Some(m.joined_at.elapsed().as_secs())
                         } else {
