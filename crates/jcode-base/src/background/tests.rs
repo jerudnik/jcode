@@ -480,13 +480,27 @@ async fn finalize_non_detached_aborts_adopted_original_future() -> Result<()> {
     let tmp = tempdir()?;
     let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
 
-    // The original future signals if it survives past the abort window.
+    // The original future sets `survived` only after a sleep far longer than
+    // the test could ever run, so a loaded runner cannot race the abort into
+    // a false failure. Aborting the future drops it mid-sleep, which fires
+    // the drop guard; the guard is the deterministic "abort landed" signal.
     let survived = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let survived_flag = std::sync::Arc::clone(&survived);
+    let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let dropped_flag = std::sync::Arc::clone(&dropped);
+
+    struct DropFlag(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
     let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
     let original = tokio::spawn(async move {
+        let _guard = DropFlag(dropped_flag);
         let _ = started_tx.send(());
-        sleep(Duration::from_millis(300)).await;
+        sleep(Duration::from_secs(120)).await;
         survived_flag.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(jcode_tool_types::ToolOutput {
             output: "should never complete".to_string(),
@@ -505,8 +519,16 @@ async fn finalize_non_detached_aborts_adopted_original_future() -> Result<()> {
     let finalized = manager.finalize_non_detached("test-shutdown").await;
     assert_eq!(finalized, 1, "the adopted task must be finalized");
 
-    // Give a detached-but-alive original ample time to reach its flag.
-    sleep(Duration::from_millis(400)).await;
+    // Wait for the abort to drop the original future (deterministic signal),
+    // then confirm the future was parked in its sleep when dropped.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !dropped.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the ORIGINAL adopted future must be aborted, not detached"
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
     assert!(
         !survived.load(std::sync::atomic::Ordering::SeqCst),
         "the ORIGINAL adopted future must be aborted, not detached"
