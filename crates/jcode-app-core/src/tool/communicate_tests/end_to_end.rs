@@ -152,21 +152,32 @@ async fn communicate_list_and_await_members_work_end_to_end() {
     let ServerEvent::Notification { message, .. } = event else {
         panic!("expected swarm_await notification, got: {event:?}");
     };
+    // The finished peer may surface as "ready" (idle after the turn) or
+    // "succeeded" (turn completed with a report); both are canonical done
+    // states for the default await target set.
     assert!(
-        message.contains("(ready)"),
-        "expected await_members to treat ready as done, got: {}",
+        message.contains("(ready)") || message.contains("(succeeded)"),
+        "expected await_members to treat a finished peer as done, got: {}",
         message
     );
 
-    let ready_members =
-        wait_for_member_status(&mut watcher, &watcher_session, &peer_session, "ready")
-            .await
-            .expect("peer should return to ready state");
+    let ready_members = wait_for_member_status_in(
+        &mut watcher,
+        &watcher_session,
+        &peer_session,
+        &["ready", "succeeded"],
+    )
+    .await
+    .expect("peer should settle in a done state");
     let ready_peer = ready_members
         .iter()
         .find(|member| member.session_id == peer_session)
-        .expect("peer should still be listed when ready");
-    assert_eq!(ready_peer.status.as_deref(), Some("ready"));
+        .expect("peer should still be listed when done");
+    assert!(
+        matches!(ready_peer.status.as_deref(), Some("ready" | "succeeded")),
+        "expected peer to settle in a done state, got: {:?}",
+        ready_peer.status
+    );
 
     server_task.abort();
 }
@@ -646,7 +657,7 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
                     ..
                 } if from_session == &spawned_session
                     && scope == "swarm"
-                    && message.contains("finished their work and is ready for more")
+                    && message.contains("finished their work successfully")
             )
         })
         .await

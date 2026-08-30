@@ -784,8 +784,11 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         "post-snapshot demotion must survive restart"
     );
     assert_eq!(
-        loaded.members.get("worker-1").map(|m| m.status.as_str()),
-        Some("completed"),
+        loaded
+            .members
+            .get("worker-1")
+            .map(|m| jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&m.status)),
+        Some(jcode_swarm_core::MemberLifecycleState::Succeeded),
         "post-snapshot terminal status must survive restart (terminal states \
          are exempt from the crash-recovery rewrite)"
     );

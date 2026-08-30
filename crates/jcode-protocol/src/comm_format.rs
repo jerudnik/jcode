@@ -23,20 +23,20 @@ pub fn format_comm_plan_followup(summary: &PlanGraphStatus) -> String {
 pub fn default_comm_cleanup_target_statuses() -> Vec<String> {
     vec![
         "ready".to_string(),
-        "completed".to_string(),
+        "succeeded".to_string(),
         "failed".to_string(),
         "stopped".to_string(),
-        "crashed".to_string(),
+        "lost".to_string(),
     ]
 }
 
 pub fn default_comm_run_await_statuses() -> Vec<String> {
     vec![
         "ready".to_string(),
-        "completed".to_string(),
+        "succeeded".to_string(),
         "failed".to_string(),
         "stopped".to_string(),
-        "crashed".to_string(),
+        "lost".to_string(),
     ]
 }
 

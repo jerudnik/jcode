@@ -249,7 +249,7 @@ async fn persist_reload_recovery_intents(
             .map(|(session_id, member)| {
                 serde_json::json!({
                     "session_id": session_id,
-                    "status": member.status,
+                    "status": member.lifecycle_status(),
                     "is_headless": member.is_headless,
                     "live_attached_connections": member.event_txs.len(),
                     "swarm_id": member.swarm_id,
@@ -268,7 +268,8 @@ async fn persist_reload_recovery_intents(
         members
             .iter()
             .filter(|(_, member)| {
-                member.status == "running" || (!member.is_headless && !member.event_txs.is_empty())
+                member.lifecycle_status() == "running"
+                    || (!member.is_headless && !member.event_txs.is_empty())
             })
             .map(|(session_id, member)| (session_id.clone(), member.is_headless))
             .collect()
@@ -393,7 +394,7 @@ async fn graceful_shutdown_sessions_with_timeout(
         let members = swarm_members.read().await;
         members
             .iter()
-            .filter(|(_, m)| m.status == "running")
+            .filter(|(_, m)| m.lifecycle_status() == "running")
             .map(|(id, _)| id.clone())
             .collect()
     };
@@ -492,7 +493,7 @@ async fn graceful_shutdown_sessions_with_timeout(
                 .filter(|id| {
                     members
                         .get(*id)
-                        .map(|m| m.status == "running")
+                        .map(|m| m.lifecycle_status() == "running")
                         .unwrap_or(false)
                 })
                 .cloned()

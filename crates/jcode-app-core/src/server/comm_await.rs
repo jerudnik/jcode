@@ -10,6 +10,7 @@ use crate::bus::{Bus, BusEvent, SwarmAwaitCompleted, UiActivity};
 use crate::protocol::{AwaitedMemberStatus, ServerEvent, format_comm_awaited_members_with_reports};
 use chrono::{DateTime, SecondsFormat, Utc};
 use jcode_swarm_core::control_log::{ScanOutcome, SwarmControlEnvelope, SwarmControlEvent};
+use jcode_swarm_core::MemberLifecycleState;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -68,6 +69,11 @@ pub(super) async fn awaited_member_statuses(
         requested_ids.to_vec()
     };
 
+    let target_status: HashSet<&'static str> = target_status
+        .iter()
+        .map(|status| MemberLifecycleState::from_compatibility_status(status).as_str())
+        .collect();
+
     let busy_sessions = sessions_with_active_plan_tasks(swarm_id, swarm_plans).await;
 
     let members = swarm_members.read().await;
@@ -79,22 +85,25 @@ pub(super) async fn awaited_member_statuses(
                 .map(|member| {
                     (
                         member.friendly_name.clone(),
-                        member.status.clone(),
+                        member.lifecycle_status().to_string(),
                         member.latest_completion_report.clone(),
                     )
                 })
-                .unwrap_or((None, "unknown".to_string(), None));
-            // A success-shaped status ("ready"/"completed") is only honest
+                .unwrap_or((None, "lost".to_string(), None));
+            // A success-shaped status ("ready"/"succeeded") is only honest
             // when the member has no in-flight plan task: turn boundaries set
             // "ready" mid-task (F2). Failure-shaped statuses still count as
             // done, otherwise a crashed worker would hang the await forever.
-            let mid_task_success_status = matches!(status.as_str(), "ready" | "completed")
+            let mid_task_success_status = matches!(status.as_str(), "ready" | "succeeded")
                 && busy_sessions.contains(session_id);
+            // A departed member ("lost") satisfies stopped/succeeded-shaped
+            // waits: the caller asked "is this worker finished", and a worker
+            // that no longer exists will never become more finished.
             let done = !mid_task_success_status
-                && (target_status.contains(&status)
-                    || (status == "unknown"
-                        && (target_status.contains(&"stopped".to_string())
-                            || target_status.contains(&"completed".to_string()))));
+                && (target_status.contains(status.as_str())
+                    || (status == "lost"
+                        && (target_status.contains("stopped")
+                            || target_status.contains("succeeded"))));
             AwaitedMemberStatus {
                 session_id: session_id.clone(),
                 friendly_name: name,

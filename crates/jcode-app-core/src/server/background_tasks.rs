@@ -10,9 +10,97 @@ use crate::message::{
 use crate::protocol::{NotificationType, ServerEvent};
 use jcode_agent_runtime::SoftInterruptSource;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::{RwLock, broadcast};
+
+const RUN_PLAN_LIVENESS_INTERVAL_SECS: u64 = 5 * 60;
+const RUN_PLAN_LIVENESS_SUMMARY: &str = "Swarm run_plan liveness report";
+
+fn run_plan_liveness_intervals() -> &'static Mutex<HashMap<String, u64>> {
+    static INTERVALS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    INTERVALS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn claim_run_plan_liveness_interval(task_id: &str, interval_key: u64) -> bool {
+    let Ok(mut intervals) = run_plan_liveness_intervals().lock() else {
+        return false;
+    };
+    if intervals
+        .get(task_id)
+        .is_some_and(|reported| *reported >= interval_key)
+    {
+        return false;
+    }
+    intervals.insert(task_id.to_string(), interval_key);
+    true
+}
+
+fn forget_run_plan_liveness(task_id: &str) {
+    if let Ok(mut intervals) = run_plan_liveness_intervals().lock() {
+        intervals.remove(task_id);
+    }
+}
+
+fn run_plan_liveness_task_id(summary: &str) -> Option<&str> {
+    summary
+        .strip_prefix(RUN_PLAN_LIVENESS_SUMMARY)?
+        .strip_prefix(':')
+        .filter(|task_id| !task_id.is_empty())
+}
+
+fn run_plan_liveness_wake(
+    progress: &crate::bus::BackgroundTaskProgressEvent,
+    status: &crate::background::TaskStatusFile,
+    now: chrono::DateTime<chrono::Utc>,
+    last_interval: Option<u64>,
+) -> Option<(u64, crate::bus::SwarmAwaitCompleted)> {
+    if progress.tool_name != "swarm"
+        || !progress
+            .display_name
+            .as_deref()
+            .is_some_and(|name| name.starts_with("run_plan "))
+        || !status.wake
+        || !matches!(status.status, crate::bus::BackgroundTaskStatus::Running)
+    {
+        return None;
+    }
+
+    let started = chrono::DateTime::parse_from_rfc3339(&status.started_at)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    let elapsed_secs = now.signed_duration_since(started).num_seconds().max(0) as u64;
+    let interval_key = elapsed_secs / RUN_PLAN_LIVENESS_INTERVAL_SECS;
+    if interval_key == 0 || last_interval.is_some_and(|last| last >= interval_key) {
+        return None;
+    }
+
+    let notification = format!(
+        "🐝 Swarm run_plan is still running.\n\n{}",
+        format_background_task_progress_markdown(progress),
+    );
+    Some((
+        interval_key,
+        crate::bus::SwarmAwaitCompleted {
+            session_id: progress.session_id.clone(),
+            completed: false,
+            summary: format!("{RUN_PLAN_LIVENESS_SUMMARY}:{}", progress.task_id),
+            notification,
+            notify: false,
+            wake: true,
+        },
+    ))
+}
+
+/// `last_status_change` is also the existing swarm age sample on the wire. Use
+/// it for evidence activity only while the member is live: terminal retention
+/// and dead-member salvage depend on the same clock and must not be extended by
+/// late queued events.
+fn refresh_evidence_clock(last_evidence: &mut std::time::Instant, terminal: bool) {
+    if !terminal {
+        *last_evidence = std::time::Instant::now();
+    }
+}
 
 #[expect(
     clippy::too_many_arguments,
@@ -28,6 +116,7 @@ pub(super) async fn dispatch_background_task_completion(
     event_counter: &Arc<AtomicU64>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
 ) {
+    forget_run_plan_liveness(&task.task_id);
     let notification = format_background_task_notification_markdown(task);
 
     if task.notify
@@ -107,6 +196,18 @@ pub(super) async fn dispatch_swarm_await_completion(
     event_counter: &Arc<AtomicU64>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
 ) {
+    if let Some(task_id) = run_plan_liveness_task_id(&event.summary) {
+        let still_running = crate::background::global()
+            .status(task_id)
+            .await
+            .is_some_and(|status| {
+                matches!(status.status, crate::bus::BackgroundTaskStatus::Running)
+            });
+        if !still_running {
+            return;
+        }
+    }
+
     if event.notify
         && fanout_session_event(
             swarm_members,
@@ -134,13 +235,15 @@ pub(super) async fn dispatch_swarm_await_completion(
         return;
     }
 
+    let followup = if run_plan_liveness_task_id(&event.summary).is_some() {
+        "A long-running swarm plan reported progress. Review its liveness and budget usage, then continue if useful."
+    } else {
+        "A swarm await you started just resolved. Review the result and continue if useful."
+    };
     if !run_live_turn_if_idle(
         &event.session_id,
         &event.notification,
-        Some(
-            "A swarm await you started just resolved. Review the result and continue if useful."
-                .to_string(),
-        ),
+        Some(followup.to_string()),
         sessions,
         LiveTurnSwarmContext::new(
             swarm_members,
@@ -195,6 +298,19 @@ pub(super) async fn dispatch_background_task_progress(
             task.session_id
         ));
     }
+
+    if task.tool_name == "swarm"
+        && task
+            .display_name
+            .as_deref()
+            .is_some_and(|name| name.starts_with("run_plan "))
+        && let Some(status) = crate::background::global().status(&task.task_id).await
+        && let Some((interval_key, wake)) =
+            run_plan_liveness_wake(task, &status, chrono::Utc::now(), None)
+        && claim_run_plan_liveness_interval(&task.task_id, interval_key)
+    {
+        crate::bus::Bus::global().publish(crate::bus::BusEvent::SwarmAwaitCompleted(wake));
+    }
 }
 
 /// Update a swarm worker's cached output tail and rebroadcast swarm status so
@@ -210,6 +326,11 @@ pub(super) async fn dispatch_swarm_output_tail(
         let Some(member) = members.get_mut(&tail.session_id) else {
             return;
         };
+        let terminal = member.lifecycle().is_terminal();
+        refresh_evidence_clock(&mut member.last_status_change, terminal);
+        if terminal && member.output_tail.as_ref() == Some(&tail.tail) {
+            return;
+        }
         member.output_tail = Some(tail.tail.clone());
         member.swarm_id.clone()
     };
@@ -246,6 +367,8 @@ pub(super) async fn dispatch_swarm_todo_progress(
         let Some(member) = members.get_mut(&event.session_id) else {
             return;
         };
+        let terminal = member.lifecycle().is_terminal();
+        refresh_evidence_clock(&mut member.last_status_change, terminal);
         // Keep tool activity attached while the same todo remains active. A
         // transition to a different active item starts a fresh intent history.
         let old_active = member
@@ -258,11 +381,13 @@ pub(super) async fn dispatch_swarm_todo_progress(
         {
             new.tool_intents = old.tool_intents.clone();
         }
-        if member.todo_progress == progress && member.todo_items == items {
-            return; // no change, skip the broadcast
+        let changed = member.todo_progress != progress || member.todo_items != items;
+        if changed {
+            member.todo_progress = progress;
+            member.todo_items = items;
+        } else if terminal {
+            return;
         }
-        member.todo_progress = progress;
-        member.todo_items = items;
         member.swarm_id.clone()
     };
     if let Some(swarm_id) = swarm_id {
@@ -282,7 +407,10 @@ pub(super) async fn dispatch_swarm_tool_activity(
         let Some(member) = members.get_mut(&event.session_id) else {
             return;
         };
-        if !update_active_todo_tool(&mut member.todo_items, event) {
+        let terminal = member.lifecycle().is_terminal();
+        refresh_evidence_clock(&mut member.last_status_change, terminal);
+        let changed = update_active_todo_tool(&mut member.todo_items, event);
+        if terminal && !changed {
             return;
         }
         member.swarm_id.clone()
@@ -310,10 +438,14 @@ pub(super) async fn dispatch_swarm_runtime_status(
         let Some(member) = members.get_mut(&event.session_id) else {
             return;
         };
-        if member.runtime.model.as_ref() == Some(model) {
+        let terminal = member.lifecycle().is_terminal();
+        refresh_evidence_clock(&mut member.last_status_change, terminal);
+        let changed = member.runtime.model.as_ref() != Some(model);
+        if changed {
+            member.runtime.model = Some(model.clone());
+        } else if terminal {
             return;
         }
-        member.runtime.model = Some(model.clone());
         member.swarm_id.clone()
     };
     if let Some(swarm_id) = swarm_id {
@@ -334,7 +466,10 @@ pub(super) async fn dispatch_swarm_batch_progress(
         let Some(member) = members.get_mut(&progress.session_id) else {
             return;
         };
-        if !update_active_todo_batch_progress(&mut member.todo_items, progress) {
+        let terminal = member.lifecycle().is_terminal();
+        refresh_evidence_clock(&mut member.last_status_change, terminal);
+        let changed = update_active_todo_batch_progress(&mut member.todo_items, progress);
+        if terminal && !changed {
             return;
         }
         member.swarm_id.clone()
@@ -610,6 +745,112 @@ mod tests {
             .expect("progress captured");
         assert_eq!((captured.current, captured.total), (27, 43));
         assert!(!update_active_todo_batch_progress(&mut items, &progress));
+    }
+
+    #[test]
+    fn evidence_activity_refreshes_the_member_age_clock() {
+        let mut last_evidence = std::time::Instant::now() - std::time::Duration::from_secs(600);
+
+        refresh_evidence_clock(&mut last_evidence, false);
+
+        assert!(last_evidence.elapsed() < std::time::Duration::from_secs(1));
+
+        let terminal_evidence = std::time::Instant::now() - std::time::Duration::from_secs(600);
+        let mut terminal_clock = terminal_evidence;
+        refresh_evidence_clock(&mut terminal_clock, true);
+        assert_eq!(terminal_clock, terminal_evidence);
+    }
+
+    #[test]
+    fn run_plan_liveness_interval_claims_deduplicate_and_completion_forgets() {
+        let task_id = "run-plan-liveness-interval-ledger";
+        forget_run_plan_liveness(task_id);
+
+        assert!(claim_run_plan_liveness_interval(task_id, 2));
+        assert!(!claim_run_plan_liveness_interval(task_id, 2));
+        assert!(!claim_run_plan_liveness_interval(task_id, 1));
+        assert!(claim_run_plan_liveness_interval(task_id, 3));
+
+        forget_run_plan_liveness(task_id);
+        assert!(claim_run_plan_liveness_interval(task_id, 1));
+        forget_run_plan_liveness(task_id);
+    }
+
+    #[test]
+    fn long_running_plan_emits_liveness_before_terminal_state() {
+        let now = chrono::Utc::now();
+        let started = now - chrono::Duration::minutes(11);
+        let progress = crate::bus::BackgroundTaskProgressEvent {
+            task_id: "run-plan-liveness".to_string(),
+            tool_name: "swarm".to_string(),
+            display_name: Some("run_plan (8 nodes, light mode)".to_string()),
+            session_id: "coordinator".to_string(),
+            progress: crate::bus::BackgroundTaskProgress {
+                kind: crate::bus::BackgroundTaskProgressKind::Determinate,
+                percent: Some(25.0),
+                message: Some(
+                    "completed 2 · failed 0 · blocked 0 · active 3 · assignments 5 · liveness 10m · graph size: 8 nodes · budget: wall clock 11m/2h"
+                        .to_string(),
+                ),
+                current: Some(2),
+                total: Some(8),
+                unit: Some("nodes".to_string()),
+                eta_seconds: None,
+                updated_at: now.to_rfc3339(),
+                source: crate::bus::BackgroundTaskProgressSource::Reported,
+            },
+        };
+        let status = crate::background::TaskStatusFile {
+            task_id: progress.task_id.clone(),
+            tool_name: progress.tool_name.clone(),
+            display_name: progress.display_name.clone(),
+            session_id: progress.session_id.clone(),
+            status: crate::bus::BackgroundTaskStatus::Running,
+            exit_code: None,
+            error: None,
+            started_at: started.to_rfc3339(),
+            completed_at: None,
+            duration_secs: None,
+            pid: None,
+            owner_pid: None,
+            owner_instance: None,
+            detached: false,
+            notify: true,
+            wake: true,
+            progress: Some(progress.progress.clone()),
+            event_history: Vec::new(),
+        };
+
+        let (interval_key, wake) = run_plan_liveness_wake(&progress, &status, now, None)
+            .expect("a plan running beyond two intervals must report before terminal state");
+
+        assert!(!wake.completed, "liveness is nonterminal progress");
+        assert!(wake.wake);
+        assert!(
+            wake.notification.contains("graph size: 8 nodes"),
+            "{}",
+            wake.notification
+        );
+        assert!(
+            wake.notification.contains("budget: wall clock 11m/2h"),
+            "{}",
+            wake.notification
+        );
+        assert_eq!(
+            run_plan_liveness_task_id(&wake.summary),
+            Some(progress.task_id.as_str())
+        );
+        assert!(
+            run_plan_liveness_wake(&progress, &status, now, Some(interval_key)).is_none(),
+            "the same interval must not replay"
+        );
+
+        let mut completed_status = status;
+        completed_status.status = crate::bus::BackgroundTaskStatus::Completed;
+        assert!(
+            run_plan_liveness_wake(&progress, &completed_status, now, None).is_none(),
+            "terminal tasks must not create a queued liveness wake"
+        );
     }
 
     #[tokio::test]

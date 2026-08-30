@@ -355,6 +355,18 @@ async fn wait_for_member_status(
     target_session: &str,
     expected_status: &str,
 ) -> Result<Vec<AgentInfo>> {
+    wait_for_member_status_in(client, requester_session, target_session, &[expected_status]).await
+}
+
+/// Like [`wait_for_member_status`], but accepts any of several canonical
+/// states. Useful for "done" waits where a finished member may surface as
+/// either `ready` (idle) or `succeeded` (finished with a report).
+async fn wait_for_member_status_in(
+    client: &mut RawClient,
+    requester_session: &str,
+    target_session: &str,
+    expected_statuses: &[&str],
+) -> Result<Vec<AgentInfo>> {
     let deadline = tokio::time::Instant::now() + E2E_FLOW_BUDGET;
     loop {
         let members = client.comm_list(requester_session).await?;
@@ -362,15 +374,15 @@ async fn wait_for_member_status(
             .iter()
             .find(|member| member.session_id == target_session)
             .and_then(|member| member.status.as_deref())
-            == Some(expected_status)
+            .is_some_and(|status| expected_statuses.contains(&status))
         {
             return Ok(members);
         }
         if tokio::time::Instant::now() >= deadline {
             anyhow::bail!(
-                "timed out waiting for member {} to reach status {}",
+                "timed out waiting for member {} to reach one of {:?}",
                 target_session,
-                expected_status
+                expected_statuses
             );
         }
         tokio::time::sleep(Duration::from_millis(25)).await;

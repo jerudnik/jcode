@@ -9,6 +9,58 @@ fn unix_now_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
+const RUN_PLAN_LIVENESS_INTERVAL_SECS: u64 = 5 * 60;
+
+#[derive(Debug, Clone, Copy)]
+struct RunPlanBudget {
+    graph_started_at_unix_ms: u64,
+    graph_wall_clock_limit_ms: u64,
+}
+
+fn compact_run_plan_duration(secs: u64) -> String {
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    if secs < 60 * 60 {
+        return format!("{}m", secs / 60);
+    }
+    let hours = secs / (60 * 60);
+    let minutes = (secs % (60 * 60)) / 60;
+    if minutes == 0 {
+        format!("{hours}h")
+    } else {
+        format!("{hours}h {minutes}m")
+    }
+}
+
+fn run_plan_progress_message(
+    message: String,
+    total_nodes: usize,
+    driver_elapsed_secs: u64,
+    now_unix_ms: u64,
+    budget: Option<RunPlanBudget>,
+) -> String {
+    let interval = driver_elapsed_secs / RUN_PLAN_LIVENESS_INTERVAL_SECS;
+    if interval == 0 {
+        return message;
+    }
+
+    let mut message = format!(
+        "{message} · liveness {}",
+        compact_run_plan_duration(interval * RUN_PLAN_LIVENESS_INTERVAL_SECS)
+    );
+    if let Some(budget) = budget {
+        let graph_elapsed_secs =
+            now_unix_ms.saturating_sub(budget.graph_started_at_unix_ms) / 1_000;
+        message.push_str(&format!(
+            " · graph size: {total_nodes} nodes · budget: wall clock {}/{}",
+            compact_run_plan_duration(graph_elapsed_secs),
+            compact_run_plan_duration(budget.graph_wall_clock_limit_ms / 1_000),
+        ));
+    }
+    message
+}
+
 /// Read the plan's wall-clock window: when its budget clock started and how
 /// long it may run.
 ///
@@ -241,6 +293,8 @@ pub(super) fn task_id_from_output_path(path: &std::path::Path) -> Option<&str> {
 pub(super) struct RunPlanReporter {
     pub(super) task_id: Option<String>,
     output_path: Option<std::path::PathBuf>,
+    started_at: std::time::Instant,
+    budget: std::sync::OnceLock<RunPlanBudget>,
 }
 
 impl RunPlanReporter {
@@ -248,6 +302,8 @@ impl RunPlanReporter {
         Self {
             task_id: None,
             output_path: None,
+            started_at: std::time::Instant::now(),
+            budget: std::sync::OnceLock::new(),
         }
     }
 
@@ -255,6 +311,8 @@ impl RunPlanReporter {
         Self {
             task_id: task_id_from_output_path(output_path).map(str::to_string),
             output_path: Some(output_path.to_path_buf()),
+            started_at: std::time::Instant::now(),
+            budget: std::sync::OnceLock::new(),
         }
     }
 
@@ -262,6 +320,13 @@ impl RunPlanReporter {
     /// reporters are no-ops, so refresh polling would be wasted requests).
     pub(super) fn is_background(&self) -> bool {
         self.task_id.is_some()
+    }
+
+    fn set_budget(&self, graph_started_at_unix_ms: u64, graph_wall_clock_limit_ms: u64) {
+        let _ = self.budget.set(RunPlanBudget {
+            graph_started_at_unix_ms,
+            graph_wall_clock_limit_ms,
+        });
     }
 
     pub(super) async fn log(&self, line: &str) {
@@ -283,6 +348,13 @@ impl RunPlanReporter {
         let Some(task_id) = &self.task_id else {
             return;
         };
+        let message = run_plan_progress_message(
+            message,
+            total,
+            self.started_at.elapsed().as_secs(),
+            unix_now_ms(),
+            self.budget.get().copied(),
+        );
         let progress = crate::bus::BackgroundTaskProgress {
             kind: crate::bus::BackgroundTaskProgressKind::Determinate,
             percent: None,
@@ -623,6 +695,7 @@ pub(super) async fn run_swarm_plan_loop(
 ) -> Result<ToolOutput> {
     let initial_summary = fetch_plan_status(&ctx.session_id).await?;
     let (graph_started_at_unix_ms, graph_wall_clock_limit_ms) = graph_wall_clock(&initial_summary)?;
+    reporter.set_budget(graph_started_at_unix_ms, graph_wall_clock_limit_ms);
     let is_deep = initial_summary.mode.eq_ignore_ascii_case("deep");
     let initial_seed_count = if initial_summary.seeded_count > 0 {
         initial_summary.seeded_count
@@ -1061,6 +1134,50 @@ mod safety_tests {
             "1234:5678".to_string(),
         );
         assert_eq!(graph_wall_clock(&summary).unwrap(), (1234, 5678));
+    }
+
+    #[test]
+    fn stable_plan_progress_changes_once_per_liveness_interval_with_graph_budget() {
+        let budget = RunPlanBudget {
+            graph_started_at_unix_ms: 1_000,
+            graph_wall_clock_limit_ms: 2 * 60 * 60 * 1_000,
+        };
+        let before = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS - 1,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+        let first = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+        let duplicate = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS + 30,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+        let second = run_plan_progress_message(
+            "completed 2 of 8".to_string(),
+            8,
+            RUN_PLAN_LIVENESS_INTERVAL_SECS * 2,
+            11 * 60 * 1_000,
+            Some(budget),
+        );
+
+        assert_eq!(before, "completed 2 of 8");
+        assert_eq!(first, duplicate);
+        assert_ne!(first, second);
+        assert!(first.contains("liveness 5m"), "{first}");
+        assert!(first.contains("graph size: 8 nodes"), "{first}");
+        assert!(first.contains("budget: wall clock 10m/2h"), "{first}");
+        assert!(second.contains("liveness 10m"), "{second}");
     }
 
     #[test]

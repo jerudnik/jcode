@@ -576,7 +576,6 @@ fn recover_member_status(
         && !matches!(
             status,
             SwarmLifecycleStatus::Completed
-                | SwarmLifecycleStatus::Done
                 | SwarmLifecycleStatus::Failed
                 | SwarmLifecycleStatus::Stopped
         )

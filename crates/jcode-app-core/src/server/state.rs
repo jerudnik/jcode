@@ -4,7 +4,9 @@ use crate::protocol::ServerEvent;
 use jcode_agent_runtime::{
     InterruptSignal, SoftInterruptMessage, SoftInterruptQueue, SoftInterruptSource,
 };
-use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
+use jcode_swarm_core::{
+    MemberLifecycleEvent, SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
@@ -31,6 +33,64 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 /// the existing shutdown-signal lifecycle.
 static BACKGROUND_TOOL_SIGNALS: LazyLock<StdMutex<HashMap<String, InterruptSignal>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+/// Canonical assignment lifecycle for every live or retained swarm member.
+/// Legacy `SwarmMember::status` remains a compatibility input while callers
+/// migrate, but no output surface should read it directly.
+static SWARM_MEMBER_LIFECYCLES: LazyLock<
+    StdMutex<HashMap<String, SwarmLifecycleStatus>>,
+> = LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+pub(super) fn swarm_member_lifecycle(
+    session_id: &str,
+    compatibility_status: &str,
+) -> SwarmLifecycleStatus {
+    let mut lifecycles = SWARM_MEMBER_LIFECYCLES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let lifecycle = lifecycles
+        .entry(session_id.to_string())
+        .or_insert_with(|| SwarmLifecycleStatus::from(compatibility_status.to_string()));
+    let compatibility_state =
+        jcode_swarm_core::MemberLifecycleState::from_compatibility_status(compatibility_status);
+    if lifecycle.revision == 0 && lifecycle.state != compatibility_state {
+        lifecycle.state = compatibility_state;
+    }
+    lifecycle.clone()
+}
+
+pub(super) fn store_swarm_member_lifecycle(
+    session_id: &str,
+    lifecycle: SwarmLifecycleStatus,
+) {
+    SWARM_MEMBER_LIFECYCLES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(session_id.to_string(), lifecycle);
+}
+
+pub(super) fn remove_swarm_member_lifecycle(session_id: &str) {
+    SWARM_MEMBER_LIFECYCLES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(session_id);
+}
+
+pub(super) fn rename_swarm_member_lifecycle(
+    old_session_id: &str,
+    new_session_id: &str,
+    compatibility_status: &str,
+) {
+    let lifecycle = {
+        let mut lifecycles = SWARM_MEMBER_LIFECYCLES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        lifecycles.remove(old_session_id).unwrap_or_else(|| {
+            SwarmLifecycleStatus::from(compatibility_status.to_string())
+        })
+    };
+    store_swarm_member_lifecycle(new_session_id, lifecycle);
+}
 
 /// Register (or replace) the background-tool signal for a session.
 pub(super) fn register_background_tool_signal(session_id: &str, signal: InterruptSignal) {
@@ -256,13 +316,131 @@ pub struct SwarmMember {
 }
 
 impl SwarmMember {
+    pub fn lifecycle(&self) -> SwarmLifecycleStatus {
+        swarm_member_lifecycle(&self.session_id, &self.status)
+    }
+
+    pub fn lifecycle_status(&self) -> &'static str {
+        self.lifecycle().state.as_str()
+    }
+
+    pub fn apply_lifecycle_event(
+        &mut self,
+        event: MemberLifecycleEvent,
+        updated_at_unix_ms: u64,
+    ) -> bool {
+        let mut lifecycle = self.lifecycle();
+        if !lifecycle.reduce(event, updated_at_unix_ms) {
+            return false;
+        }
+        self.status = lifecycle.state.as_str().to_string();
+        store_swarm_member_lifecycle(&self.session_id, lifecycle);
+        true
+    }
+
+    /// Temporary bridge for callers that still submit historical status
+    /// strings. The bridge is an input adapter only. It immediately reduces to
+    /// the canonical state and mirrors that state back into `status`.
+    pub fn apply_compatibility_lifecycle_status(
+        &mut self,
+        status: &str,
+        detail: Option<&str>,
+        has_completion_report: bool,
+        updated_at_unix_ms: u64,
+    ) -> bool {
+        let current = self.lifecycle();
+        let epoch = current.assignment_epoch;
+        let reason = detail.map(ToString::to_string);
+        let mut changed = false;
+
+        match status.to_ascii_lowercase().as_str() {
+            "starting" | "spawned" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::SpawnRequested,
+                    updated_at_unix_ms,
+                );
+            }
+            "ready" if has_completion_report || current.state.is_terminal() => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::TurnSucceeded { epoch },
+                    updated_at_unix_ms,
+                );
+            }
+            "ready" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::WorkerReady,
+                    updated_at_unix_ms,
+                );
+            }
+            "assigned" | "queued" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::AssignmentCreated {
+                        epoch: current.next_assignment_epoch(),
+                    },
+                    updated_at_unix_ms,
+                );
+            }
+            "running" | "running_stale" | "streaming" | "thinking" | "blocked"
+            | "waiting_network" => {
+                let running_epoch = if matches!(
+                    current.state,
+                    jcode_swarm_core::MemberLifecycleState::Assigned
+                        | jcode_swarm_core::MemberLifecycleState::Running
+                ) {
+                    epoch
+                } else {
+                    let next = current.next_assignment_epoch();
+                    changed |= self.apply_lifecycle_event(
+                        MemberLifecycleEvent::AssignmentCreated { epoch: next },
+                        updated_at_unix_ms,
+                    );
+                    next
+                };
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::TurnStarted {
+                        epoch: running_epoch,
+                    },
+                    updated_at_unix_ms,
+                );
+            }
+            "succeeded" | "completed" | "done" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::TurnSucceeded { epoch },
+                    updated_at_unix_ms,
+                );
+            }
+            "failed" | "error" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::TurnFailed { epoch, reason },
+                    updated_at_unix_ms,
+                );
+            }
+            "stopped" | "closed" | "cancelled" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::StopConfirmed { epoch, reason },
+                    updated_at_unix_ms,
+                );
+            }
+            "lost" | "crashed" | "disconnected" | "unknown" => {
+                changed |= self.apply_lifecycle_event(
+                    MemberLifecycleEvent::ProcessLost { reason },
+                    updated_at_unix_ms,
+                );
+            }
+            _ => {}
+        }
+
+        self.status = self.lifecycle_status().to_string();
+        changed
+    }
+
     pub fn durable_record(&self) -> SwarmMemberRecord {
         SwarmMemberRecord {
             session_id: self.session_id.clone(),
             working_dir: self.working_dir.clone(),
             swarm_id: self.swarm_id.clone(),
             swarm_enabled: self.swarm_enabled,
-            status: SwarmLifecycleStatus::from(self.status.clone()),
+            status: self.lifecycle(),
             detail: self.detail.clone(),
             task_label: self.task_label.clone(),
             subagent_type: self.subagent_type.clone(),
@@ -289,6 +467,7 @@ impl SwarmMember {
         record: SwarmMemberRecord,
         event_tx: mpsc::UnboundedSender<ServerEvent>,
     ) -> Self {
+        store_swarm_member_lifecycle(&record.session_id, record.status.clone());
         Self {
             session_id: record.session_id,
             event_tx,

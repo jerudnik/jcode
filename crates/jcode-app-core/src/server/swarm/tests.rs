@@ -79,7 +79,7 @@ async fn detached_cancel_final_member_status_is_stopped_for_both_write_orders() 
             HashSet::from(["worker".to_string()]),
         )])));
         let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
-        worker.status = "running".to_string();
+        worker.apply_compatibility_lifecycle_status("running", None, false, 0);
         swarm_members
             .write()
             .await
@@ -821,7 +821,7 @@ async fn update_member_status_notifies_coordinator_when_headless_worker_returns_
 
     let (coord, mut coord_rx) = swarm_member("coord", "coordinator", false);
     let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
-    worker.status = "running".to_string();
+    worker.apply_compatibility_lifecycle_status("running", None, false, 0);
     worker.detail = Some("doing task".to_string());
     worker.report_back_to_session_id = Some("coord".to_string());
     {
@@ -850,7 +850,7 @@ async fn update_member_status_notifies_coordinator_when_headless_worker_returns_
                 notification_type: NotificationType::Message { .. },
                 message,
                 ..
-            } if message.contains("finished their work and is ready for more")
+            } if message.contains("completed their work")
         )
     }));
 }
@@ -939,7 +939,7 @@ async fn update_member_status_prefers_explicit_report_back_owner_over_coordinato
     let (coord, mut coord_rx) = swarm_member("coord", "coordinator", false);
     let (owner, mut owner_rx) = swarm_member("owner", "agent", false);
     let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
-    worker.status = "running".to_string();
+    worker.apply_compatibility_lifecycle_status("running", None, false, 0);
     worker.detail = Some("doing task".to_string());
     worker.report_back_to_session_id = Some("owner".to_string());
     {
@@ -969,7 +969,7 @@ async fn update_member_status_prefers_explicit_report_back_owner_over_coordinato
                 notification_type: NotificationType::Message { .. },
                 message,
                 ..
-            } if message.contains("finished their work and is ready for more")
+            } if message.contains("completed their work")
         )
     }));
     let coord_events: Vec<_> = std::iter::from_fn(|| coord_rx.try_recv().ok()).collect();
@@ -980,7 +980,7 @@ async fn update_member_status_prefers_explicit_report_back_owner_over_coordinato
                 notification_type: NotificationType::Message { .. },
                 message,
                 ..
-            } if message.contains("finished their work and is ready for more")
+            } if message.contains("completed their work")
         )
     }));
 }
@@ -999,7 +999,7 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
     let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
     register_session_interrupt_queue(&soft_interrupt_queues, "coord", coord_queue.clone()).await;
     let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
-    worker.status = "running".to_string();
+    worker.apply_compatibility_lifecycle_status("running", None, false, 0);
     worker.report_back_to_session_id = Some("coord".to_string());
     worker.runtime.model = Some("gpt-5.6-sol".to_string());
     worker.runtime.provider = Some("OpenAI".to_string());
@@ -1063,6 +1063,55 @@ async fn update_member_status_includes_completion_report_in_owner_notification()
 }
 
 #[tokio::test]
+async fn update_member_status_delivers_long_completion_report_without_loss() {
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        "swarm-1".to_string(),
+        HashSet::from(["coord".to_string(), "worker".to_string()]),
+    )])));
+
+    let (coord, _coord_rx) = swarm_member("coord", "coordinator", false);
+    let coord_queue = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sessions: SessionAgents = Arc::new(RwLock::new(HashMap::new()));
+    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    register_session_interrupt_queue(&soft_interrupt_queues, "coord", coord_queue.clone()).await;
+    let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
+    worker.apply_compatibility_lifecycle_status("running", None, false, 0);
+    worker.report_back_to_session_id = Some("coord".to_string());
+    {
+        let mut members = swarm_members.write().await;
+        members.insert("coord".to_string(), coord);
+        members.insert("worker".to_string(), worker);
+    }
+
+    let report = format!("{}\nTAIL: all recommendations arrived.", "Δ".repeat(4_100));
+    update_member_status_with_report(
+        "worker",
+        "ready",
+        None,
+        Some(report.clone()),
+        &swarm_members,
+        &swarms_by_id,
+        Some(&sessions),
+        Some(&soft_interrupt_queues),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let pending = coord_queue.lock().expect("queue lock");
+    assert_eq!(pending.len(), 1);
+    assert!(
+        pending[0]
+            .content
+            .contains(&format!("\n\nReport:\n{report}\n\n")),
+        "the queued report was not delivered byte-for-byte"
+    );
+    assert!(!pending[0].content.contains("Report truncated by jcode"));
+}
+
+#[tokio::test]
 async fn update_member_status_skips_noop_broadcasts() {
     let swarm_members = Arc::new(RwLock::new(HashMap::new()));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
@@ -1092,7 +1141,7 @@ async fn update_member_status_skips_noop_broadcasts() {
 
     update_member_status(
         "worker",
-        "busy",
+        "running",
         Some("working".to_string()),
         &swarm_members,
         &swarms_by_id,
@@ -1106,7 +1155,7 @@ async fn update_member_status_skips_noop_broadcasts() {
         worker_rx.try_recv(),
         Ok(ServerEvent::SwarmStatus { members }) if members.len() == 1
             && members[0].session_id == "worker"
-            && members[0].status == "busy"
+            && members[0].status == "running"
             && members[0].detail.as_deref() == Some("working")
     ));
 }
@@ -1502,7 +1551,7 @@ async fn update_member_status_notifies_owner_when_worker_crashes_mid_task() {
     )])));
     let (owner, mut owner_rx) = swarm_member("owner", "coordinator", false);
     let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
-    worker.status = "running".to_string();
+    worker.apply_compatibility_lifecycle_status("running", None, false, 0);
     worker.report_back_to_session_id = Some("owner".to_string());
     {
         let mut members = swarm_members.write().await;
@@ -1527,7 +1576,7 @@ async fn update_member_status_notifies_owner_when_worker_crashes_mid_task() {
         owner_events.iter().any(|event| matches!(
             event,
             ServerEvent::Notification { message, .. }
-                if message.contains("crashed while working")
+                if message.contains("was lost while working")
         )),
         "owner should be notified of the crash, got {owner_events:?}"
     );

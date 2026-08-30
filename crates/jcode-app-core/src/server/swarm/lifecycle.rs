@@ -246,7 +246,7 @@ pub(in crate::server) fn claim_dead_pid_sweep(now_ms: u64, interval: Duration) -
         .is_ok()
 }
 
-/// Reconcile persisted Active sessions with dead owner PIDs and mirror crashed
+/// Reconcile persisted Active sessions with dead owner PIDs and mirror lost
 /// sessions into swarm member state. This is intentionally cheap and opportunistic:
 /// it runs at most once per interval from daemon-side swarm status traffic, so
 /// dead visible workers stop looking alive even when nobody opens the picker.
@@ -265,20 +265,20 @@ pub(in crate::server) async fn sweep_dead_pid_swarm_members(
         return Vec::new();
     };
     let _ = crate::session::reconcile_active_sessions();
-    // Only members not already in a terminal (dead) state can newly transition
-    // to crashed, so skip the rest BEFORE touching disk. This keeps the per-sweep
+    // Only members not already in a terminal state can newly transition to
+    // lost, so skip the rest BEFORE touching disk. This keeps the per-sweep
     // `Session::load` count proportional to live members instead of O(all members)
     // — dead members otherwise accumulate and get re-loaded from disk every tick.
     let session_ids: Vec<String> = {
         let members = swarm_members.read().await;
         members
             .iter()
-            .filter(|(_, member)| !member_status_is_dead(&member.status))
+            .filter(|(_, member)| !member.lifecycle().is_terminal())
             .map(|(session_id, _)| session_id.clone())
             .collect()
     };
 
-    let crashed_sessions: HashSet<String> = session_ids
+    let lost_sessions: HashSet<String> = session_ids
         .into_iter()
         .filter(|session_id| {
             crate::session::Session::load(session_id).is_ok_and(|session| {
@@ -289,27 +289,50 @@ pub(in crate::server) async fn sweep_dead_pid_swarm_members(
             })
         })
         .collect();
-    if crashed_sessions.is_empty() {
+    if lost_sessions.is_empty() {
         return Vec::new();
     }
 
     let mut changed_swarms = HashSet::new();
+    let mut persisted = Vec::new();
     {
         let mut members = swarm_members.write().await;
-        for session_id in &crashed_sessions {
+        for session_id in &lost_sessions {
             let Some(member) = members.get_mut(session_id) else {
                 continue;
             };
-            if member_status_is_dead(&member.status) {
+            if member.lifecycle().is_terminal() {
                 continue;
             }
-            member.status = "crashed".to_string();
-            member.detail = Some("client process exited".to_string());
+            let detail = "client process exited".to_string();
+            if !member.apply_lifecycle_event(
+                jcode_swarm_core::MemberLifecycleEvent::ProcessLost {
+                    reason: Some(detail.clone()),
+                },
+                now_unix_ms(),
+            ) {
+                continue;
+            }
+            member.detail = Some(detail);
             member.last_status_change = Instant::now();
+            persisted.push((session_id.clone(), member.lifecycle()));
             if let Some(swarm_id) = member.swarm_id.clone() {
                 changed_swarms.insert(swarm_id);
             }
         }
+    }
+
+    for (session_id, lifecycle) in persisted {
+        let _ = crate::session::Session::persist_swarm_lifecycle(
+            &session_id,
+            crate::session::StoredSwarmLifecycleStatus {
+                state: lifecycle.state.as_str().to_string(),
+                assignment_epoch: lifecycle.assignment_epoch,
+                revision: lifecycle.revision,
+                reason: lifecycle.reason,
+                updated_at_unix_ms: lifecycle.updated_at_unix_ms,
+            },
+        );
     }
 
     changed_swarms.into_iter().collect()
@@ -338,14 +361,11 @@ pub(in crate::server) fn swarm_terminal_member_gc_interval() -> Duration {
 /// visible temporarily for reports and diagnostics but must not consume the
 /// runaway-prevention spawn budget.
 pub(in crate::server) fn member_status_is_terminal(status: &str) -> bool {
-    matches!(
-        status,
-        "completed" | "done" | "failed" | "stopped" | "crashed" | "closed" | "disconnected"
-    )
+    jcode_swarm_core::MemberLifecycleState::from_compatibility_status(status).is_terminal()
 }
 
 pub(in crate::server) fn member_consumes_swarm_capacity(member: &SwarmMember) -> bool {
-    !member_status_is_terminal(&member.status)
+    !member.lifecycle().is_terminal()
 }
 
 pub(in crate::server) fn expired_terminal_member_ids(
@@ -354,7 +374,7 @@ pub(in crate::server) fn expired_terminal_member_ids(
 ) -> Vec<String> {
     members
         .values()
-        .filter(|member| member_status_is_terminal(&member.status))
+        .filter(|member| member.lifecycle().is_terminal())
         .filter(|member| member.last_status_change.elapsed() >= retention)
         .map(|member| member.session_id.clone())
         .collect()
@@ -364,7 +384,12 @@ pub(in crate::server) fn expired_terminal_member_ids(
 /// the session's agent loop is gone, so no heartbeat or turn end will ever
 /// arrive for tasks it holds.
 pub(in crate::server) fn member_status_is_dead(status: &str) -> bool {
-    crate::swarm_verbs::member_status_is_dead(status)
+    matches!(
+        jcode_swarm_core::MemberLifecycleState::from_compatibility_status(status),
+        jcode_swarm_core::MemberLifecycleState::Failed
+            | jcode_swarm_core::MemberLifecycleState::Stopped
+            | jcode_swarm_core::MemberLifecycleState::Lost
+    )
 }
 
 /// Outcome of salvaging one dead member's plan assignments.
@@ -796,5 +821,50 @@ pub(in crate::server) async fn refresh_swarm_task_staleness(
             swarm_coordinators,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_consistency_tests {
+    use jcode_swarm_core::MemberLifecycleState;
+
+    /// Every surface that accepts legacy status strings funnels them through
+    /// `from_compatibility_status` (await targets, persistence recovery, the
+    /// member registry), so this mapping is the single vocabulary authority.
+    #[test]
+    fn compatibility_inputs_collapse_to_canonical_states() {
+        let cases = [
+            ("ready", MemberLifecycleState::Ready),
+            ("completed", MemberLifecycleState::Succeeded),
+            ("done", MemberLifecycleState::Succeeded),
+            ("succeeded", MemberLifecycleState::Succeeded),
+            ("error", MemberLifecycleState::Failed),
+            ("failed", MemberLifecycleState::Failed),
+            ("cancelled", MemberLifecycleState::Stopped),
+            ("stopped", MemberLifecycleState::Stopped),
+            ("crashed", MemberLifecycleState::Lost),
+            ("lost", MemberLifecycleState::Lost),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                MemberLifecycleState::from_compatibility_status(input),
+                expected,
+                "compatibility input {input} must parse to {expected:?}"
+            );
+        }
+    }
+
+    /// "ready" is a live state (a worker awaiting more work), never a
+    /// completion, while every terminal alias classifies as terminal.
+    #[test]
+    fn terminal_classification_follows_canonical_states() {
+        assert!(!MemberLifecycleState::from_compatibility_status("ready").is_terminal());
+        for input in ["completed", "done", "failed", "stopped", "crashed"] {
+            assert!(
+                MemberLifecycleState::from_compatibility_status(input).is_terminal(),
+                "compatibility input {input} must classify as terminal"
+            );
+        }
     }
 }

@@ -1360,20 +1360,21 @@ pub(super) async fn handle_comm_list_swarms(
             let Some(member) = members.get(member_id) else {
                 continue;
             };
-            *members_by_status.entry(member.status.clone()).or_insert(0) += 1;
+            let lifecycle_status = member.lifecycle_status().to_string();
+            *members_by_status.entry(lifecycle_status.clone()).or_insert(0) += 1;
             *members_by_type
                 .entry(member_type_for_fleet(member, plan))
                 .or_insert(0) += 1;
             fleet_members.push(SwarmFleetMember {
                 session_id: member.session_id.clone(),
                 friendly_name: member.friendly_name.clone(),
-                status: member.status.clone(),
+                status: lifecycle_status.clone(),
                 subagent_type: member.subagent_type.clone(),
                 task_label: member.task_label.clone(),
                 swarm_id: member.swarm_id.clone(),
                 assigned_instance_id: assigned_instance_id_for_fleet(member, plan),
             });
-            needs_operator_input |= status_needs_operator_input(&member.status);
+            needs_operator_input |= status_needs_operator_input(&lifecycle_status);
             let status_age = member.last_status_change.elapsed().as_secs();
             last_activity_age_secs =
                 Some(last_activity_age_secs.map_or(status_age, |age| age.min(status_age)));
@@ -1393,7 +1394,7 @@ pub(super) async fn handle_comm_list_swarms(
             swarm_id: swarm_id.clone(),
             coordinator_session_id,
             coordinator_name: coordinator.and_then(|member| member.friendly_name.clone()),
-            coordinator_status: coordinator.map(|member| member.status.clone()),
+            coordinator_status: coordinator.map(|member| member.lifecycle_status().to_string()),
             member_count: member_ids.len(),
             members: fleet_members,
             members_by_status,

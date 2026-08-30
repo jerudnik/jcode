@@ -150,7 +150,11 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
         recovered_member.report_back_to_session_id.as_deref(),
         Some("session-2")
     );
-    assert_eq!(recovered_member.status, "crashed");
+    assert_eq!(
+        jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&recovered_member.status),
+        jcode_swarm_core::MemberLifecycleState::Lost,
+        "a member running at shutdown must recover as lost/crashed"
+    );
     assert_eq!(
         recovered_member.detail.as_deref(),
         Some("writing tests (recovered after reload while running)")
