@@ -58,8 +58,14 @@ impl Drop for TestCurrentDirGuard {
 ///
 /// Environment variables and their caches are mutable process-global state.
 /// Tests that mutate them need exclusive access, while tests that only read
-/// them can safely run concurrently. Waiting writers block new readers so a
-/// steady reader stream cannot starve a scoped environment writer.
+/// them can safely run concurrently. Waiting writers block new readers only
+/// while the lock is quiescent (no active readers). Once a read generation is
+/// active, new readers keep joining it even when a writer waits: read leases
+/// live as long as their owning Agent, and one live agent's test can only
+/// finish after building further agents, so barring those dependent readers
+/// behind a queued writer deadlocks the whole process (observed as 90-minute
+/// CI hangs in `client_lifecycle` tests). The writer instead gets priority
+/// over readers that arrive at quiescence.
 #[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
 struct TestEnvLockState {
@@ -67,6 +73,14 @@ struct TestEnvLockState {
     active_writer: bool,
     waiting_writers: usize,
 }
+
+/// Upper bound on waiting for a test env lease before panicking.
+///
+/// A blocked lease acquisition means a lease leaked or the admission rules
+/// regressed. Panicking with the lock state turns what would otherwise be a
+/// silent multi-hour CI hang into a fast, attributable test failure.
+#[cfg(any(test, feature = "test-support"))]
+const TEST_ENV_LOCK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[cfg(any(test, feature = "test-support"))]
 struct TestEnvLockInner {
@@ -236,11 +250,21 @@ fn acquire_test_env_read(lock: Arc<TestEnvLockInner>) -> TestEnvReadLease {
         .state
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    while state.active_writer || state.waiting_writers > 0 {
-        state = lock
+    let deadline = std::time::Instant::now() + TEST_ENV_LOCK_DEADLINE;
+    while state.active_writer || (state.waiting_writers > 0 && state.active_readers == 0) {
+        let (next, timeout) = lock
             .changed
-            .wait(state)
+            .wait_timeout(state, TEST_ENV_LOCK_DEADLINE)
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state = next;
+        if timeout.timed_out() && std::time::Instant::now() >= deadline {
+            panic!(
+                "test env read lease not granted within {TEST_ENV_LOCK_DEADLINE:?} \
+                 (active_readers={}, active_writer={}, waiting_writers={}); \
+                 a lease is stuck or the lock admission rules regressed",
+                state.active_readers, state.active_writer, state.waiting_writers
+            );
+        }
     }
     state.active_readers += 1;
     drop(state);
@@ -254,11 +278,23 @@ fn acquire_test_env_write(lock: Arc<TestEnvLockInner>) -> TestEnvWriteLease {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.waiting_writers += 1;
+    let deadline = std::time::Instant::now() + TEST_ENV_LOCK_DEADLINE;
     while state.active_writer || state.active_readers > 0 {
-        state = lock
+        let (next, timeout) = lock
             .changed
-            .wait(state)
+            .wait_timeout(state, TEST_ENV_LOCK_DEADLINE)
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state = next;
+        if timeout.timed_out() && std::time::Instant::now() >= deadline {
+            state.waiting_writers = state.waiting_writers.saturating_sub(1);
+            lock.changed.notify_all();
+            panic!(
+                "test env write lease not granted within {TEST_ENV_LOCK_DEADLINE:?} \
+                 (active_readers={}, active_writer={}, waiting_writers={}); \
+                 a read lease is stuck or leaked",
+                state.active_readers, state.active_writer, state.waiting_writers
+            );
+        }
     }
     state.waiting_writers = state.waiting_writers.saturating_sub(1);
     state.active_writer = true;
