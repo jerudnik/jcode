@@ -139,6 +139,20 @@ impl ProviderActivation {
         Self::new(runtime_id, RuntimeSelection::Unlocked { active_hint })
     }
 
+    /// Downgrade a locked activation to an unlocked one that keeps the same
+    /// active-provider hint. Auth-change activation must use this in shared
+    /// (daemon) processes: `JCODE_FORCE_PROVIDER` is process-wide, so a locked
+    /// activation there pins every current and future session to one provider
+    /// and silently breaks model switching until the daemon restarts.
+    pub fn into_unlocked(mut self) -> Self {
+        if let RuntimeSelection::Locked(active_provider) = self.selection {
+            self.selection = RuntimeSelection::Unlocked {
+                active_hint: Some(active_provider),
+            };
+        }
+        self
+    }
+
     pub fn azure_openai(model: Option<String>) -> Self {
         let activation = Self::locked(RuntimeProviderId::AzureOpenAi, ActiveProvider::OpenRouter);
         if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
@@ -254,8 +268,29 @@ pub fn apply_azure_openai_runtime() -> Result<Option<String>> {
     Ok(model)
 }
 
+/// Azure activation for auth-change notifications: same credential and model
+/// wiring as [`apply_azure_openai_runtime`], but without locking provider
+/// selection for the whole process.
+pub fn apply_azure_openai_runtime_unlocked() -> Result<Option<String>> {
+    crate::auth::azure::apply_runtime_env()?;
+    let model = crate::auth::azure::load_model();
+    ProviderActivation::azure_openai(model.clone())
+        .into_unlocked()
+        .apply_env()?;
+    Ok(model)
+}
+
 pub fn apply_openai_compatible_runtime(default_model: Option<String>) -> Result<()> {
     ProviderActivation::openai_compatible(default_model).apply_env()
+}
+
+/// OpenAI-compatible activation for auth-change notifications: unlocked, so a
+/// shared daemon process never pins provider selection. See
+/// [`ProviderActivation::into_unlocked`].
+pub fn apply_openai_compatible_runtime_unlocked(default_model: Option<String>) -> Result<()> {
+    ProviderActivation::openai_compatible(default_model)
+        .into_unlocked()
+        .apply_env()
 }
 
 #[cfg(test)]
