@@ -1650,11 +1650,14 @@ fn build_skills_report(app: &App) -> String {
         }
     } else {
         let snapshot = app.current_skills_snapshot();
+        if let Err(error) = snapshot.ensure_valid() {
+            out.push_str(&format!("- registry error: {error}\n"));
+        }
         let mut skills = snapshot.list();
         skills.sort_by(|a, b| a.name.cmp(&b.name));
         if skills.is_empty() {
             out.push_str(
-                "- none loaded\n  Add skills under ~/.jcode/skills/<name>/SKILL.md or ./.jcode/skills/<name>/SKILL.md\n",
+                "- none loaded\n  Add global skills under ~/.jcode/skills/ or ~/.agents/skills/, and project skills under ./.jcode/skills/ or ./.agents/skills/. ./.claude/skills/ is a compatibility fallback when ./.agents/skills/ has no loadable skills.\n",
             );
         } else {
             for skill in skills {

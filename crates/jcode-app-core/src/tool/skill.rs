@@ -22,9 +22,14 @@ impl SkillTool {
     /// session's project-local overlay resolved from the tool context working
     /// dir (issue #457). The overlay is read fresh from disk so edits are
     /// visible without daemon restarts and never enter the shared registry.
-    async fn effective_registry(&self, working_dir: Option<&std::path::Path>) -> SkillRegistry {
+    async fn effective_registry(
+        &self,
+        working_dir: Option<&std::path::Path>,
+    ) -> Result<SkillRegistry> {
         let global = self.registry.read().await;
-        SkillRegistry::effective_for_working_dir(&global, working_dir)
+        let effective = SkillRegistry::effective_for_working_dir(&global, working_dir);
+        effective.ensure_valid()?;
+        Ok(effective)
     }
 }
 
@@ -117,7 +122,7 @@ impl SkillTool {
     ) -> Result<ToolOutput> {
         let name = normalize_skill_name(name, "load")?;
 
-        let registry = self.effective_registry(working_dir).await;
+        let registry = self.effective_registry(working_dir).await?;
         let skill = registry.get(&name).ok_or_else(|| {
             // Endorsed skills are advertised in `list` but are not bundled;
             // a bare "not found" here reads like a bug (issue #445). Point at
@@ -160,7 +165,7 @@ impl SkillTool {
     }
 
     async fn list_skills(&self, working_dir: Option<&std::path::Path>) -> Result<ToolOutput> {
-        let registry = self.effective_registry(working_dir).await;
+        let registry = self.effective_registry(working_dir).await?;
         let mut skills = registry.list();
         skills.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -171,8 +176,10 @@ impl SkillTool {
             "No skills loaded.\n\n\
             Skills are loaded from:\n\
             - ~/.jcode/skills/<skill-name>/SKILL.md (global)\n\
+            - ~/.agents/skills/<skill-name>/SKILL.md (global shared)\n\
             - ./.jcode/skills/<skill-name>/SKILL.md (project-local)\n\
-            - ./.claude/skills/<skill-name>/SKILL.md (compatibility)\n\n\
+            - ./.agents/skills/<skill-name>/SKILL.md (project projection)\n\
+            - ./.claude/skills/<skill-name>/SKILL.md (fallback when .agents has no loadable skills)\n\n\
             Create a SKILL.md file with YAML frontmatter:\n\
             ---\n\
             name: my-skill\n\
@@ -246,12 +253,25 @@ impl SkillTool {
         // (issue #457).
         let reloaded = {
             let mut registry = self.registry.write().await;
-            registry.reload_global()
+            let previous = registry.clone();
+            match registry.reload_global() {
+                Ok(global_count) => {
+                    let effective =
+                        SkillRegistry::effective_for_working_dir(&registry, working_dir);
+                    match effective.ensure_valid() {
+                        Ok(()) => Ok((global_count, effective)),
+                        Err(error) => {
+                            *registry = previous;
+                            Err(error)
+                        }
+                    }
+                }
+                Err(error) => Err(error),
+            }
         };
 
         match reloaded {
-            Ok(global_count) => {
-                let effective = self.effective_registry(working_dir).await;
+            Ok((global_count, effective)) => {
                 let skills = effective.list();
                 let mut output = format!(
                     "Reloaded {} global skills ({} effective for this session)\n\n",
@@ -286,7 +306,7 @@ impl SkillTool {
     ) -> Result<ToolOutput> {
         let name = normalize_skill_name(name, "read")?;
 
-        let registry = self.effective_registry(working_dir).await;
+        let registry = self.effective_registry(working_dir).await?;
 
         if let Some(skill) = registry.get(&name) {
             let mut output = format!("# Skill: {}\n\n", skill.name);
@@ -567,13 +587,61 @@ mod tests {
     }
 
     fn write_project_skill(root: &std::path::Path, name: &str) {
-        let skill_dir = root.join(".agents").join("skills").join(name);
+        write_project_skill_in(root, ".agents", name);
+    }
+
+    fn write_project_skill_in(root: &std::path::Path, source: &str, name: &str) {
+        let skill_dir = root.join(source).join("skills").join(name);
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
             format!("---\nname: {name}\ndescription: Project skill {name}\n---\n\nBody."),
         )
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_project_skill_names_fail_with_every_source_path() {
+        let tool = create_test_tool();
+        let repo = tempfile::tempdir().unwrap();
+        write_project_skill_in(repo.path(), ".jcode", "shared-name");
+        write_project_skill_in(repo.path(), ".agents", "shared-name");
+
+        let error = tool
+            .execute(
+                json!({"action": "list"}),
+                context_with_working_dir(repo.path()),
+            )
+            .await
+            .expect_err("duplicate declared names must fail skill_manage");
+        let message = error.to_string();
+        assert!(message.contains("shared-name"));
+        assert!(message.contains(".jcode"));
+        assert!(message.contains(".agents"));
+    }
+
+    #[tokio::test]
+    async fn test_reload_all_restores_global_registry_on_project_conflict() {
+        let tool = create_test_tool();
+        let repo = tempfile::tempdir().unwrap();
+        write_project_skill_in(repo.path(), ".jcode", "shared-name");
+        write_project_skill_in(repo.path(), ".agents", "shared-name");
+
+        let result = tool
+            .execute(
+                json!({"action": "reload_all"}),
+                context_with_working_dir(repo.path()),
+            )
+            .await
+            .unwrap();
+        assert!(result.output.contains("Failed to reload skills"));
+        assert!(result.output.contains("shared-name"));
+        assert!(result.output.contains(".jcode"));
+        assert!(result.output.contains(".agents"));
+        assert!(
+            tool.registry.read().await.list().is_empty(),
+            "failed project validation must restore the previous global registry"
+        );
     }
 
     /// Issue #457: project-local skills must be session-scoped. Two contexts

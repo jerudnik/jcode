@@ -4,16 +4,25 @@ This branch keeps Jcode's agent-tool integration model centered on existing runt
 
 ## APM-managed skills
 
-Jcode loads skills from these project-local directories, in order:
+Jcode loads skills from these project-local directories:
 
-1. `.apm/skills/`
-2. `.agents/skills/`
-3. `.jcode/skills/`
-4. `.claude/skills/`
+1. `.jcode/skills/` for Jcode-native project skills.
+2. `.agents/skills/` as the canonical APM/shared projection.
+3. `.claude/skills/` only as a compatibility fallback when `.agents/skills/`
+   has no loadable skills.
 
-Later paths override earlier paths when two skills declare the same `name` in `SKILL.md`. This lets APM own generated/source skill trees while keeping explicit project overrides available.
+`.apm/skills/` is authoring source. APM projects it into client discovery
+directories during install; Jcode does not load the source tree directly or
+read two generated projections of the same bundle.
 
-Global user skills still live under `~/.jcode/skills/`.
+Every declared skill name must be unique across all loaded sources. When two
+`SKILL.md` files declare the same name, Jcode removes that name from the active
+registry and reports every conflicting path. Discovery order is not an override
+mechanism; consolidate or rename the sources.
+
+Global skills load from installed Claude plugins, `~/.jcode/skills/`, and the
+shared `~/.agents/skills/` projection. Duplicate declared names across those
+sources fail under the same rule.
 
 ## APM-managed MCP servers
 

@@ -112,16 +112,26 @@ impl App {
         if let Some(invocation) = skill_invocation {
             let skill_name = invocation.name.to_string();
             let trailing_prompt = invocation.prompt.map(str::to_string);
-            let mut skill = self.current_skills_snapshot().get(&skill_name).cloned();
+            let mut skills = self.current_skills_snapshot();
+            if let Err(error) = skills.ensure_valid() {
+                self.push_display_message(DisplayMessage::error(error.to_string()));
+                return;
+            }
+            let mut skill = skills.get(&skill_name).cloned();
 
             // Remote/minimal TUI clients may start with an empty skill snapshot, and
             // daemon-side `skill_manage reload_all` can update a different process.
             // On a slash miss, synchronously refresh from the active session working
             // directory before reporting Unknown skill so project-local skills such
-            // as .jcode/skills/optimization work immediately after reload/build.
+            // as a newly projected .agents skill work immediately after reload/build.
             if skill.is_none() {
                 self.refresh_skills_snapshot();
-                skill = self.current_skills_snapshot().get(&skill_name).cloned();
+                skills = self.current_skills_snapshot();
+                if let Err(error) = skills.ensure_valid() {
+                    self.push_display_message(DisplayMessage::error(error.to_string()));
+                    return;
+                }
+                skill = skills.get(&skill_name).cloned();
             }
 
             if let Some(skill) = skill {

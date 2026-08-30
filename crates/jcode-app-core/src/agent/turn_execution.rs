@@ -844,6 +844,7 @@ impl Agent {
 
         // Show available skills
         let skills = self.current_skills_snapshot();
+        skills.ensure_valid()?;
         let skill_list = skills.list();
         if !skill_list.is_empty() {
             println!(

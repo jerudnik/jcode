@@ -31,6 +31,7 @@ struct SkillFrontmatter {
 #[derive(Debug, Default, Clone)]
 pub struct SkillRegistry {
     skills: HashMap<String, Skill>,
+    duplicate_sources: HashMap<String, Vec<PathBuf>>,
 }
 
 /// A slash-command skill invocation, optionally followed by a prompt that
@@ -61,18 +62,14 @@ impl SkillRegistry {
     pub fn shared_registry() -> Arc<RwLock<Self>> {
         #[cfg(test)]
         {
-            Arc::new(RwLock::new(Self::load_global().unwrap_or_default()))
+            Arc::new(RwLock::new(Self::load_global_or_log()))
         }
 
         #[cfg(not(test))]
         {
             static SHARED: OnceLock<Arc<RwLock<SkillRegistry>>> = OnceLock::new();
             SHARED
-                .get_or_init(|| {
-                    Arc::new(RwLock::new(
-                        SkillRegistry::load_global().unwrap_or_default(),
-                    ))
-                })
+                .get_or_init(|| Arc::new(RwLock::new(SkillRegistry::load_global_or_log())))
                 .clone()
         }
     }
@@ -82,7 +79,7 @@ impl SkillRegistry {
     pub fn shared_snapshot() -> Arc<Self> {
         #[cfg(test)]
         {
-            Arc::new(Self::load_global().unwrap_or_default())
+            Arc::new(Self::load_global_or_log())
         }
 
         #[cfg(not(test))]
@@ -90,7 +87,22 @@ impl SkillRegistry {
             if let Ok(skills) = Self::shared_registry().try_read() {
                 Arc::new(skills.clone())
             } else {
-                Arc::new(SkillRegistry::load_global().unwrap_or_default())
+                Arc::new(SkillRegistry::load_global_or_log())
+            }
+        }
+    }
+
+    fn load_global_or_log() -> Self {
+        match Self::load_global_unvalidated() {
+            Ok((registry, _)) => {
+                if let Err(error) = registry.ensure_valid() {
+                    crate::logging::error(&format!("Skills: {error}"));
+                }
+                registry
+            }
+            Err(error) => {
+                crate::logging::error(&format!("Skills: {error}"));
+                Self::default()
             }
         }
     }
@@ -236,13 +248,24 @@ impl SkillRegistry {
     /// resolved from the active session's workspace root (issue #457), never
     /// from the daemon's startup cwd, and never shared across sessions.
     pub fn load_global() -> Result<Self> {
+        let (registry, _) = Self::load_global_unvalidated()?;
+        registry.ensure_valid()?;
+        Ok(registry)
+    }
+
+    /// Build the global registry while retaining duplicate-source evidence.
+    /// Strict callers use [`Self::load_global`]; shared startup keeps this
+    /// invalid registry so every conflicting path remains agent-visible and
+    /// unrelated unique skills are not discarded.
+    fn load_global_unvalidated() -> Result<(Self, usize)> {
         // First-run import from Claude Code / Codex CLI
         Self::import_from_external();
 
         let mut registry = Self::default();
 
         // Load skills provided by Claude Code plugins/marketplace installs
-        // first, so explicit jcode/agents skills with the same name win below.
+        // first. Same-named jcode/agents skills become conflicts below; no
+        // source is allowed to win by discovery order.
         if let Some(plugins_root) = Self::claude_plugins_root() {
             registry.load_plugin_skills_from_root(&plugins_root);
         }
@@ -262,11 +285,15 @@ impl SkillRegistry {
             registry.load_from_dir(&agents_skills)?;
         }
 
-        Ok(registry)
+        let count = registry.skills.len();
+        Ok((registry, count))
     }
 
     /// Load only the project-local skill overlay for a workspace root:
-    /// `./.jcode/skills/`, `./.agents/skills/`, and `./.claude/skills/`.
+    /// `./.jcode/skills/`, the canonical `./.agents/skills/` projection, and
+    /// `./.claude/skills/` only as a compatibility fallback when `.agents` has
+    /// no loadable skills. `.apm/skills/` is authoring source, not a runtime
+    /// discovery path.
     ///
     /// Loaded fresh from disk on access so edits are visible without daemon
     /// restarts and two sessions in different repositories never see each
@@ -278,11 +305,16 @@ impl SkillRegistry {
         Ok(overlay)
     }
 
-    /// Merge a project-local overlay into this registry. Overlay skills win
-    /// over same-named global skills, mirroring the historical load order
-    /// (project dirs loaded last).
+    /// Merge a project-local overlay into this registry. Duplicate declared
+    /// names are removed from the active map and retained as validation errors;
+    /// discovery order is never an override mechanism.
     pub fn merge_overlay(&mut self, overlay: Self) {
-        self.skills.extend(overlay.skills);
+        for (name, paths) in overlay.duplicate_sources {
+            self.record_duplicate(name, paths);
+        }
+        for skill in overlay.skills.into_values() {
+            self.insert_skill(skill);
+        }
     }
 
     /// Effective skills for a session: shared global skills plus the
@@ -292,6 +324,9 @@ impl SkillRegistry {
         if let Ok(overlay) = Self::load_project_overlay(working_dir) {
             effective.merge_overlay(overlay);
         }
+        if let Err(error) = effective.ensure_valid() {
+            crate::logging::error(&format!("Skills: {error}"));
+        }
         effective
     }
 
@@ -300,6 +335,7 @@ impl SkillRegistry {
     pub fn load_for_working_dir(working_dir: Option<&Path>) -> Result<Self> {
         let mut registry = Self::load_global()?;
         registry.load_project_local_dirs(working_dir)?;
+        registry.ensure_valid()?;
         Ok(registry)
     }
 
@@ -309,15 +345,6 @@ impl SkillRegistry {
     }
 
     fn load_project_local_dirs(&mut self, working_dir: Option<&Path>) -> Result<()> {
-        // Fork seam (additive): APM-generated skill trees load first, so a
-        // project-local .jcode/.agents/.claude skill of the same name still
-        // overrides a generated one (load_from_dir inserts last-wins).
-        // `.agents` is loaded natively by upstream below.
-        let apm_dir = Self::project_local_dir(working_dir, ".apm");
-        if apm_dir.exists() {
-            self.load_from_dir(&apm_dir)?;
-        }
-
         // Load from ./.jcode/skills/ (project-local jcode skills)
         let local_jcode = Self::project_local_dir(working_dir, ".jcode");
         if local_jcode.exists() {
@@ -326,13 +353,17 @@ impl SkillRegistry {
 
         // Load from ./.agents/skills/ (shared cross-tool `.agents` convention)
         let local_agents = Self::project_local_dir(working_dir, ".agents");
-        if local_agents.exists() {
-            self.load_from_dir(&local_agents)?;
-        }
+        let agents_count = if local_agents.exists() {
+            self.load_from_dir_count(&local_agents)?
+        } else {
+            0
+        };
 
-        // Fallback: ./.claude/skills/ (project-local Claude skills for compatibility)
+        // Fallback: ./.claude/skills/ for projects that have not adopted the
+        // shared .agents projection. APM commonly writes both client outputs;
+        // reading both would create duplicate authorities from generated copies.
         let local_claude = Self::project_local_dir(working_dir, ".claude");
-        if local_claude.exists() {
+        if agents_count == 0 && local_claude.exists() {
             self.load_from_dir(&local_claude)?;
         }
 
@@ -481,7 +512,7 @@ impl SkillRegistry {
                 if skill_file.exists()
                     && let Ok(skill) = Self::parse_skill(&skill_file)
                 {
-                    self.skills.insert(skill.name.clone(), skill);
+                    self.insert_skill(skill);
                 }
             }
         }
@@ -514,6 +545,57 @@ impl SkillRegistry {
             path: path.to_path_buf(),
             search_text,
         })
+    }
+
+    fn insert_skill(&mut self, skill: Skill) {
+        let name = skill.name.clone();
+        if let Some(paths) = self.duplicate_sources.get_mut(&name) {
+            paths.push(skill.path);
+            paths.sort();
+            paths.dedup();
+            return;
+        }
+
+        if let Some(existing) = self.skills.remove(&name) {
+            self.record_duplicate(name, vec![existing.path, skill.path]);
+            return;
+        }
+
+        self.skills.insert(name, skill);
+    }
+
+    fn record_duplicate(&mut self, name: String, mut paths: Vec<PathBuf>) {
+        if let Some(existing) = self.skills.remove(&name) {
+            paths.push(existing.path);
+        }
+        paths.extend(self.duplicate_sources.remove(&name).unwrap_or_default());
+        paths.sort();
+        paths.dedup();
+        self.duplicate_sources.insert(name, paths);
+    }
+
+    pub fn ensure_valid(&self) -> Result<()> {
+        if self.duplicate_sources.is_empty() {
+            return Ok(());
+        }
+
+        let mut conflicts: Vec<_> = self.duplicate_sources.iter().collect();
+        conflicts.sort_by(|(left, _), (right, _)| left.cmp(right));
+        let details = conflicts
+            .into_iter()
+            .map(|(name, paths)| {
+                let paths = paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("'{name}' declared by: {paths}")
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        anyhow::bail!(
+            "Duplicate declared skill names are not allowed; remove or rename every duplicate: {details}"
+        )
     }
 
     /// Parse YAML frontmatter from markdown
@@ -559,22 +641,33 @@ impl SkillRegistry {
 
     /// Reload a specific skill by name
     pub fn reload(&mut self, name: &str) -> Result<bool> {
-        // Find the skill's path first
-        let path = self.skills.get(name).map(|s| s.path.clone());
+        let previous = self.clone();
+        let result = (|| {
+            // Find the skill's path first
+            let path = self.skills.get(name).map(|s| s.path.clone());
 
-        if let Some(path) = path {
-            if path.exists() {
-                let skill = Self::parse_skill(&path)?;
-                self.skills.insert(skill.name.clone(), skill);
-                Ok(true)
+            if let Some(path) = path {
+                if path.exists() {
+                    let skill = Self::parse_skill(&path)?;
+                    self.skills.remove(name);
+                    self.insert_skill(skill);
+                    self.ensure_valid()?;
+                    Ok(true)
+                } else {
+                    // Skill file was deleted
+                    self.skills.remove(name);
+                    Ok(false)
+                }
             } else {
-                // Skill file was deleted
-                self.skills.remove(name);
                 Ok(false)
             }
-        } else {
-            Ok(false)
+        })();
+
+        if result.is_err() {
+            *self = previous;
         }
+
+        result
     }
 
     /// Reload all skills from all locations
@@ -591,38 +684,17 @@ impl SkillRegistry {
     /// can never leak its project skills into the shared registry that other
     /// sessions see (issue #457).
     pub fn reload_global(&mut self) -> Result<usize> {
+        let (reloaded, count) = Self::load_global_unvalidated()?;
+        reloaded.ensure_valid()?;
+        *self = reloaded;
+
         // The available-skills list is embedded in the static system prompt,
-        // so a reload that changes it legitimately invalidates warm KV cache
-        // prefixes. Document it so the miss is attributed instead of alarmed.
+        // so a successful reload that changes it legitimately invalidates warm
+        // KV cache prefixes. Record only committed reloads.
         crate::cache_invalidation::record(
             "skill reload",
             "reloaded all skills; the skills list in the system prompt may have changed",
         );
-        self.skills.clear();
-
-        let mut count = 0;
-
-        // Load skills provided by Claude Code plugins/marketplace installs
-        // first, so explicit jcode/agents skills with the same name win below.
-        if let Some(plugins_root) = Self::claude_plugins_root() {
-            count += self.load_plugin_skills_from_root(&plugins_root);
-        }
-
-        // Load from ~/.jcode/skills/ (jcode's own global skills)
-        if let Ok(jcode_dir) = crate::storage::jcode_dir() {
-            let jcode_skills = jcode_dir.join("skills");
-            if jcode_skills.exists() {
-                count += self.load_from_dir_count(&jcode_skills)?;
-            }
-        }
-
-        // Load from ~/.agents/skills/ (shared cross-tool `.agents` convention)
-        if let Ok(agents_skills) = crate::storage::user_home_path(".agents/skills")
-            && agents_skills.exists()
-        {
-            count += self.load_from_dir_count(&agents_skills)?;
-        }
-
         Ok(count)
     }
 
@@ -642,7 +714,7 @@ impl SkillRegistry {
                 if skill_file.exists()
                     && let Ok(skill) = Self::parse_skill(&skill_file)
                 {
-                    self.skills.insert(skill.name.clone(), skill);
+                    self.insert_skill(skill);
                     count += 1;
                 }
             }
@@ -721,7 +793,7 @@ pub const ENDORSED_SKILLS: &[EndorsedSkill] = &[
         name: "optimization",
         description: "Improve performance, latency, throughput, memory usage, or general efficiency by defining metrics, measuring, attributing bottlenecks, and prioritizing macro-optimizations.",
         category: "jcode",
-        source: "bundled in jcode repo (.jcode/skills/optimization)",
+        source: "Jcode APM package (.apm/skills/optimization; projected to .agents/skills)",
         install: None,
     },
     EndorsedSkill {
@@ -1116,25 +1188,96 @@ mod tests {
     }
 
     #[test]
-    fn load_for_working_dir_reads_apm_and_agents_skills() {
+    fn load_for_working_dir_reads_agents_projection_not_apm_source() {
         let temp = tempfile::tempdir().expect("tempdir");
         write_test_skill(temp.path(), ".apm", "apm-skill");
         write_test_skill(temp.path(), ".agents", "agents-skill");
 
         let registry = SkillRegistry::load_for_working_dir(Some(temp.path())).expect("load skills");
 
-        let apm_skill = registry
-            .get("apm-skill")
-            .expect("APM-managed skill should load");
-        assert!(apm_skill.path.starts_with(temp.path().join(".apm")));
+        assert!(
+            registry.get("apm-skill").is_none(),
+            "APM authoring source must not be loaded alongside its projections"
+        );
         let agents_skill = registry
             .get("agents-skill")
-            .expect("agent-package-manager skill should load");
+            .expect("APM .agents projection should load");
         assert!(agents_skill.path.starts_with(temp.path().join(".agents")));
     }
 
     #[test]
-    fn project_overlay_is_session_scoped_and_composes_over_globals() {
+    fn load_for_working_dir_uses_claude_only_as_agents_fallback() {
+        let fallback = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(fallback.path().join(".agents/skills"))
+            .expect("create empty agents projection");
+        write_test_skill(fallback.path(), ".claude", "claude-only");
+        let registry = SkillRegistry::load_for_working_dir(Some(fallback.path()))
+            .expect("load Claude fallback");
+        assert!(registry.get("claude-only").is_some());
+
+        let projected = tempfile::tempdir().expect("tempdir");
+        write_test_skill(projected.path(), ".agents", "agents-skill");
+        write_test_skill(projected.path(), ".claude", "claude-skill");
+        let registry = SkillRegistry::load_for_working_dir(Some(projected.path()))
+            .expect("load agents projection");
+        assert!(registry.get("agents-skill").is_some());
+        assert!(
+            registry.get("claude-skill").is_none(),
+            "Claude projection must be ignored when .agents is present"
+        );
+    }
+
+    #[test]
+    fn duplicate_names_preserve_unrelated_skills_and_every_source_path() {
+        let mut registry = SkillRegistry::default();
+        registry.insert_skill(test_skill("unrelated", "Unrelated skill", "body"));
+
+        let mut first = test_skill("shared-name", "First variant", "body");
+        first.path = PathBuf::from("/tmp/source-a/shared-name/SKILL.md");
+        let mut second = test_skill("shared-name", "Second variant", "body");
+        second.path = PathBuf::from("/tmp/source-b/shared-name/SKILL.md");
+        registry.insert_skill(first);
+        registry.insert_skill(second);
+
+        assert!(registry.get("shared-name").is_none());
+        assert!(registry.get("unrelated").is_some());
+        let message = registry
+            .ensure_valid()
+            .expect_err("duplicate declared names must fail")
+            .to_string();
+        assert!(message.contains("source-a/shared-name/SKILL.md"));
+        assert!(message.contains("source-b/shared-name/SKILL.md"));
+    }
+
+    #[test]
+    fn reload_restores_previous_registry_when_declared_name_conflicts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let reloaded_path = temp.path().join("SKILL.md");
+        std::fs::write(
+            &reloaded_path,
+            "---\nname: retained\ndescription: Conflicting reload\n---\n\nbody",
+        )
+        .expect("write conflicting reload");
+
+        let mut registry = SkillRegistry::default();
+        let mut changing = test_skill("changing", "Changing skill", "body");
+        changing.path = reloaded_path;
+        registry.insert_skill(changing);
+        registry.insert_skill(test_skill("retained", "Retained skill", "body"));
+
+        let error = registry
+            .reload("changing")
+            .expect_err("conflicting declared name must fail reload");
+        assert!(error.to_string().contains("retained"));
+        assert!(registry.get("changing").is_some());
+        assert!(registry.get("retained").is_some());
+        registry
+            .ensure_valid()
+            .expect("failed reload must restore the valid registry");
+    }
+
+    #[test]
+    fn project_overlay_is_session_scoped_and_rejects_global_duplicates() {
         let temp = tempfile::tempdir().expect("tempdir");
         write_test_skill(temp.path(), ".jcode", "session-skill");
 
@@ -1149,20 +1292,36 @@ mod tests {
             SkillRegistry::load_project_overlay(Some(other.path())).expect("load overlay");
         assert!(other_overlay.get("session-skill").is_none());
 
-        // Effective set = base globals + overlay, with overlay winning on name.
+        // A project skill cannot override a same-named global skill.
         let mut base = SkillRegistry::default();
         base.skills.insert(
             "session-skill".to_string(),
             test_skill("session-skill", "global variant", "global body"),
         );
         let effective = SkillRegistry::effective_for_working_dir(&base, Some(temp.path()));
-        let skill = effective
-            .get("session-skill")
-            .expect("overlay skill should be present");
+        assert!(effective.get("session-skill").is_none());
         assert!(
-            skill.path.starts_with(temp.path()),
-            "project-local overlay must win over a same-named global skill"
+            effective
+                .ensure_valid()
+                .expect_err("duplicate should invalidate the effective registry")
+                .to_string()
+                .contains("session-skill"),
+            "duplicate diagnostic should name the conflicting skill"
         );
+    }
+
+    #[test]
+    fn load_for_working_dir_rejects_duplicate_project_skill_names() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_test_skill(temp.path(), ".jcode", "shared-name");
+        write_test_skill(temp.path(), ".agents", "shared-name");
+
+        let error = SkillRegistry::load_for_working_dir(Some(temp.path()))
+            .expect_err("duplicate declared names must fail");
+        let message = error.to_string();
+        assert!(message.contains("shared-name"));
+        assert!(message.contains(".jcode"));
+        assert!(message.contains(".agents"));
     }
 
     #[test]
@@ -1424,7 +1583,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_jcode_skill_wins_over_plugin_skill_with_same_name() {
+    fn explicit_jcode_skill_conflicts_with_plugin_skill_with_same_name() {
         let temp = tempfile::tempdir().expect("tempdir");
         let plugins_root = temp.path().join("plugins");
 
@@ -1434,19 +1593,18 @@ mod tests {
         // Explicit jcode skill with the same name.
         write_test_skill(temp.path(), ".jcode", "shared-name");
 
-        // Mirror load ordering: plugins first, then explicit skill dirs, so
-        // the later (explicit) insert wins in the registry map.
+        // Discovery order must not turn either source into an override.
         let mut registry = SkillRegistry::default();
         registry.load_plugin_skills_from_root(&plugins_root);
         registry
             .load_from_dir(&temp.path().join(".jcode/skills"))
             .expect("load explicit skills");
 
-        let skill = registry.get("shared-name").expect("skill present");
-        assert_eq!(
-            skill.description, "Test skill shared-name",
-            "explicit jcode skill must override the plugin-provided one"
-        );
+        assert!(registry.get("shared-name").is_none());
+        let error = registry
+            .ensure_valid()
+            .expect_err("duplicate plugin and explicit skills must fail");
+        assert!(error.to_string().contains("shared-name"));
     }
 
     #[test]
