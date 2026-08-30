@@ -875,27 +875,52 @@ fn spawn_assigned_task_run(
 ) {
     let assignment_text = append_swarm_completion_report_instructions(&assignment_text);
     tokio::spawn(async move {
-        {
+        let node_kind = {
             let now_ms = now_unix_ms();
             let mut plans = swarm_plans.write().await;
-            if let Some(plan) = plans.get_mut(&swarm_id)
-                && let Some(item) = plan.items.iter_mut().find(|item| item.id == task_id)
-            {
-                item.status = "running".to_string();
-                let progress = plan.task_progress.entry(task_id.clone()).or_default();
-                progress.assigned_session_id = Some(target_session.clone());
-                progress.assignment_summary = Some(truncate_detail(&assignment_text, 120));
-                progress.started_at_unix_ms = Some(now_ms);
-                progress.last_heartbeat_unix_ms = Some(now_ms);
-                progress.last_detail = Some(truncate_detail(&assignment_text, 120));
-                progress.last_checkpoint_unix_ms = Some(now_ms);
-                progress.checkpoint_summary = Some("task started".to_string());
-                progress.completed_at_unix_ms = None;
-                progress.stale_since_unix_ms = None;
-                progress.heartbeat_count = Some(progress.heartbeat_count.unwrap_or(0) + 1);
-                progress.checkpoint_count = Some(progress.checkpoint_count.unwrap_or(0) + 1);
-                plan.version += 1;
+            let mut node_kind: Option<String> = None;
+            if let Some(plan) = plans.get_mut(&swarm_id) {
+                node_kind = plan
+                    .node_meta
+                    .get(&task_id)
+                    .and_then(|meta| meta.kind.clone());
+                if let Some(item) = plan.items.iter_mut().find(|item| item.id == task_id) {
+                    item.status = "running".to_string();
+                    let progress = plan.task_progress.entry(task_id.clone()).or_default();
+                    progress.assigned_session_id = Some(target_session.clone());
+                    progress.assignment_summary = Some(truncate_detail(&assignment_text, 120));
+                    progress.started_at_unix_ms = Some(now_ms);
+                    progress.last_heartbeat_unix_ms = Some(now_ms);
+                    progress.last_detail = Some(truncate_detail(&assignment_text, 120));
+                    progress.last_checkpoint_unix_ms = Some(now_ms);
+                    progress.checkpoint_summary = Some("task started".to_string());
+                    progress.completed_at_unix_ms = None;
+                    progress.stale_since_unix_ms = None;
+                    progress.heartbeat_count = Some(progress.heartbeat_count.unwrap_or(0) + 1);
+                    progress.checkpoint_count = Some(progress.checkpoint_count.unwrap_or(0) + 1);
+                    plan.version += 1;
+                }
             }
+            node_kind
+        };
+        // The worker's authority for this run comes from its node's kind, not
+        // from anything in the assignment prompt. Installed before the turn
+        // starts and cleared when it ends, so a reused worker never keeps a
+        // previous node's tier.
+        let tier =
+            crate::tool::capability_tier::CapabilityTier::from_node_kind(node_kind.as_deref());
+        if let Some((stale_swarm, stale_task)) = crate::tool::capability_tier::
+            install_session_capability(&target_session, tier, &swarm_id, &task_id)
+        {
+            crate::logging::event_warn(
+                "SWARM_CAPABILITY",
+                vec![
+                    ("event".to_string(), "stale_tier_replaced".to_string()),
+                    ("session".to_string(), target_session.clone()),
+                    ("stale_swarm".to_string(), stale_swarm),
+                    ("stale_task".to_string(), stale_task),
+                ],
+            );
         }
         let swarm_state = SwarmState {
             members: Arc::clone(&swarm_members),
@@ -1004,6 +1029,9 @@ fn spawn_assigned_task_run(
         } else {
             None
         };
+        // The tier covers exactly the assigned run. Cleared on every exit path,
+        // success or error, so the session leaves with its ordinary authority.
+        crate::tool::capability_tier::clear_session_capability(&target_session);
         let _ = heartbeat_stop_tx.send(true);
         let _ = heartbeat_task.await;
 
