@@ -74,6 +74,7 @@ async fn assign_task_to_client_attached_session_skips_server_side_run() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
@@ -185,6 +186,6 @@ async fn assign_task_to_client_attached_session_skips_server_side_run() {
             "plan must not be terminal while the assigned task is still queued"
         );
         let members = swarm_members.read().await;
-        assert_eq!(members[worker].status, "ready");
+        assert_eq!(members[worker].status, "succeeded");
     }
 }

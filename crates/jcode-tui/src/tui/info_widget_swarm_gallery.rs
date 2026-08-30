@@ -37,27 +37,40 @@ fn member_icon(member: &SwarmMemberStatus) -> Option<String> {
     }
 }
 
-/// Age marker appended to member bodies, e.g. "· 7s ago" or "· now".
+/// Age marker appended to member bodies. Live members render evidence activity,
+/// while terminal members keep lifecycle age because late evidence does not
+/// advance their retention clock.
 /// `humanize_age` already yields "now" for fresh updates, which reads wrong
 /// with an "ago" suffix.
-fn age_marker(age: u64) -> String {
+fn age_marker(member: &SwarmMemberStatus, age: u64) -> String {
     let human = humanize_age(age);
+    let terminal = matches!(
+        member.status.as_str(),
+        "succeeded" | "failed" | "stopped" | "lost"
+    );
+    if terminal {
+        return if human == "now" {
+            "· now".to_string()
+        } else {
+            format!("· {human} ago")
+        };
+    }
     if human == "now" {
-        "· now".to_string()
+        "· active now".to_string()
     } else {
-        format!("· {human} ago")
+        format!("· active {human} ago")
     }
 }
 
 /// Build the body lines shown inside a member's viewport. Prefers live streamed
 /// output (the tail) when present; otherwise surfaces the latest detail plus a
-/// status-age hint.
+/// latest-evidence age hint.
 fn member_body(member: &SwarmMemberStatus) -> Vec<String> {
     // Live streamed output wins: show the worker's in-progress assistant text.
     if let Some(tail) = member.output_tail.as_ref().filter(|t| !t.trim().is_empty()) {
         let mut body: Vec<String> = tail.lines().map(|l| l.to_string()).collect();
         if let Some(age) = member.status_age_secs {
-            body.push(age_marker(age));
+            body.push(age_marker(member, age));
         }
         return body;
     }
@@ -66,7 +79,7 @@ fn member_body(member: &SwarmMemberStatus) -> Vec<String> {
         body.push(detail.clone());
     }
     if let Some(age) = member.status_age_secs {
-        body.push(age_marker(age));
+        body.push(age_marker(member, age));
     }
     body
 }
@@ -603,6 +616,34 @@ mod tests {
         assert_eq!(body[0], "line one");
         assert_eq!(body[1], "line two");
         assert!(!body.iter().any(|l| l.contains("the detail line")));
+    }
+
+    #[test]
+    fn running_member_renders_recent_evidence_activity_instead_of_old_status_age() {
+        let mut m = member("alpha", "running", Some("waiting on provider"), None);
+        m.status_age_secs = Some(7);
+
+        let body = member_body(&m);
+
+        assert!(
+            body.iter().any(|line| line == "· active 7s ago"),
+            "body={body:?}"
+        );
+        assert!(!body.iter().any(|line| line == "· 7s ago"), "body={body:?}");
+    }
+
+    #[test]
+    fn terminal_member_keeps_lifecycle_age_wording() {
+        let mut m = member("alpha", "succeeded", Some("finished"), None);
+        m.status_age_secs = Some(7);
+
+        let body = member_body(&m);
+
+        assert!(body.iter().any(|line| line == "· 7s ago"), "body={body:?}");
+        assert!(
+            !body.iter().any(|line| line == "· active 7s ago"),
+            "body={body:?}"
+        );
     }
 
     #[test]

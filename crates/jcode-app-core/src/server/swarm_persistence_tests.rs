@@ -85,6 +85,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
             node_meta: HashMap::new(),
             max_nodes: Some(64),
             frozen: true,
+            safety_ledger: None,
         },
     );
     let coordinators = HashMap::from([("swarm-alpha".to_string(), "session-2".to_string())]);
@@ -149,7 +150,11 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
         recovered_member.report_back_to_session_id.as_deref(),
         Some("session-2")
     );
-    assert_eq!(recovered_member.status, "crashed");
+    assert_eq!(
+        jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&recovered_member.status),
+        jcode_swarm_core::MemberLifecycleState::Lost,
+        "a member running at shutdown must recover as lost/crashed"
+    );
     assert_eq!(
         recovered_member.detail.as_deref(),
         Some("writing tests (recovered after reload while running)")
@@ -405,6 +410,7 @@ fn remove_swarm_state_deletes_persisted_snapshot() {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )]);
     persist_swarm_state("swarm-beta", plans.get("swarm-beta"), None, &[], 0);
@@ -475,6 +481,7 @@ fn deep_plan_mode_and_node_meta_round_trip() {
         node_meta,
         max_nodes: Some(96),
         frozen: true,
+            safety_ledger: None,
     };
 
     persist_swarm_state("swarm-deep", Some(&plan), None, &[], 0);

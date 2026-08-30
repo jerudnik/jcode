@@ -280,6 +280,17 @@ pub struct VersionedPlan {
     /// When true, server policy rejects graph-seeding and graph-growth verbs.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub frozen: bool,
+    /// Budget accounting for the plan as a whole: the limits it runs under, when
+    /// its clock started, and whether a budget has already paused it.
+    ///
+    /// Plan-level rather than an entry in `task_progress`, because the two have
+    /// opposite lifetimes: per-node progress is stale once the graph is replaced
+    /// and is cleared then, while the ledger must outlive any single graph or a
+    /// plan could win a fresh allowance just by being reseeded. Absent on plans
+    /// created before budgets existed, which start a clock under current
+    /// configuration rather than being refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safety_ledger: Option<dag::PlanSafetyLedger>,
 }
 
 impl VersionedPlan {
@@ -293,6 +304,7 @@ impl VersionedPlan {
             node_meta: HashMap::new(),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         }
     }
 

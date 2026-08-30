@@ -99,21 +99,17 @@
               ./scripts/clean_target.sh
               ./scripts/check_agent_instructions.py
               ./scripts/check_reusable_workflow_calls.py
-              ./scripts/check_workflow_permissions.py
               ./scripts/dev_cargo.sh
               ./scripts/docs_impact_advisory.py
               ./scripts/preflight.sh
               ./scripts/prune_incremental.sh
               ./scripts/remote_build.sh
               ./scripts/remote_config.sh
-              ./scripts/test_docs_impact_advisory.py
               ./scripts/test_fast.sh
               ./scripts/test_incremental_policy.sh
               ./scripts/governance_compare.py
               ./tests/test_reusable_workflow_calls.py
-              ./tests/test_workflow_permissions.py
               ./tests/fixtures/actionlint-dollar-local
-              ./tests/fixtures/workflow_permissions
               ./.apm/instructions
               ./.jcode/preferred-tools.md
               ./.jcode/prompt-overlay.md
@@ -125,21 +121,12 @@
               ./docs/SWARM_TASK_GRAPH.md
               ./CONTRIBUTING.md
               ./RELEASING.md
-              ./.github/workflows/ci.yml
-              ./.github/workflows/docs-impact.yml
-              ./.github/workflows/fork-ci.yml
-              ./.github/workflows/fork-health.yml
               ./.github/workflows/main.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
-              ./.github/workflows/nix-update.yml
               ./.github/workflows/pr.yml
               ./.github/workflows/release.yml
               ./.github/workflows/scheduled.yml
-              ./.github/workflows/governance-root.yml
-              # Not linted (sole upstream exemption), but ci.yml calls it, so
-              # the reusable-call policy check needs it present.
-              ./.github/workflows/freebsd-smoke.yml
             ];
           };
 
@@ -258,7 +245,7 @@
 
           # CI gates run by `nix flake check`. Keep these cheap, local, and valid
           # on every flake system: Rust clippy/fmt/tests and the package build are
-          # already covered by fork-ci.yml / nix.yml, while security auditing is a
+          # already covered by pr.yml / nix.yml, while security auditing is a
           # separate non-blocking workflow. These checks instead validate the Nix
           # surface, local preflight entry point, fork-owned workflows, and pinned
           # Rust-toolchain contract without network access or another full build.
@@ -314,21 +301,6 @@
                   touch "$out"
                 '';
 
-            docs-impact-advisory =
-              pkgs.runCommand "jcode-docs-impact-advisory-check"
-                {
-                  src = checkSrc;
-                  nativeBuildInputs = [
-                    pkgs.git
-                    pkgs.python3
-                  ];
-                }
-                ''
-                  cd "$src"
-                  python3 scripts/test_docs_impact_advisory.py
-                  touch "$out"
-                '';
-
             incremental-policy =
               pkgs.runCommand "jcode-incremental-policy-check"
                 {
@@ -355,23 +327,15 @@
                 ''
                   cd "$src"
                   actionlint \
-                    .github/workflows/ci.yml \
-                    .github/workflows/docs-impact.yml \
-                    .github/workflows/fork-ci.yml \
-                    .github/workflows/fork-health.yml \
                     .github/workflows/main.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
-                    .github/workflows/nix-update.yml \
                     .github/workflows/pr.yml \
                     .github/workflows/release.yml \
-                    .github/workflows/scheduled.yml \
-                    .github/workflows/governance-root.yml
+                    .github/workflows/scheduled.yml
 
                   ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py .
                   ${pkgs.python3}/bin/python3 tests/test_reusable_workflow_calls.py
-                  ${pkgs.python3}/bin/python3 scripts/check_workflow_permissions.py .
-                  ${pkgs.python3}/bin/python3 -m unittest tests.test_workflow_permissions
 
                   dollar_fixture="$TMPDIR/actionlint-dollar-local-valid"
                   cp -R "$src/tests/fixtures/actionlint-dollar-local" "$dollar_fixture"
@@ -382,7 +346,6 @@
                     actionlint .github/workflows/caller.yml .github/workflows/called.yaml
                   )
                   ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py "$dollar_fixture"
-                  ${pkgs.python3}/bin/python3 scripts/check_workflow_permissions.py "$dollar_fixture"
 
                   fixture_dir="$TMPDIR/actionlint-permissions"
                   mkdir -p "$fixture_dir"

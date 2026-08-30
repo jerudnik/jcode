@@ -1,5 +1,13 @@
 name: PR
 
+# The whole pull-request surface in one file: the classifier routes, the legs
+# run, two required contexts gate (PR Gate and Governance Root), and the DOX
+# packet advises. The legs used to live in five files (ci.yml, fork-ci.yml,
+# freebsd-smoke.yml, docs-impact.yml, governance-root.yml) whose only caller
+# on pull requests was this one; the indirection cost reviewers a
+# file-following exercise per question and bought nothing, so the legs were
+# folded into their caller (REGIME.md section 2, workflow consolidation).
+
 on:
   pull_request:
     branches: [main]
@@ -24,21 +32,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
-
-      - name: Verify the guard registry before trusting the route
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The non-vacuity harness proves every registered guard can still
-          # fail, including the classifier's own claims (it refuses to exempt
-          # its change set and fails closed on an unreadable one). Until now
-          # the harness ran only inside Fork CI, a leg the routing verdict can
-          # switch off -- the detector sat downstream of the decision it
-          # audits.
-          # Running it here, before the route is computed, closes that
-          # ordering: a weakened guard fails this job, and a failed classify
-          # job fails PR Gate through needs.classify.result.
-          python3 -I scripts/check_guard_nonvacuity.py
 
       - name: Check citations to moved or deleted files
         shell: bash
@@ -95,30 +88,257 @@ jobs:
           cat "$route"
           cat "$route" >> "$GITHUB_OUTPUT"
 
-  checks:
-    name: Checks
+  # Audit gate: runs from the pull request head like any other workflow, so it
+  # detects an unreviewed governance-path change on the PR that makes it rather
+  # than preventing one. Legitimate governance-path changes go through the
+  # transaction-bound maintenance procedure in design.md section 4. Required
+  # context; deliberately independent of the classifier so no routing decision
+  # can skip it.
+  governance-root:
+    name: Governance Root
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the trusted main boundary
+        run: git fetch --force --no-tags origin main:refs/remotes/origin/main
+
+      - name: Detect governance-path changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(git merge-base HEAD refs/remotes/origin/main)"
+          protected=(
+            .github/workflows
+            scripts/required-checks.json
+            scripts/fork-health.sh
+            scripts/governance_compare.py
+            scripts/generate_governance_fixture.py
+            justfile
+            tests/test_classify_pr_paths.py
+          )
+          if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
+            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (docs/architecture/GOVERNANCE_DECISIONS.md, 'Ruleset maintenance window')"
+            git diff --name-only "$base" HEAD -- "${protected[@]}"
+            exit 1
+          fi
+
+          # The decision log is protected against destructive edits only. Appending an
+          # entry is routine -- 34 commits in the three months to 2026-08-17 -- and must
+          # not cost a maintenance window, or the control would penalise recording
+          # decisions. Losing the log is the failure PR #155 nearly caused. A rename
+          # reads as a deletion here, which is correct: moving the log is a governance
+          # event.
+          #
+          # What "destructive" means is measured, not assumed. Forbidding every removed
+          # line also forbids correcting a citation inside an entry, and that is not a
+          # theoretical cost: when a cited file legitimately moves,
+          # scripts/check_docs_references.py requires the citation be updated and this
+          # rule forbade the edit, so the two controls contradicted each other and no
+          # honest change could satisfy both. Three signals stand in for the intent
+          # instead. The log must exist, so deleting or moving it still fails. Its
+          # entry count must not fall, so no decision can be dropped. Its length must
+          # not fall, so an entry cannot be gutted while its heading is left behind.
+          log=docs/architecture/GOVERNANCE_DECISIONS.md
+          if ! git diff --quiet "$base" HEAD -- "$log"; then
+            if [ ! -f "$log" ]; then
+              echo "::error::$log was removed or renamed; moving the decision log is a governance event (see its 'Ruleset maintenance window' section)"
+              exit 1
+            fi
+            entries_before="$(git show "$base:$log" | grep -c '^## ' || true)"
+            entries_after="$(grep -c '^## ' "$log" || true)"
+            lines_before="$(git show "$base:$log" | wc -l | tr -d ' ')"
+            lines_after="$(wc -l < "$log" | tr -d ' ')"
+            if [ "$entries_after" -lt "$entries_before" ]; then
+              echo "::error::$log lost $((entries_before - entries_after)) entry heading(s) ($entries_before -> $entries_after); the decision log does not drop decisions (see its 'Ruleset maintenance window' section)"
+              exit 1
+            fi
+            if [ "$lines_after" -lt "$lines_before" ]; then
+              echo "::error::$log is $((lines_before - lines_after)) line(s) shorter ($lines_before -> $lines_after); correcting text in place is allowed, net removal is not (see its 'Ruleset maintenance window' section)"
+              exit 1
+            fi
+          fi
+
+  advisory:
+    name: DOX Review Advisory
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build branch-wide DOX review packet
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 scripts/docs_impact_advisory.py \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+  docs:
+    name: Docs lint
+    # Runs on every pull request, not only docs-only ones. Gating it on
+    # docs_only meant a PR that touched one code file and one doc file skipped
+    # the linter entirely -- the docs were checked exactly when they were the
+    # only thing changed, and unchecked whenever they shipped alongside code.
+    # Measured over the 25 most recent runs: median 31s, max 34s.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Run docs lint recipe
+        run: nix shell nixpkgs#just nixpkgs#vale nixpkgs#python3 -c just lint-docs
+
+  rust:
+    name: Rust checks
     needs: classify
-    uses: ./.github/workflows/ci.yml
+    if: needs.classify.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    # full-test rebuilds release for the explicit host target and runs the
+    # whole suite; 45 minutes gets cancelled mid-run on a cold cache. The old
+    # Linux test job allowed 90.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # `just check` now runs every module in tests/, and some of them ask
+          # the repository about its own history: fork-health walks from the
+          # `fork-point` tag to main, and the branch-handoff gate reasons about
+          # main. A depth-1 detached checkout has neither the tag nor the
+          # ancestry, so those checks correctly refuse to answer and the suite
+          # ends up measuring the checkout rather than the repository.
+          # Governance Root clones in full for the same reason.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
+      # install-nix-action exports TMPDIR=$RUNNER_TEMP (/home/runner/work/_temp),
+      # which sits under the runner's real home. Tests that create tempdirs and
+      # point $XDG_CONFIG_HOME at them (e.g. jcode-base
+      # save_github_token_creates_config_dir) then have the override discarded
+      # by sanitize_ambient_dir_override, which ignores ambient dirs under the
+      # real home while the test harness redirects it. Restore the default so
+      # test tempdirs land outside the home directory.
+      - name: Keep test tempdirs outside the runner home
+        run: echo "TMPDIR=/tmp" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          key: fork-ci
+
+      - name: Run ratchet preflight
+        run: scripts/preflight.sh --ratchets-only --no-branch-handoff
+
+      - name: Run check recipe
+        run: nix shell nixpkgs#just nixpkgs#python3 -c just check
+
+      - name: Run test recipe
+        run: nix shell nixpkgs#just -c just test
+
+      - name: Run full-test recipe
+        # Compared against 'false' rather than 'true' so an output the
+        # classifier never wrote runs the expensive leg instead of silently
+        # skipping it.
+        if: needs.classify.outputs.product_impacting != 'false'
+        run: nix shell nixpkgs#just -c just full-test
+
+  security:
+    name: Security
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    uses: ./.github/workflows/security.yml
     secrets: inherit
     with:
-      docs_only: ${{ needs.classify.outputs.docs_only == 'true' }}
-      # Compared against 'false' rather than 'true' so an output the classifier
-      # never wrote runs the expensive legs instead of silently skipping them.
-      product_impacting: ${{ needs.classify.outputs.product_impacting != 'false' }}
+      strict: true
+      weekly: false
+
+  nix:
+    name: Nix
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    uses: ./.github/workflows/nix.yml
+    secrets: inherit
+    with:
+      publish: false
+      build_package: ${{ needs.classify.outputs.product_impacting != 'false' }}
+
+  smoke:
+    name: Smoke
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.product_impacting != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-check recipe
+        run: nix shell nixpkgs#just -c just release-check
 
   pr-gate:
     name: PR Gate
-    needs: [classify, checks]
+    needs: [classify, docs, rust, security, nix, smoke]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       CLASSIFY_RESULT: ${{ needs.classify.result }}
-      CHECKS_RESULT: ${{ needs.checks.result }}
+      DOCS_RESULT: ${{ needs.docs.result }}
+      RUST_RESULT: ${{ needs.rust.result }}
+      SECURITY_RESULT: ${{ needs.security.result }}
+      NIX_RESULT: ${{ needs.nix.result }}
+      SMOKE_RESULT: ${{ needs.smoke.result }}
+      DOCS_ONLY: ${{ needs.classify.outputs.docs_only }}
+      PRODUCT_IMPACTING: ${{ needs.classify.outputs.product_impacting }}
     steps:
       - name: Require the classifier and every routed check
         shell: bash
+        # A routed leg may conclude 'skipped' only when the classifier's own
+        # outputs say the route excused it. Reading the route here rather than
+        # trusting the skip means a leg skipped for any other reason -- a
+        # failed dependency, a mistyped `if:` -- fails the gate instead of
+        # passing it.
         run: |
           set -euo pipefail
-          [ "$CLASSIFY_RESULT" = success ] || { echo "::error::pull request classifier concluded '$CLASSIFY_RESULT'"; exit 1; }
-          [ "$CHECKS_RESULT" = success ] || { echo "::error::routed checks concluded '$CHECKS_RESULT'"; exit 1; }
+          require() {
+            local name=$1 result=$2 may_skip=$3
+            if [ "$result" = success ]; then return 0; fi
+            if [ "$may_skip" = yes ] && [ "$result" = skipped ]; then return 0; fi
+            echo "::error::$name concluded '$result'"
+            exit 1
+          }
+          route_skip=no
+          [ "$DOCS_ONLY" = true ] && route_skip=yes
+          smoke_skip=$route_skip
+          [ "$PRODUCT_IMPACTING" = false ] && smoke_skip=yes
+          require "pull request classifier" "$CLASSIFY_RESULT" no
+          require "docs lint" "$DOCS_RESULT" no
+          require "rust checks" "$RUST_RESULT" "$route_skip"
+          require "security" "$SECURITY_RESULT" "$route_skip"
+          require "nix" "$NIX_RESULT" "$route_skip"
+          require "smoke" "$SMOKE_RESULT" "$smoke_skip"

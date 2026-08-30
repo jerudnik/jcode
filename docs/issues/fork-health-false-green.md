@@ -4,7 +4,7 @@ priority: low
 owner: maintainers
 opened: 2026-08-15
 related:
-  - .github/workflows/fork-health.yml
+  - .github/workflows/scheduled.yml
   - scripts/fork-health.sh
 ---
 

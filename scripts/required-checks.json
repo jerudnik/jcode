@@ -14,7 +14,7 @@
   "workflow_contracts": [
     {
       "context": "Governance Root",
-      "file": ".github/workflows/governance-root.yml",
+      "file": ".github/workflows/pr.yml",
       "job_id": "governance-root",
       "if": null,
       "needs": [],
@@ -28,8 +28,12 @@
       "job_id": "pr-gate",
       "if": "always()",
       "needs": [
-        "checks",
-        "classify"
+        "classify",
+        "docs",
+        "rust",
+        "security",
+        "nix",
+        "smoke"
       ],
       "routing": {},
       "pull_request_paths_filter": "forbidden"
@@ -63,9 +67,6 @@
       "scripts/governance_compare.py",
       "scripts/generate_governance_fixture.py",
       "justfile",
-      "scripts/check_guard_nonvacuity.py",
-      "tests/test_guard_nonvacuity.py",
-      "tests/test_governance_compare.py",
       "tests/test_classify_pr_paths.py"
     ],
     "proposed_additions": []

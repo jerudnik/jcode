@@ -692,6 +692,7 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         node_meta: HashMap::new(),
         max_nodes: None,
         frozen: false,
+            safety_ledger: None,
     };
 
     // Write the log prefix the snapshot will cover.
@@ -783,8 +784,11 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         "post-snapshot demotion must survive restart"
     );
     assert_eq!(
-        loaded.members.get("worker-1").map(|m| m.status.as_str()),
-        Some("succeeded"),
+        loaded
+            .members
+            .get("worker-1")
+            .map(|m| jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&m.status)),
+        Some(jcode_swarm_core::MemberLifecycleState::Succeeded),
         "post-snapshot terminal status must survive restart (terminal states \
          are exempt from the crash-recovery rewrite); the control log still \
          spells this \"completed\" and reads back as the same state"

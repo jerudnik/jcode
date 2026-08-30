@@ -354,9 +354,16 @@ impl SwarmLifecycleStatus {
                 }
             }
             MemberLifecycleEvent::WorkerReady => {
+                // Idle declarations arrive both from workers that just came
+                // up (Starting) and from workers whose turn ended without a
+                // structured report (Assigned/Running via the compatibility
+                // bridge). Terminal states stay terminal.
                 if matches!(
                     self.state,
-                    MemberLifecycleState::Starting | MemberLifecycleState::Ready
+                    MemberLifecycleState::Starting
+                        | MemberLifecycleState::Ready
+                        | MemberLifecycleState::Assigned
+                        | MemberLifecycleState::Running
                 ) {
                     self.state = MemberLifecycleState::Ready;
                     self.reason = None;

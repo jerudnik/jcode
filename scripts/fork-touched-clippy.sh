@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Local port of the fork-ci "blocking only for fork-touched files" quality gate.
+# Local port of the CI "blocking only for fork-touched files" quality gate.
 #
 # Mirrors the `quality` job's "Clippy (blocking for fork-touched files)" and
-# "Check formatting (blocking for fork-touched files)" steps in
-# .github/workflows/fork-ci.yml so you can reproduce the CI verdict before (or
+# "Check formatting (blocking for fork-touched files)" steps that historically
+# lived in the fork CI workflow so you can reproduce the CI verdict before (or
 # after) a push. The logic is byte-parallel to CI: run the tool over the whole
 # tree without -D warnings, then fail only when a lint's / rustfmt's primary
 # span lands in a file this fork modified relative to the fork point. Drift in

@@ -8,34 +8,29 @@ Last reviewed: 2026-07-29
 |---|---|
 | `.cargo/audit.toml` | The advisory IDs `cargo audit` suppresses. Nothing else: cargo-audit validates this file against a closed schema and rejects any extra key, so it cannot hold ownership metadata. |
 | `docs/security/advisories.toml` | **The machine-readable ownership record.** One `[[advisory]]` per accepted advisory with `id`, `crate_name`, `owner`, `accepted`, `expires`, `affected_surface`, `rationale`, and `retire_when`. |
-| `scripts/check_advisory_policy.py` | The checker that proves the two agree and that no acceptance has expired. |
-| `tests/test_advisory_policy.py` | Fixtures that observe the checker failing on each planted violation, so the gate is never trusted unseen. |
-| This file | Human-readable narrative: priority order, review cadence, and what changed. It is not the enforcement surface. |
+| This file | Human-readable narrative: priority order, review cadence, and what changed. |
 
-An acceptance that is undocumented, incomplete, stale, or expired fails the
-`advisory ownership policy` job in `.github/workflows/security.yml` and the
-`advisory ownership` gate in `scripts/preflight.sh`. Neither reads a Markdown
-table; adding a row here does not suppress anything, and deleting one does not
-break the build.
+Ownership and expiry are maintained by review, not by a gate. The automated
+checker that cross-validated the two TOML files was retired in 2026-08 as
+process bookkeeping; the weekly `cargo audit` report in
+`.github/workflows/security.yml` (ignores disabled) remains the recurring
+prompt that surfaces every suppressed advisory for re-review.
 
 This is not an allowlist. It is a triage record so advisories are visible and
 actionable.
 
-## Enforcement rules
+## Record rules
 
-- Every ID in `.cargo/audit.toml` must have a record in
-  `docs/security/advisories.toml` — an ignore with no owner fails CI.
+- Every ID in `.cargo/audit.toml` should have a record in
+  `docs/security/advisories.toml` — an ignore with no owner is review-rejected.
 - Every record must carry all eight fields, non-blank.
-- `expires` is an ISO date. On or after that date, the gate fails: an ignore
-  cannot outlive the argument that justified it. Renewing means re-reading the
+- `expires` is an ISO date. An ignore cannot outlive the argument that
+  justified it. Renewing means re-reading the
   advisory, re-checking `retire_when`, and moving `accepted` forward with a
   fresh justification in the same commit — not re-stamping the date.
 - `expires` may be at most `[policy].max_expiry_days` (365) past `accepted`.
-- A record whose ID is no longer ignored also fails, so retired acceptances get
+- A record whose ID is no longer ignored should be
   deleted rather than accumulating.
-- The checker takes the current date from `--today`, then
-  `$ADVISORY_POLICY_TODAY`, then the system date. Tests and preflight inject it,
-  so expiry behavior never depends on when the suite happens to run.
 - Unmaintained/unsound *warnings* are advisory by design. `cargo audit` fails
   only on vulnerabilities; do not add `--deny warnings` semantics.
 
@@ -87,13 +82,13 @@ ignores disabled. When reviewing it:
 
 1. Any accepted advisory whose `retire_when` is now met: drop the ignore from
    `.cargo/audit.toml`, delete the record from `docs/security/advisories.toml`,
-   and remove the row above. The stale-record check fails if you do only one.
+   and remove the row above. Keep the three surfaces in step.
 2. Any new vulnerability: fix it if a compatible version exists, otherwise add
    an ignore *and* a complete record in the same commit.
 3. Bump "Last reviewed" above.
 
-Expiry does the same job on a hard deadline: the gate turns red on its own if
-nobody reviews.
+Expiry dates make staleness visible in review: a past-due `expires` in the
+weekly report means nobody has re-argued the acceptance.
 
 ## Notes
 
@@ -101,4 +96,3 @@ nobody reviews.
   - `scripts/dev_cargo.sh check`
   - `scripts/dev_cargo.sh test -j 1`
   - `scripts/security_preflight.sh`
-  - `python3 scripts/check_advisory_policy.py`

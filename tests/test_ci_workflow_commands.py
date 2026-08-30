@@ -14,9 +14,8 @@ from pathlib import Path
 
 # Borrowed, not donated. Leaving scripts/ on sys.path is exactly the shadowing
 # hazard the guards were hardened against, and it leaks into every module that
-# runs after this one: `python3 -m unittest tests.test_guard_nonvacuity
-# tests.test_ci_workflow_commands` fails that suite's sys.path scrub assertion
-# purely because this import ran last. Append rather than insert so the standard
+# runs after this one: a later suite's sys.path scrub assertion fails purely
+# because this import ran last. Append rather than insert so the standard
 # library keeps precedence even inside the window.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent.parent / "scripts")
 _BORROWED_PATH_ENTRY = _SCRIPTS_DIR not in sys.path

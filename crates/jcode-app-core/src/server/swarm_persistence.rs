@@ -101,6 +101,11 @@ struct PersistedVersionedPlan {
     max_nodes: Option<usize>,
     #[serde(default)]
     frozen: bool,
+    /// Plan-level budget accounting. Persisted so a restart cannot hand a plan a
+    /// fresh allowance: dropping this on reload would reset every budget clock
+    /// and turn a restart into an unlimited-spend loophole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    safety_ledger: Option<jcode_plan::dag::PlanSafetyLedger>,
 }
 
 fn default_plan_mode() -> String {
@@ -489,6 +494,7 @@ fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64
         node_meta: std::mem::take(&mut plan.node_meta),
         max_nodes: plan.max_nodes,
         frozen: plan.frozen,
+        safety_ledger: plan.safety_ledger.take(),
     };
     mark_running_items_stale(&mut plan, updated_at_unix_ms);
     plan
@@ -521,6 +527,7 @@ fn to_persisted_plan(plan: &VersionedPlan) -> PersistedVersionedPlan {
         node_meta: plan.node_meta.clone(),
         max_nodes: plan.max_nodes,
         frozen: plan.frozen,
+        safety_ledger: plan.safety_ledger.clone(),
     }
 }
 

@@ -153,30 +153,30 @@ async fn test_agent_with_working_dir(session_id: &str, working_dir: &str) -> Arc
 async fn comm_list_swarms_returns_live_fleet_rollup() {
     let swarm_id = "comm-list-swarms-rollup-test".to_string();
     let sessions = Arc::new(RwLock::new(HashMap::new()));
-    let (mut coord, _coord_rx) = member("coord", Some(&swarm_id), "coordinator");
+    let (mut coord, _coord_rx) = member("rollup-coord", Some(&swarm_id), "coordinator");
     coord.friendly_name = Some("falcon".to_string());
-    let (mut worker, _worker_rx) = member("worker", Some(&swarm_id), "agent");
+    let (mut worker, _worker_rx) = member("rollup-worker", Some(&swarm_id), "agent");
     worker.status = "running".to_string();
     worker.subagent_type = Some("implement".to_string());
 
     let swarm_members = Arc::new(RwLock::new(HashMap::from([
-        ("coord".to_string(), coord),
-        ("worker".to_string(), worker),
+        ("rollup-coord".to_string(), coord),
+        ("rollup-worker".to_string(), worker),
     ])));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
         swarm_id.clone(),
-        HashSet::from(["coord".to_string(), "worker".to_string()]),
+        HashSet::from(["rollup-coord".to_string(), "rollup-worker".to_string()]),
     )])));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
         swarm_id.clone(),
-        "coord".to_string(),
+        "rollup-coord".to_string(),
     )])));
     let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
         swarm_id.clone(),
         VersionedPlan {
-            items: vec![plan_item("task-verify", "running", "high", Some("worker"))],
+            items: vec![plan_item("task-verify", "running", "high", Some("rollup-worker"))],
             version: 7,
-            participants: HashSet::from(["coord".to_string(), "worker".to_string()]),
+            participants: HashSet::from(["rollup-coord".to_string(), "rollup-worker".to_string()]),
             task_progress: HashMap::new(),
             mode: "deep".to_string(),
             node_meta: HashMap::from([(
@@ -188,6 +188,7 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
             )]),
             max_nodes: None,
             frozen: false,
+            safety_ledger: None,
         },
     )])));
 
@@ -211,14 +212,14 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
             assert_eq!(swarms.len(), 1);
             let entry = &swarms[0];
             assert_eq!(entry.swarm_id, swarm_id);
-            assert_eq!(entry.coordinator_session_id.as_deref(), Some("coord"));
+            assert_eq!(entry.coordinator_session_id.as_deref(), Some("rollup-coord"));
             assert_eq!(entry.coordinator_name.as_deref(), Some("falcon"));
             assert_eq!(entry.coordinator_status.as_deref(), Some("ready"));
             assert_eq!(entry.member_count, 2);
             let worker = entry
                 .members
                 .iter()
-                .find(|member| member.session_id == "worker")
+                .find(|member| member.session_id == "rollup-worker")
                 .expect("worker member");
             assert_eq!(worker.status, "running");
             assert_eq!(worker.subagent_type.as_deref(), Some("implement"));

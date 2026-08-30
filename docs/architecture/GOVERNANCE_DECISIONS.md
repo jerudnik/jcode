@@ -1784,3 +1784,82 @@ recomputed from a fresh read and matched the baseline again, the ruleset is
 `active` with empty bypass actors and both required contexts restored, and the
 merge landed as exactly one first-parent commit. The window was open for
 roughly twenty seconds and nothing else merged inside it.
+
+## The CI apparatus built to watch the process is retired; gates that watch the product stay
+
+**2026-08-29.** REGIME.md section 2 recorded the verdict: most of the checker
+fleet measured the repository's process, not its product, and the maintenance
+cost of proving the checkers correct had itself become the largest source of
+churn. This wave deletes that apparatus, one target per commit, on
+`automation/regime-apparatus-deletion`:
+
+- `scripts/check_web_mobile.sh` — checked a retired surface.
+- `scripts/check_guard_nonvacuity.py` and its test — a registry proving other
+  checkers can fail, meta-apparatus with no product signal (~2,647 lines).
+- `scripts/check_critical_path_budget.py`, its test, and
+  `scripts/rust_production_filter.py` with its test — the size-budget gate and
+  shared classifier (1,686 lines). Oversized files are now a review flag, not
+  a gate; the 1200-line threshold survives as prose.
+- `scripts/check_workflow_permissions.py`, its test, and fixtures — workflow
+  permissions are reviewed, not machine-proved (1,303 lines).
+- `scripts/check_advisory_policy.py`, its test, and
+  `scripts/test_docs_impact_advisory.py` — advisory ownership records in
+  `docs/security/advisories.toml` are maintained by review and the weekly
+  audit report, not a cross-check gate (915 lines).
+- `scripts/f20c_removal_report.sh` — a report about a finished removal (128
+  lines).
+- `tests/test_governance_compare.py` — the planted-failure meta-harness for
+  the governance snapshot comparator (1,071 lines). The comparator
+  `scripts/governance_compare.py`, its fixture generator, and the
+  `fork-health.sh` drift check all stay; only the harness proving the
+  comparator can fail is gone.
+
+What stays, and why: `check_docs_references.py` (docs point at real files — a
+product property), the `nix-distribution-policy` flake check (distribution
+contract), the dependency/env-lease/render-lock ratchets (runtime
+correctness), `classify_pr_paths.py` (routing), `check_startup_budget.sh`
+(runtime performance), and `docs_impact_advisory.py` (advisory generator still
+wired in `docs-impact.yml`).
+
+Where earlier entries in this log describe the deleted checkers in the present
+tense, they are history, not contract. This entry is the correction of record.
+
+**Reopen trigger:** a real regression that one of the deleted gates would have
+caught, recurring more than once. That would justify a narrow, wired,
+product-focused successor — not resurrection of the meta-apparatus.
+
+## Maintenance window: PR #241 merged under the recorded procedure
+
+**2026-08-29.** PR #241 (the apparatus deletion wave recorded in the entry
+above) changed protected paths — the `justfile`, `scripts/preflight.sh`, and
+workflow files — so `Governance Root` stayed red by design while every other
+check was green, and the window procedure above was executed.
+
+The live ruleset was read and its required contexts matched the recorded
+contract before anything was touched. The window payload removed only the
+`Governance Root` context from the required status checks, the pull request
+was merged through the REST endpoint as merge commit `e0d4791c3`, and the
+writable contract was put back verbatim. A fresh read then matched the
+restore payload exactly after stripping response-only keys, the ruleset is
+`active` with empty bypass actors and both required contexts restored, and
+`scripts/fork-health.sh --live` reported every invariant green. The window
+was open for roughly four seconds and nothing else merged inside it.
+
+## Maintenance window: PR #243 merged under the recorded procedure
+
+**2026-08-29.** PR #243 consolidated fourteen workflows into six and moved
+both required contexts' defining jobs into `.github/workflows/pr.yml`, so it
+changed protected paths — workflow files and
+`scripts/required-checks.json` — and `Governance Root` stayed red by design
+while every other check was green. The window procedure above was executed.
+
+The live ruleset digest matched the recorded baseline before anything was
+touched, and the pull request head's `scripts/required-checks.json` blob was
+verified identical to the reviewed local commit. The window payload removed
+only the `Governance Root` context, the pull request was merged through the
+REST endpoint as merge commit `1dce3d14a`, and the writable contract was put
+back verbatim. A fresh read then reproduced the baseline digest exactly, and
+`scripts/fork-health.sh --live` reported every invariant green, including
+that `Governance Root` and `PR Gate` are now each uniquely defined in
+`pr.yml`. The context names never changed, only their defining workflow. The
+window was open for roughly three seconds and nothing else merged inside it.

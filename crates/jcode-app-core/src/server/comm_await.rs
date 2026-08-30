@@ -16,6 +16,30 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, broadcast, mpsc};
 
+/// Sessions that still hold a non-terminal assigned task in the swarm plan.
+///
+/// F2 (premature wake): member status flips to "ready" at EVERY turn end
+/// (comm_session.rs), so status alone cannot distinguish "task complete" from
+/// "mid-task turn boundary". The plan is the source of truth for in-flight
+/// work; awaits must not treat a member as done while its assigned task is
+/// still active.
+async fn sessions_with_active_plan_tasks(
+    swarm_id: &str,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+) -> HashSet<String> {
+    let plans = swarm_plans.read().await;
+    plans
+        .get(swarm_id)
+        .map(|plan| {
+            plan.items
+                .iter()
+                .filter(|item| !crate::plan::is_terminal_status(&item.status))
+                .filter_map(|item| item.assigned_to.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub(super) async fn awaited_member_statuses(
     req_session_id: &str,
     swarm_id: &str,
@@ -23,7 +47,7 @@ pub(super) async fn awaited_member_statuses(
     target_status: &[String],
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    _swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
 ) -> Vec<AwaitedMemberStatus> {
     let watch_ids: Vec<String> = if requested_ids.is_empty() {
         let mut watch_ids: Vec<String> = {
@@ -50,6 +74,8 @@ pub(super) async fn awaited_member_statuses(
         .map(|status| MemberLifecycleState::from_compatibility_status(status).as_str())
         .collect();
 
+    let busy_sessions = sessions_with_active_plan_tasks(swarm_id, swarm_plans).await;
+
     let members = swarm_members.read().await;
     watch_ids
         .iter()
@@ -64,7 +90,20 @@ pub(super) async fn awaited_member_statuses(
                     )
                 })
                 .unwrap_or((None, "lost".to_string(), None));
-            let done = target_status.contains(status.as_str());
+            // A success-shaped status ("ready"/"succeeded") is only honest
+            // when the member has no in-flight plan task: turn boundaries set
+            // "ready" mid-task (F2). Failure-shaped statuses still count as
+            // done, otherwise a crashed worker would hang the await forever.
+            let mid_task_success_status = matches!(status.as_str(), "ready" | "succeeded")
+                && busy_sessions.contains(session_id);
+            // A departed member ("lost") satisfies stopped/succeeded-shaped
+            // waits: the caller asked "is this worker finished", and a worker
+            // that no longer exists will never become more finished.
+            let done = !mid_task_success_status
+                && (target_status.contains(status.as_str())
+                    || (status == "lost"
+                        && (target_status.contains("stopped")
+                            || target_status.contains("succeeded"))));
             AwaitedMemberStatus {
                 session_id: session_id.clone(),
                 friendly_name: name,

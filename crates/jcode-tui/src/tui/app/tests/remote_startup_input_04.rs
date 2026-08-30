@@ -124,9 +124,9 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
     app.handle_server_event(
         crate::protocol::ServerEvent::SwarmStatus {
             members: vec![
-                member("ant", "completed", Some(&self_id)),
+                member("ant", "succeeded", Some(&self_id)),
                 member("bat", "running", Some(&self_id)),
-                member("stranger", "completed", None),
+                member("stranger", "succeeded", None),
             ],
         },
         &mut remote,
