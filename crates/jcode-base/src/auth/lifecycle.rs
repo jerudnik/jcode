@@ -934,9 +934,16 @@ fn sync_process_env_from_saved_credentials(
     }
 }
 
+/// Applies runtime provider env for an auth change.
+///
+/// Every activation here is deliberately UNLOCKED: an auth change expresses a
+/// preference (`JCODE_ACTIVE_PROVIDER` hint), never a hard pin. Locking
+/// (`JCODE_FORCE_PROVIDER`) is reserved for an explicit `--provider` flag. In
+/// a long-lived daemon a locked activation would poison provider selection
+/// process-wide for every later session and model switch.
 fn apply_auth_provider_runtime(provider_id: Option<&str>) -> Option<String> {
     match normalized_auth_provider_id(provider_id) {
-        Some("azure-openai") => match crate::provider::activation::apply_azure_openai_runtime() {
+        Some("azure-openai") => match crate::provider::activation::apply_azure_openai_runtime_unlocked() {
             Ok(model) => model,
             Err(error) => {
                 let message = error.to_string();
@@ -970,7 +977,9 @@ fn apply_auth_provider_runtime(provider_id: Option<&str>) -> Option<String> {
             let default_model =
                 crate::provider_catalog::resolve_openai_compatible_profile(profile).default_model;
             if let Err(error) =
-                crate::provider::activation::apply_openai_compatible_runtime(default_model.clone())
+                crate::provider::activation::apply_openai_compatible_runtime_unlocked(
+                    default_model.clone(),
+                )
             {
                 let message = error.to_string();
                 crate::logging::auth_event(
@@ -985,7 +994,7 @@ fn apply_auth_provider_runtime(provider_id: Option<&str>) -> Option<String> {
         }
         Some(provider_id) => {
             if let Some(activation) = direct_provider_activation(provider_id)
-                && let Err(error) = activation.apply_env()
+                && let Err(error) = activation.into_unlocked().apply_env()
             {
                 let message = error.to_string();
                 crate::logging::auth_event(
@@ -1379,8 +1388,39 @@ mod tests {
                 std::env::var("JCODE_ACTIVE_PROVIDER").as_deref(),
                 Ok(active)
             );
-            assert_eq!(std::env::var("JCODE_FORCE_PROVIDER").as_deref(), Ok("1"));
+            assert!(
+                std::env::var("JCODE_FORCE_PROVIDER").is_err(),
+                "auth-change activation for {provider} must not lock provider selection"
+            );
         }
+    }
+
+    #[test]
+    fn auth_change_activation_clears_stale_process_wide_provider_lock() {
+        // Regression: in a long-lived daemon a stale JCODE_FORCE_PROVIDER lock
+        // (e.g. left behind by an earlier locked activation) must not survive an
+        // auth change. Auth changes are hints, and applying one self-heals the
+        // process-wide lock so later sessions can pick providers freely.
+        let _sandbox = crate::auth::test_sandbox::AuthTestSandbox::new().expect("sandbox");
+
+        crate::env::set_var("JCODE_FORCE_PROVIDER", "1");
+        crate::env::set_var("JCODE_ACTIVE_PROVIDER", "claude");
+
+        let activation = activate_auth_change(&AuthActivationRequest::new(
+            None,
+            Some(AuthChanged::new("openrouter")),
+        ));
+
+        assert_eq!(activation.provider_id.as_deref(), Some("openrouter"));
+        assert_eq!(
+            std::env::var("JCODE_FORCE_PROVIDER").ok(),
+            None,
+            "auth change must remove a stale process-wide provider lock"
+        );
+        assert_eq!(
+            std::env::var("JCODE_ACTIVE_PROVIDER").as_deref(),
+            Ok("openrouter")
+        );
     }
 
     #[test]
@@ -1486,7 +1526,11 @@ mod tests {
                 std::env::var("JCODE_ACTIVE_PROVIDER").as_deref(),
                 Ok(active)
             );
-            assert_eq!(std::env::var("JCODE_FORCE_PROVIDER").as_deref(), Ok("1"));
+            assert!(
+                std::env::var("JCODE_FORCE_PROVIDER").is_err(),
+                "{} auth-change activation must not lock provider selection",
+                provider.id
+            );
             assert_eq!(
                 activation.model_switch_request("ignored-runtime", "shared-model"),
                 format!("{switch_prefix}:shared-model"),
