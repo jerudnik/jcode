@@ -18,20 +18,22 @@ assignment, and denies tool calls above the tier before execution. Layers
 only deny, never grant, and unknown tools fail closed. These gaps were
 deliberately deferred:
 
-## 1. Verify-tier shell is not sandboxed
+## 1. Verify-tier shell is not sandboxed (RETIRED 2026-08-31)
 
-Verify-tier workers may run shell commands so they can execute tests, but
-nothing constrains those commands to be read-only. A verify worker can
-mutate the repo through `bash`. Closing this needs command classification
-or an OS sandbox, both out of scope for the first layer.
+Verify-tier workers may run shell commands so they can execute tests, and
+nothing constrains those commands to be read-only. Retired: command
+classification or an OS sandbox is large machinery for modest gain over
+the existing directory scoping and tool-level denial. Accepted loss: a
+verify worker can mutate its assigned directory through `bash`. Revisit
+only if an incident shows this path being abused.
 
-## 2. No approval flow for gate-origin escalation
+## 2. No approval flow for gate-origin escalation (RETIRED 2026-08-31)
 
-When a gate (critique/verify) node concludes a fix is needed, the worker
-cannot request a temporary tier raise. Today the coordinator must inject a
-fix node so a new worker gets the higher tier. An explicit
-escalate-with-approval flow may be worth having once real usage shows the
-inject-node path is too slow.
+A gate worker that concludes a fix is needed cannot request a tier raise;
+the coordinator injects a fix node so a new worker gets the higher tier.
+Retired: no usage evidence shows the inject-node path is too slow, and an
+approval flow would break the invariant that a live session's tier never
+rises. Accepted loss: gate-to-fix handoff costs one node injection.
 
 ## 3. Wake/resume outside an assignment carries no tier
 
