@@ -189,3 +189,131 @@ async fn assign_task_to_client_attached_session_skips_server_side_run() {
         assert_eq!(members[worker].status, "succeeded");
     }
 }
+
+#[tokio::test]
+async fn assign_task_to_client_attached_session_installs_capability_tier() {
+    let (_env, _runtime) = RuntimeEnvGuard::new();
+    let swarm_id = "swarm-client-attached-tier";
+    let requester = "coord-tier";
+    // Unique id: the capability map is process-global across parallel tests.
+    let worker = format!("worker-attached-tier-{}", std::process::id());
+    let (client_tx, mut client_rx) = mpsc::unbounded_channel();
+
+    let worker_agent = test_agent().await;
+    let sessions = Arc::new(RwLock::new(HashMap::from([(
+        worker.clone(),
+        Arc::clone(&worker_agent),
+    )])));
+    let soft_interrupt_queues = Arc::new(RwLock::new(HashMap::new()));
+
+    let (disconnect_tx, _disconnect_rx) = mpsc::unbounded_channel();
+    let client_connections = Arc::new(RwLock::new(HashMap::from([(
+        "conn-tier-1".to_string(),
+        crate::server::ClientConnectionInfo {
+            client_id: "conn-tier-1".to_string(),
+            session_id: worker.clone(),
+            client_instance_id: None,
+            debug_client_id: None,
+            connected_at: Instant::now(),
+            last_seen: Instant::now(),
+            is_processing: false,
+            current_tool_name: None,
+            terminal_env: Vec::new(),
+            disconnect_tx,
+        },
+    )])));
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        (requester.to_string(), {
+            let mut member = member(requester, swarm_id, "ready");
+            member.role = "coordinator".to_string();
+            member
+        }),
+        (
+            worker.clone(),
+            owned_member(&worker, swarm_id, "ready", requester),
+        ),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.to_string(),
+        HashSet::from([requester.to_string(), worker.clone()]),
+    )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.to_string(),
+        VersionedPlan {
+            items: vec![plan_item("scout", "queued", "high", &[])],
+            version: 1,
+            participants: HashSet::from([requester.to_string(), worker.clone()]),
+            task_progress: HashMap::new(),
+            mode: "deep".to_string(),
+            node_meta: HashMap::from([(
+                "scout".to_string(),
+                jcode_plan::NodeMeta {
+                    kind: Some("explore".to_string()),
+                    ..Default::default()
+                },
+            )]),
+            max_nodes: None,
+            frozen: false,
+            safety_ledger: None,
+        },
+    )])));
+    let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.to_string(),
+        requester.to_string(),
+    )])));
+    let event_history = Arc::new(RwLock::new(VecDeque::new()));
+    let event_counter = Arc::new(AtomicU64::new(1));
+    let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
+    let mutation_runtime = SwarmMutationRuntime::default();
+
+    handle_comm_assign_task(
+        92,
+        requester.to_string(),
+        Some(worker.clone()),
+        Some("scout".to_string()),
+        None,
+        &client_tx,
+        &sessions,
+        &soft_interrupt_queues,
+        &client_connections,
+        &swarm_members,
+        &swarms_by_id,
+        &swarm_plans,
+        &swarm_coordinators,
+        &event_history,
+        &event_counter,
+        &swarm_event_tx,
+        &mutation_runtime,
+    )
+    .await;
+
+    match client_rx.recv().await.expect("response") {
+        ServerEvent::CommAssignTaskResponse { task_id, .. } => assert_eq!(task_id, "scout"),
+        other => panic!("expected CommAssignTaskResponse, got {other:?}"),
+    }
+
+    // The security contract under review: a client-attached (headed) assignee
+    // never reaches `spawn_assigned_task_run`, so the assignment itself must
+    // install the node-kind tier. Without this, headed explore/verify workers
+    // keep full write/bash authority (fail-open).
+    let (tier, bound_swarm, bound_task) =
+        crate::tool::capability_tier::session_capability_binding(&worker)
+            .expect("assignment must install a capability tier for a headed assignee");
+    assert_eq!(tier, crate::tool::capability_tier::CapabilityTier::ReadOnly);
+    assert_eq!(bound_swarm, swarm_id);
+    assert_eq!(bound_task, "scout");
+
+    // And the binding is enforced, not just recorded.
+    assert!(
+        crate::tool::capability_tier::authorize_tool_call(
+            &worker,
+            "bash",
+            &serde_json::json!({"command": "echo hi"})
+        )
+        .is_err(),
+        "explore-tier headed worker must be denied write/bash tools"
+    );
+
+    crate::tool::capability_tier::clear_session_capability(&worker);
+}

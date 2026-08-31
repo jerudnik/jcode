@@ -5,6 +5,7 @@ mod bash;
 mod batch;
 mod bg;
 mod browser;
+pub(crate) mod capability_tier;
 mod communicate;
 #[cfg(target_os = "macos")]
 mod computer;
@@ -593,6 +594,18 @@ impl Registry {
         // action without a human. Interactive sessions are never registered as
         // ambient, so this is a no-op for them.
         ambient::check_ambient_action_tier(&ctx.session_id, resolved_name)?;
+        // Capability tier: an assigned plan worker's authority comes from its
+        // node's kind, installed server-side at assignment. Sessions without an
+        // installed tier pass through untouched.
+        if let Err(error) =
+            capability_tier::authorize_tool_call(&ctx.session_id, resolved_name, &input)
+        {
+            let mut fields =
+                Self::tool_lifecycle_fields("tier_blocked", name, resolved_name, &input, &ctx);
+            fields.push(("block_reason".to_string(), error.to_string()));
+            crate::logging::event_warn("TOOL_LIFECYCLE", fields);
+            return Err(error.into());
+        }
         let tool = match tools.get(resolved_name) {
             Some(tool) => tool.clone(),
             None => {

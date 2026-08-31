@@ -1211,3 +1211,139 @@ fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
         );
     }
 }
+
+#[tokio::test]
+async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
+    let _env = crate::storage::lock_test_env_read();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let target = temp.path().join("forbidden.txt");
+
+    let session_id = "capability-tier-read-only-worker";
+    crate::tool::capability_tier::install_session_capability(
+        session_id,
+        crate::tool::capability_tier::CapabilityTier::ReadOnly,
+        "tier-test-swarm",
+        "explore-node",
+    );
+
+    let ctx = ToolContext {
+        session_id: session_id.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let write_result = registry
+        .execute(
+            "write",
+            serde_json::json!({
+                "file_path": target,
+                "content": "should never land\n"
+            }),
+            ctx.clone(),
+        )
+        .await;
+    // The gate must also catch provider-alias names, which resolve to the
+    // same underlying tool before authorization runs.
+    let alias_result = registry
+        .execute(
+            "Write",
+            serde_json::json!({
+                "file_path": target,
+                "content": "should never land\n"
+            }),
+            ctx.clone(),
+        )
+        .await;
+    let bash_result = registry
+        .execute("bash", serde_json::json!({"command": "true"}), ctx.clone())
+        .await;
+    let read_result = registry
+        .execute(
+            "ls",
+            serde_json::json!({"path": temp.path().to_string_lossy()}),
+            ctx.clone(),
+        )
+        .await;
+
+    crate::tool::capability_tier::clear_session_capability(session_id);
+
+    let cleared_result = registry
+        .execute(
+            "write",
+            serde_json::json!({
+                "file_path": target,
+                "content": "allowed after clear\n"
+            }),
+            ctx,
+        )
+        .await;
+
+    let error = write_result.expect_err("read-only worker write must be refused");
+    assert!(
+        error.to_string().contains("read-only"),
+        "refusal must name the tier: {error}"
+    );
+    let alias_error = alias_result.expect_err("alias write must be refused too");
+    assert!(alias_error.to_string().contains("read-only"));
+    bash_result.expect_err("read-only worker shell must be refused");
+    read_result.expect("read tools must remain allowed");
+    cleared_result.expect("write must succeed after the tier is cleared");
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("file after clear"),
+        "allowed after clear\n",
+        "only the post-clear write may land"
+    );
+}
+
+#[tokio::test]
+async fn registry_execute_verify_tier_allows_shell_but_not_mutation() {
+    let _env = crate::storage::lock_test_env_read();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let target = temp.path().join("forbidden.txt");
+
+    let session_id = "capability-tier-verify-worker";
+    crate::tool::capability_tier::install_session_capability(
+        session_id,
+        crate::tool::capability_tier::CapabilityTier::Verify,
+        "tier-test-swarm",
+        "verify-node",
+    );
+
+    let ctx = ToolContext {
+        session_id: session_id.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let bash_result = registry
+        .execute("bash", serde_json::json!({"command": "true"}), ctx.clone())
+        .await;
+    let write_result = registry
+        .execute(
+            "write",
+            serde_json::json!({
+                "file_path": target,
+                "content": "should never land\n"
+            }),
+            ctx,
+        )
+        .await;
+
+    crate::tool::capability_tier::clear_session_capability(session_id);
+
+    bash_result.expect("verify worker must be able to run builds and tests");
+    write_result.expect_err("verify worker file mutation must be refused");
+    assert!(!target.exists(), "denied write must leave no file behind");
+}
