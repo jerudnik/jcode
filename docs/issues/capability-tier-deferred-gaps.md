@@ -33,11 +33,18 @@ fix node so a new worker gets the higher tier. An explicit
 escalate-with-approval flow may be worth having once real usage shows the
 inject-node path is too slow.
 
-## 3. Resume/wake paths do not install tiers
+## 3. Wake/resume outside an assignment carries no tier
 
-Tiers install at task assignment (`assign_task`/`assign_next`/spawn-driven
-assignment). A worker resumed or woken outside those paths
-(`swarm resume`, `swarm wake`, scheduled wakeups) keeps whatever tier it
-had, or none for pre-tier sessions. Related to the broken wake/resume
-provider seam (`scheduled-wake-and-background-resume-broken.md`); fix the
-seam first, then route tier install through it.
+Tiers now bind at assignment time for every assignee, headed or headless,
+and persist until the assignment ends (terminal node, reassignment,
+reclaim, member removal, or disconnect). A worker woken or resumed while
+it still holds its assignment therefore keeps the correct binding.
+
+What remains: a session revived through `swarm resume`/`swarm wake` after
+its assignment was reclaimed, or one that never passed through an assign
+path, runs unbound. That is the pre-tier default (full authority), so the
+exposure is a stale worker acting outside any node, not a wrong tier for a
+held node. Related to the broken wake/resume provider seam
+(`scheduled-wake-and-background-resume-broken.md`); fix the seam first,
+then decide whether revival without an assignment should re-run task
+selection (and tier install) instead of resuming bare.

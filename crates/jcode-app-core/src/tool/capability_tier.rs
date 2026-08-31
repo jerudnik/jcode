@@ -109,6 +109,63 @@ pub(crate) fn clear_session_capability(session_id: &str) {
         .remove(session_id);
 }
 
+/// Clear the binding only when it still belongs to the given assignment, so a
+/// binding already replaced by a newer assignment survives an older run's
+/// cleanup.
+pub(crate) fn clear_session_capability_for_task(session_id: &str, swarm_id: &str, task_id: &str) {
+    let mut capabilities = SESSION_CAPABILITIES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if capabilities
+        .get(session_id)
+        .is_some_and(|capability| capability.swarm_id == swarm_id && capability.task_id == task_id)
+    {
+        capabilities.remove(session_id);
+    }
+}
+
+/// Clear every session bound to the given task. Called when the task reaches
+/// a terminal state, so no worker (headed or headless, current or stale
+/// assignee) retains authority derived from a finished node.
+pub(crate) fn clear_task_capability(swarm_id: &str, task_id: &str) {
+    SESSION_CAPABILITIES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .retain(|_, capability| {
+            capability.swarm_id != swarm_id || capability.task_id != task_id
+        });
+}
+
+/// Move a binding across a session rename, so a reattached worker keeps the
+/// tier of its still-assigned node instead of silently regaining full
+/// authority under the new session id.
+pub(crate) fn rename_session_capability(old_session_id: &str, new_session_id: &str) {
+    let mut capabilities = SESSION_CAPABILITIES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(capability) = capabilities.remove(old_session_id) {
+        capabilities.insert(new_session_id.to_string(), capability);
+    }
+}
+
+/// Test-visible read of a session's current binding.
+#[cfg(test)]
+pub(crate) fn session_capability_binding(
+    session_id: &str,
+) -> Option<(CapabilityTier, String, String)> {
+    SESSION_CAPABILITIES
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(session_id)
+        .map(|capability| {
+            (
+                capability.tier,
+                capability.swarm_id.clone(),
+                capability.task_id.clone(),
+            )
+        })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CapabilityTierError {
     session_id: String,
@@ -251,6 +308,54 @@ mod tests {
 
     fn unique_session(name: &str) -> String {
         format!("cap-tier-test-{name}-{}", std::process::id())
+    }
+
+    #[test]
+    fn scoped_clear_only_removes_the_matching_assignment() {
+        let session = unique_session("scoped-clear");
+        install_session_capability(&session, CapabilityTier::ReadOnly, "swarm-a", "task-1");
+        // A clear for a different task (an older run's cleanup racing a newer
+        // assignment) must leave the binding alone.
+        clear_session_capability_for_task(&session, "swarm-a", "task-2");
+        assert!(session_capability_binding(&session).is_some());
+        clear_session_capability_for_task(&session, "swarm-a", "task-1");
+        assert!(session_capability_binding(&session).is_none());
+    }
+
+    #[test]
+    fn task_clear_removes_every_session_bound_to_the_task() {
+        let first = unique_session("task-clear-a");
+        let second = unique_session("task-clear-b");
+        let unrelated = unique_session("task-clear-other");
+        install_session_capability(&first, CapabilityTier::ReadOnly, "swarm-t", "task-x");
+        install_session_capability(&second, CapabilityTier::Verify, "swarm-t", "task-x");
+        install_session_capability(&unrelated, CapabilityTier::ReadOnly, "swarm-t", "task-y");
+        clear_task_capability("swarm-t", "task-x");
+        assert!(session_capability_binding(&first).is_none());
+        assert!(session_capability_binding(&second).is_none());
+        assert!(
+            session_capability_binding(&unrelated).is_some(),
+            "a different task's binding must survive"
+        );
+        clear_session_capability(&unrelated);
+    }
+
+    #[test]
+    fn rename_moves_the_binding_to_the_new_session_id() {
+        let old_id = unique_session("rename-old");
+        let new_id = unique_session("rename-new");
+        install_session_capability(&old_id, CapabilityTier::ReadOnly, "swarm-r", "task-r");
+        rename_session_capability(&old_id, &new_id);
+        assert!(session_capability_binding(&old_id).is_none());
+        let (tier, swarm, task) =
+            session_capability_binding(&new_id).expect("binding follows the rename");
+        assert_eq!(tier, CapabilityTier::ReadOnly);
+        assert_eq!(swarm, "swarm-r");
+        assert_eq!(task, "task-r");
+        // The renamed session is still enforced, not just recorded.
+        let denied = authorize_tool_call(&new_id, "edit", &json!({}));
+        assert!(denied.is_err(), "tier must keep denying under the new id");
+        clear_session_capability(&new_id);
     }
 
     #[test]

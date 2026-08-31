@@ -1559,6 +1559,9 @@ pub(super) async fn handle_comm_stop(
             (None, None)
         }
     };
+    // A removed member's capability binding must not outlive its membership:
+    // a later session under the same id starts with ordinary authority.
+    crate::tool::capability_tier::clear_session_capability(&target_session);
     if let Some(ref swarm_id) = removed_swarm_id {
         record_swarm_event(
             event_history,

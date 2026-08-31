@@ -805,6 +805,10 @@ pub(super) async fn handle_comm_complete_node(
 
     match result {
         Ok(()) => {
+            // The node is terminal: every session's authority derived from it
+            // ends now, including a headed assignee that never runs through
+            // the server-side turn loop and its run-end cleanup.
+            crate::tool::capability_tier::clear_task_capability(&swarm_id, &node_id);
             // File evidence before finalize publishes the derived done state.
             super::control_log_sync::append_control_event(
                 &swarm_id,

@@ -687,6 +687,14 @@ async fn reclaim_stale_plan_assignments(
                     ),
                 ],
             );
+            // The departed assignee's tier binding dies with its assignment,
+            // so a later revival of that session id cannot inherit authority
+            // for a node it no longer owns.
+            if let Some(ref departed) = item.assigned_to {
+                crate::tool::capability_tier::clear_session_capability_for_task(
+                    departed, swarm_id, &item.id,
+                );
+            }
             item.assigned_to = None;
             reclaimed += 1;
         }
@@ -1029,9 +1037,6 @@ fn spawn_assigned_task_run(
         } else {
             None
         };
-        // The tier covers exactly the assigned run. Cleared on every exit path,
-        // success or error, so the session leaves with its ordinary authority.
-        crate::tool::capability_tier::clear_session_capability(&target_session);
         let _ = heartbeat_stop_tx.send(true);
         let _ = heartbeat_task.await;
 
@@ -1220,6 +1225,28 @@ fn spawn_assigned_task_run(
                 )
                 .await;
             }
+        }
+        // The tier covers the assignment, not just this turn. Checked after
+        // the turn-end plan writes above so terminal outcomes (done, failed,
+        // requeued elsewhere) clear it, while a node this session still holds
+        // non-terminally — a composite awaiting synthesis, or a wake/resume
+        // between turns — keeps its restricted authority in place.
+        let assignment_still_held = {
+            let plans = swarm_plans.read().await;
+            plans.get(&swarm_id).is_some_and(|plan| {
+                plan.items.iter().any(|item| {
+                    item.id == task_id
+                        && item.assigned_to.as_deref() == Some(target_session.as_str())
+                        && !crate::plan::is_terminal_status(&item.status)
+                })
+            })
+        };
+        if !assignment_still_held {
+            crate::tool::capability_tier::clear_session_capability_for_task(
+                &target_session,
+                &swarm_id,
+                &task_id,
+            );
         }
     });
 }
@@ -1676,7 +1703,15 @@ async fn handle_comm_assign_task_with_mode(
         }
     };
 
-    let (selected_task_id, task_content, participant_ids, plan_item_count, blocked_reason) = {
+    let (
+        selected_task_id,
+        task_content,
+        participant_ids,
+        plan_item_count,
+        blocked_reason,
+        assigned_node_kind,
+        previous_assignee,
+    ) = {
         // F1: release assignments held by departed sessions so the "next
         // unassigned runnable" scan below cannot be starved by a stale
         // assignee (the audited run_plan stall).
@@ -1770,8 +1805,8 @@ async fn handle_comm_assign_task_with_mode(
             ));
             progress.assigned_at_unix_ms = Some(now_ms);
             progress.stale_since_unix_ms = None;
-            if let Some(previous_assignee) = previous_assignee
-                && previous_assignee != target_session
+            if let Some(ref previous_assignee) = previous_assignee
+                && *previous_assignee != target_session
             {
                 jcode_plan::append_progress_provenance(
                     progress,
@@ -1783,15 +1818,21 @@ async fn handle_comm_assign_task_with_mode(
             plan.version += 1;
             plan.participants.insert(req_session_id.clone());
             plan.participants.insert(target_session.clone());
+            let assigned_node_kind = plan
+                .node_meta
+                .get(&item_id)
+                .and_then(|meta| meta.kind.clone());
             (
                 Some(item_id.clone()),
                 Some(content),
                 plan.participants.clone(),
                 plan.items.len(),
                 None,
+                assigned_node_kind,
+                previous_assignee,
             )
         } else {
-            (None, None, HashSet::new(), 0, blocked_reason)
+            (None, None, HashSet::new(), 0, blocked_reason, None, None)
         }
     };
 
@@ -1837,6 +1878,41 @@ async fn handle_comm_assign_task_with_mode(
         .await;
         return;
     };
+
+    // The tier binds at assignment time, for the assignment's lifetime. This
+    // is the only install point that covers a client-attached (headed)
+    // assignee, which never passes through `spawn_assigned_task_run`; the
+    // headless run re-installs the identical binding at turn start, which is
+    // harmless. A displaced previous assignee loses its binding here so a
+    // reassignment cannot leave two sessions holding authority for one node.
+    if let Some(ref previous) = previous_assignee
+        && *previous != target_session
+    {
+        crate::tool::capability_tier::clear_session_capability_for_task(
+            previous,
+            &swarm_id,
+            &selected_task_id,
+        );
+    }
+    let assigned_tier = crate::tool::capability_tier::CapabilityTier::from_node_kind(
+        assigned_node_kind.as_deref(),
+    );
+    if let Some((stale_swarm, stale_task)) = crate::tool::capability_tier::install_session_capability(
+        &target_session,
+        assigned_tier,
+        &swarm_id,
+        &selected_task_id,
+    ) {
+        crate::logging::event_warn(
+            "SWARM_CAPABILITY",
+            vec![
+                ("event".to_string(), "stale_tier_replaced".to_string()),
+                ("session".to_string(), target_session.clone()),
+                ("stale_swarm".to_string(), stale_swarm),
+                ("stale_task".to_string(), stale_task),
+            ],
+        );
+    }
 
     let swarm_state = SwarmState {
         members: Arc::clone(swarm_members),
