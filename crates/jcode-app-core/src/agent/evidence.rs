@@ -142,7 +142,6 @@ impl Agent {
 
     pub(super) fn append_provider_error_response(
         &self,
-        provider_name: &str,
         provider_model: String,
         started_at: Instant,
         _error: &anyhow::Error,
@@ -151,7 +150,7 @@ impl Agent {
     ) {
         self.append_session_evidence_with_correlation(
             SessionLogEventKind::ProviderResponse {
-                provider: provider_name.to_string(),
+                provider: self.evidence_provider(),
                 model: provider_model,
                 status: SessionLogStatus::Error,
                 duration_ms: started_at.elapsed().as_millis() as u64,
@@ -177,7 +176,6 @@ impl Agent {
     /// in the turn loops.
     pub(super) fn append_and_classify_provider_error(
         &self,
-        provider_name: &str,
         provider_model: String,
         started_at: Instant,
         error: anyhow::Error,
@@ -185,7 +183,6 @@ impl Agent {
         correlation: CorrelationIds,
     ) -> anyhow::Error {
         self.append_provider_error_response(
-            provider_name,
             provider_model,
             started_at,
             &error,
@@ -201,14 +198,12 @@ impl Agent {
     /// classified by type, not by `ClassifiedEvidenceError`).
     pub(super) fn append_interrupted_turn_evidence(
         &self,
-        provider_name: &str,
         provider_model: String,
         started_at: Instant,
         correlation: CorrelationIds,
     ) -> anyhow::Error {
         let error = Self::interrupted_turn_error();
         self.append_provider_error_response(
-            provider_name,
             provider_model,
             started_at,
             &error,

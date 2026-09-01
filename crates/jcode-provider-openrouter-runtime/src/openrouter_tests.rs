@@ -298,6 +298,32 @@ fn named_openai_compatible_provider_sets_catalog_cache_namespace() {
 }
 
 #[test]
+fn evidence_identity_distinguishes_transport_profile_and_display_name() {
+    let _lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("create temp home");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path().join("jcode-home"));
+    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _home = EnvVarGuard::set("HOME", temp.path());
+    let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
+    let _env = isolate_openrouter_autodetect_env();
+    let _zai_key = EnvVarGuard::set("ZHIPU_API_KEY", "test-zai-key");
+    let _openrouter_key = EnvVarGuard::set("OPENROUTER_API_KEY", "test-openrouter-key");
+
+    let zai = OpenRouterProvider::new_openai_compatible_profile_runtime(
+        jcode_base::provider_catalog::ZAI_PROFILE,
+    )
+    .expect("build Z.AI runtime");
+    assert_eq!(Provider::name(&zai), "openrouter");
+    assert_eq!(Provider::provider_identity(&zai), "zai");
+    assert_eq!(zai.runtime_display_name(), "Z.AI");
+
+    let openrouter = OpenRouterProvider::new_openrouter_api_key_runtime()
+        .expect("build OpenRouter aggregator runtime");
+    assert_eq!(Provider::name(&openrouter), "openrouter");
+    assert_eq!(Provider::provider_identity(&openrouter), "openrouter");
+}
+
+#[test]
 fn named_openai_compatible_provider_exposes_static_models_as_routes() {
     let _lock = ENV_LOCK.lock();
     let _namespace = EnvVarGuard::remove("JCODE_OPENROUTER_CACHE_NAMESPACE");
