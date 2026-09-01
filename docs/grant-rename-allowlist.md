@@ -10,7 +10,7 @@ All hits in this table were classified as `authority` and renamed to grant vocab
 
 | File at classification time | Classified hits | Decision and action |
 |---|---|---|
-| `crates/jcode-app-core/src/tool/capability_tier.rs` | Module name and docs; `CapabilityTier`; `CapabilityTierError`; `SessionCapability`; `SESSION_CAPABILITIES`; install, clear, rename, binding, authorization, and unit-test identifiers; refusal text | `authority`: file renamed to `tool/grant.rs`; types, storage, functions, fields, variables, tests, and model-visible refusal text renamed to grant vocabulary. |
+| `crates/jcode-app-core/src/tool/grant.rs` | Module name and docs; `CapabilityTier`; `CapabilityTierError`; `SessionCapability`; `SESSION_CAPABILITIES`; install, clear, rename, binding, authorization, and unit-test identifiers; refusal text | `authority`: file renamed to `tool/grant.rs`; types, storage, functions, fields, variables, tests, and model-visible refusal text renamed to grant vocabulary. |
 | `crates/jcode-app-core/src/tool/mod.rs` | Module declaration, authorization call, assignment-authority comments, `tier_blocked` lifecycle label | `authority`: renamed to the grant module and `grant_blocked`. The adjacent ambient action tier call remains unchanged and now states the boundary. |
 | `crates/jcode-app-core/src/server/comm_control.rs` | Assignment install and scoped-clear calls, derived tier variables, stale-tier event labels | `authority`: renamed to grant calls, variables, comments, and `SWARM_GRANT` / `stale_grant_replaced` log vocabulary. |
 | `crates/jcode-app-core/src/server/client_disconnect_cleanup.rs` | Session capability cleanup | `authority`: renamed to session grant cleanup. |

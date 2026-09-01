@@ -21,9 +21,7 @@ RULE_FILES = {
 HISTORICAL_LINES = {
     "docs/issues/capability-tier-deferred-gaps.md": {
         'title: "Capability tier follow-ups deferred from the initial enforcement layer"',
-        "- crates/jcode-app-core/src/tool/capability_tier.rs",
         "# Capability tier deferred gaps",
-        "(`crates/jcode-app-core/src/tool/capability_tier.rs`), installs it at",
     },
     "docs/issues/swarm-runaway-growth.md": {
         "- Capability tiers per node kind: explore/verify nodes get read-only tool",
