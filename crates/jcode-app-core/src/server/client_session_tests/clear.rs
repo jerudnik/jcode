@@ -57,7 +57,12 @@ async fn handle_clear_session_replaces_runtime_handles_and_updates_shutdown_regi
             disconnect_tx: mpsc::unbounded_channel().0,
         },
     )])));
-    let swarm_members = Arc::new(RwLock::new(HashMap::<String, SwarmMember>::new()));
+    let mut spawning_member = test_swarm_member(old_session_id, "spawned");
+    spawning_member.lifecycle = jcode_swarm_core::SwarmLifecycleStatus::starting(1);
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([(
+        old_session_id.to_string(),
+        spawning_member,
+    )])));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::<String, HashSet<String>>::new()));
     let file_touch = FileTouchService::new();
     let swarm_plans = Arc::new(RwLock::new(HashMap::<String, VersionedPlan>::new()));
@@ -91,6 +96,19 @@ async fn handle_clear_session_replaces_runtime_handles_and_updates_shutdown_regi
     .await;
 
     assert_ne!(client_session_id, old_session_id);
+
+    let members = swarm_members.read().await;
+    assert!(!members.contains_key(old_session_id));
+    let replacement = members
+        .get(&client_session_id)
+        .ok_or_else(|| anyhow!("replacement swarm member"))?;
+    assert_eq!(
+        replacement.lifecycle.state,
+        jcode_swarm_core::MemberLifecycleState::Ready
+    );
+    assert_eq!(replacement.status, "ready");
+    assert!(replacement.lifecycle.revision > 0);
+    drop(members);
 
     old_queue
         .lock()

@@ -139,7 +139,7 @@ async fn prune_expired_terminal_swarm_members(
         let removed_swarm_id = {
             let mut members = swarm_state.members.write().await;
             let still_expired = members.get(&session_id).is_some_and(|member| {
-                swarm::member_status_is_terminal(&member.status)
+                member.lifecycle.is_terminal_state()
                     && member.last_status_change.elapsed() >= retention
             });
             if still_expired {
@@ -213,11 +213,13 @@ pub(super) async fn remove_persisted_swarm_state_for(swarm_id: &str, swarm_state
 /// unfinished work. `Lost` is terminal yet restorable: the process died without
 /// reporting an outcome, so its session may hold an interrupted turn. The other
 /// terminal states reported their outcome, and `Ready` never started one.
-fn headless_member_should_restore(status: &str, is_headless: bool) -> bool {
-    let state = MemberLifecycleState::from_compatibility_status(status);
+fn headless_member_should_restore(
+    lifecycle: &jcode_swarm_core::SwarmLifecycleStatus,
+    is_headless: bool,
+) -> bool {
     is_headless
         && matches!(
-            state,
+            lifecycle.state,
             MemberLifecycleState::Starting
                 | MemberLifecycleState::Assigned
                 | MemberLifecycleState::Running
@@ -743,7 +745,9 @@ impl Server {
             let members = self.swarm_state.members.read().await;
             members
                 .values()
-                .filter(|member| headless_member_should_restore(&member.status, member.is_headless))
+                .filter(|member| {
+                    headless_member_should_restore(&member.lifecycle, member.is_headless)
+                })
                 .map(|member| member.session_id.clone())
                 .collect::<Vec<_>>()
         };
@@ -1839,7 +1843,9 @@ impl Server {
         swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     ) -> bool {
         let members = swarm_members.read().await;
-        members.values().any(|member| member.status == "running")
+        members
+            .values()
+            .any(|member| member.lifecycle.state == MemberLifecycleState::Running)
     }
 
     /// Monitor the global Bus for FileTouch events and detect conflicts

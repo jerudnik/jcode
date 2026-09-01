@@ -724,6 +724,7 @@ async fn reclaim_stale_plan_assignments(
 /// per-node by [`crate::plan::MAX_DEAD_ASSIGNEE_RECLAIMS`] to respect the
 /// repeat-failure policy: beyond the cap only explicit `retry`/`assign_task`
 /// move the node.
+#[allow(deprecated, reason = "migrated to canonical lifecycle state in W23-C2")]
 async fn next_runnable_task_id_reclaiming_stranded(
     swarm_id: &str,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
@@ -902,9 +903,9 @@ fn spawn_assigned_task_run(
                     item.status = "running".to_string();
                     let progress = plan.task_progress.entry(task_id.clone()).or_default();
                     progress.assigned_session_id = Some(target_session.clone());
-                    progress.assignment_grant = Some(
-                        jcode_plan::AssignmentGrant::from_node_kind(node_kind.as_deref()),
-                    );
+                    progress.assignment_grant = Some(jcode_plan::AssignmentGrant::from_node_kind(
+                        node_kind.as_deref(),
+                    ));
                     progress.assignment_epoch =
                         Some(progress.assignment_epoch.unwrap_or(0).saturating_add(1));
                     progress.assignment_summary = Some(truncate_detail(&assignment_text, 120));

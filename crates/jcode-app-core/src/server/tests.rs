@@ -24,6 +24,35 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tokio::time::timeout;
 
+#[test]
+fn headless_restore_decision_is_explicit_for_every_lifecycle_state() {
+    use jcode_swarm_core::SwarmLifecycleStatus;
+
+    let cases = [
+        (SwarmLifecycleStatus::Spawned, true),
+        (SwarmLifecycleStatus::Ready, false),
+        (SwarmLifecycleStatus::Queued, true),
+        (SwarmLifecycleStatus::Running, true),
+        (SwarmLifecycleStatus::Completed, false),
+        (SwarmLifecycleStatus::Failed, false),
+        (SwarmLifecycleStatus::Stopped, false),
+        (SwarmLifecycleStatus::Crashed, true),
+    ];
+
+    for (lifecycle, should_restore) in cases {
+        assert_eq!(
+            super::headless_member_should_restore(&lifecycle, true),
+            should_restore,
+            "unexpected headless restore decision for {:?}",
+            lifecycle.state
+        );
+        assert!(
+            !super::headless_member_should_restore(&lifecycle, false),
+            "headed sessions are never restored by the headless recovery path"
+        );
+    }
+}
+
 struct EnvGuard {
     prev_home: Option<OsString>,
     prev_runtime_dir: Option<OsString>,

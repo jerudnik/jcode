@@ -19,6 +19,7 @@ use crate::tool::Registry;
 use crate::transport::WriteHalf;
 use anyhow::Result;
 use jcode_agent_runtime::InterruptSignal;
+use jcode_swarm_core::MemberLifecycleEvent;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -245,8 +246,10 @@ pub(super) async fn handle_clear_session(
         if let Some(mut member) = members.remove(client_session_id) {
             let swarm_id = member.swarm_id.clone();
             member.session_id = new_id.clone();
-            member.status = "ready".to_string();
-            member.lifecycle = jcode_swarm_core::SwarmLifecycleStatus::Ready;
+            member.apply_lifecycle_event(
+                MemberLifecycleEvent::WorkerReady,
+                super::swarm::now_unix_ms(),
+            );
             member.detail = None;
             members.insert(new_id.clone(), member);
             swarm_id
