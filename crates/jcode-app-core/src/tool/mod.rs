@@ -126,6 +126,8 @@ impl Clone for Registry {
 }
 
 impl Registry {
+    const INPUT_SCHEMA_SUMMARY_MAX_CHARS: usize = 2_048;
+
     fn shared_skills_registry() -> Arc<RwLock<SkillRegistry>> {
         SkillRegistry::shared_registry()
     }
@@ -451,6 +453,36 @@ impl Registry {
         crate::util::estimate_tokens(s)
     }
 
+    fn is_input_contract_error(error: &anyhow::Error) -> bool {
+        if error.downcast_ref::<serde_json::Error>().is_some() {
+            return true;
+        }
+
+        // Some tools enforce action-dependent required fields immediately
+        // after serde has populated an all-optional input struct. Those remain
+        // caller-correctable contract failures even though serde accepted the
+        // object (ScheduleWakeup is the compatibility case).
+        error
+            .chain()
+            .map(ToString::to_string)
+            .any(|message| message.to_ascii_lowercase().contains(" is required"))
+    }
+
+    fn parameters_schema_summary(tool: &dyn Tool) -> String {
+        let serialized = serde_json::to_string(&tool.parameters_schema())
+            .unwrap_or_else(|_| "{\"type\":\"object\"}".to_string());
+        if serialized.chars().count() <= Self::INPUT_SCHEMA_SUMMARY_MAX_CHARS {
+            return serialized;
+        }
+
+        let mut summary: String = serialized
+            .chars()
+            .take(Self::INPUT_SCHEMA_SUMMARY_MAX_CHARS.saturating_sub(1))
+            .collect();
+        summary.push('…');
+        summary
+    }
+
     fn tool_lifecycle_fields(
         phase: &str,
         requested_name: &str,
@@ -683,6 +715,15 @@ impl Registry {
         let mut output = match result {
             Ok(output) => output,
             Err(error) => {
+                let error = if name != resolved_name && Self::is_input_contract_error(&error) {
+                    let original = error.to_string();
+                    let schema = Self::parameters_schema_summary(tool.as_ref());
+                    error.context(format!(
+                        "{original}\nBacking tool '{resolved_name}' parameters schema: {schema}"
+                    ))
+                } else {
+                    error
+                };
                 let mut fields =
                     Self::tool_lifecycle_fields("error", name, resolved_name, &input, &ctx);
                 fields.push(("elapsed_ms".to_string(), latency_ms.to_string()));
