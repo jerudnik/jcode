@@ -377,8 +377,9 @@ verification matrix (cross-instance concurrency, crash-interruption/torn
 write, malformed-file matrix, orphan re-verification).
 
 **WIRE:** cross-process write ordering for background-task fields remains a
-durability requirement, tracked in
-[`background-task-cross-process-write-order.md`](../issues/background-task-cross-process-write-order.md).
+durability requirement, formerly tracked in
+`docs/issues/background-task-cross-process-write-order.md` (resolved; see the
+2026-09-01 entry below).
 Atomic replacement prevents torn JSON, and the path-keyed mutex serializes
 writers only within one process; neither prevents a stale writer in another
 process from replacing newer terminal state. Test naming could still be
@@ -1863,3 +1864,21 @@ back verbatim. A fresh read then reproduced the baseline digest exactly, and
 that `Governance Root` and `PR Gate` are now each uniquely defined in
 `pr.yml`. The context names never changed, only their defining workflow. The
 window was open for roughly three seconds and nothing else merged inside it.
+
+## Background task status writes are serialized across processes
+
+**2026-09-01.** Every background status read-modify-write now holds a per-task
+`{task}.status.lock` sidecar across the fresh read, terminal-truth check,
+mutation, and atomic replacement. Reconciliation uses nonblocking acquisition
+and leaves a contended status read-only instead of waiting on or racing an
+active writer. The lock sidecar is persistent and is not part of temp-file
+cleanup; deleting it while held could split coordination across two inodes.
+
+Cross-process regression tests cover stale running writes after terminal
+completion, process death while holding a lock, nonblocking reconciliation,
+same-process terminal immutability, and lock handoff. The resolved issue was
+deleted under the `docs/issues/` contract.
+
+**Reopen trigger:** a reproducible status update that bypasses the sidecar lock,
+or a supported filesystem where advisory locking does not provide the required
+same-host serialization.
