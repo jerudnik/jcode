@@ -111,6 +111,7 @@ pub struct Registry {
     tools: Arc<RwLock<HashMap<String, Arc<dyn Tool>>>>,
     skills: Arc<RwLock<SkillRegistry>>,
     compaction: Arc<RwLock<CompactionManager>>,
+    swarm_state: Arc<StdRwLock<Option<crate::server::SwarmState>>>,
 }
 
 impl Clone for Registry {
@@ -121,6 +122,7 @@ impl Clone for Registry {
             // Each clone gets a fresh CompactionManager to prevent parallel
             // subagents from corrupting each other's message history
             compaction: Arc::new(RwLock::new(CompactionManager::new())),
+            swarm_state: Arc::clone(&self.swarm_state),
         }
     }
 }
@@ -159,6 +161,7 @@ impl Registry {
             tools: Arc::new(RwLock::new(HashMap::new())),
             skills: Arc::new(RwLock::new(SkillRegistry::default())),
             compaction: Arc::new(RwLock::new(CompactionManager::new())),
+            swarm_state: Arc::new(StdRwLock::new(None)),
         }
     }
 
@@ -284,6 +287,7 @@ impl Registry {
             tools: Arc::new(RwLock::new(HashMap::new())),
             skills: skills.clone(),
             compaction: compaction.clone(),
+            swarm_state: Arc::new(StdRwLock::new(None)),
         };
         let registry_struct_ms = registry_struct_start.elapsed().as_millis();
 
@@ -334,6 +338,14 @@ impl Registry {
             start.elapsed().as_millis()
         ));
         registry
+    }
+
+    pub(crate) fn with_swarm_state(self, swarm_state: crate::server::SwarmState) -> Self {
+        *self
+            .swarm_state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(swarm_state);
+        self
     }
 
     /// Get all tool definitions for the API
@@ -630,7 +642,18 @@ impl Registry {
         // installed server-side at assignment. Sessions without an installed
         // grant pass through untouched. This is distinct from the ambient action
         // tier above, which ranks unattended action risk rather than authority.
-        if let Err(error) = grant::authorize_tool_call(&ctx.session_id, resolved_name, &input) {
+        let swarm_state = self
+            .swarm_state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let grant_lookup = match swarm_state {
+            Some(swarm_state) => swarm_state.assignment_grant_for_session(&ctx.session_id).await,
+            None => grant::GrantLookup::Unrestricted,
+        };
+        if let Err(error) =
+            grant::authorize_tool_call(&ctx.session_id, grant_lookup, resolved_name, &input)
+        {
             let mut fields =
                 Self::tool_lifecycle_fields("grant_blocked", name, resolved_name, &input, &ctx);
             fields.push(("block_reason".to_string(), error.to_string()));

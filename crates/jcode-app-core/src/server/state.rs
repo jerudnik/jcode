@@ -162,6 +162,62 @@ impl SwarmState {
         }
     }
 
+    /// Snapshot assignment authority without retaining either swarm lock. Only
+    /// sessions classified as swarm agents are subject to assignment grants;
+    /// human, coordinator, and bootstrap identities fail open.
+    pub(crate) async fn assignment_grant_for_session(
+        &self,
+        session_id: &str,
+    ) -> crate::tool::grant::GrantLookup {
+        let swarm_id = {
+            let members = self.members.read().await;
+            let Some(member) = members.get(session_id) else {
+                return crate::tool::grant::GrantLookup::Unrestricted;
+            };
+            if member.role != "agent" {
+                return crate::tool::grant::GrantLookup::Unrestricted;
+            }
+            member.swarm_id.clone()
+        };
+        let Some(swarm_id) = swarm_id else {
+            return crate::tool::grant::GrantLookup::Unrestricted;
+        };
+
+        let plans = self.plans.read().await;
+        let Some(plan) = plans.get(&swarm_id) else {
+            return crate::tool::grant::GrantLookup::Unassigned { reclaimed: false };
+        };
+        for item in &plan.items {
+            if item.assigned_to.as_deref() != Some(session_id)
+                || crate::plan::is_terminal_status(&item.status)
+            {
+                continue;
+            }
+            let Some(progress) = plan.task_progress.get(&item.id) else {
+                continue;
+            };
+            if progress.assigned_session_id.as_deref() != Some(session_id) {
+                continue;
+            }
+            if let (Some(grant), Some(epoch)) =
+                (progress.assignment_grant, progress.assignment_epoch)
+            {
+                return crate::tool::grant::GrantLookup::Assigned {
+                    grant,
+                    swarm_id,
+                    task_id: item.id.clone(),
+                    epoch,
+                };
+            }
+        }
+
+        let reclaimed = plan.task_progress.values().any(|progress| {
+            progress.assigned_session_id.as_deref() == Some(session_id)
+                && progress.assignment_grant.is_none()
+        });
+        crate::tool::grant::GrantLookup::Unassigned { reclaimed }
+    }
+
     pub async fn load_runtime(&self, swarm_id: &str) -> SwarmRuntime {
         let plan = {
             let plans = self.plans.read().await;

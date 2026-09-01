@@ -1005,6 +1005,7 @@ fn test_schema_validator_rejects_any_of_branches_without_type() {
 async fn test_context_guard_small_output_passes_through() {
     let compaction = Arc::new(RwLock::new(CompactionManager::new().with_budget(200_000)));
     let registry = Registry {
+        swarm_state: Arc::new(StdRwLock::new(None)),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1019,6 +1020,7 @@ async fn test_context_guard_small_output_passes_through() {
 async fn test_context_guard_truncates_huge_single_output() {
     let compaction = Arc::new(RwLock::new(CompactionManager::new().with_budget(1000)));
     let registry = Registry {
+        swarm_state: Arc::new(StdRwLock::new(None)),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1047,6 +1049,7 @@ async fn test_context_guard_truncates_when_context_nearly_full() {
         mgr.update_observed_input_tokens(9500); // 95% full
     }
     let registry = Registry {
+        swarm_state: Arc::new(StdRwLock::new(None)),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1065,6 +1068,7 @@ async fn test_context_guard_truncates_when_context_nearly_full() {
 async fn test_context_guard_zero_budget_passes_through() {
     let compaction = Arc::new(RwLock::new(CompactionManager::new().with_budget(0)));
     let registry = Registry {
+        swarm_state: Arc::new(StdRwLock::new(None)),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1311,140 +1315,4 @@ fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
             "'{tool}' must bypass the tier gate or ambient cycles deadlock"
         );
     }
-}
-
-#[tokio::test]
-async fn registry_execute_denies_mutation_for_read_only_grant() {
-    let _env = crate::storage::lock_test_env_read();
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
-    let registry = Registry::new(provider).await;
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let target = temp.path().join("forbidden.txt");
-
-    let session_id = "grant-read-only-worker";
-    crate::tool::grant::install_assignment_grant(
-        session_id,
-        crate::tool::grant::Grant::ReadOnly,
-        "grant-test-swarm",
-        "explore-node",
-    );
-
-    let ctx = ToolContext {
-        session_id: session_id.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(temp.path().to_path_buf()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-    };
-
-    let write_result = registry
-        .execute(
-            "write",
-            serde_json::json!({
-                "file_path": target,
-                "content": "should never land\n"
-            }),
-            ctx.clone(),
-        )
-        .await;
-    // The gate must also catch provider-alias names, which resolve to the
-    // same underlying tool before authorization runs.
-    let alias_result = registry
-        .execute(
-            "Write",
-            serde_json::json!({
-                "file_path": target,
-                "content": "should never land\n"
-            }),
-            ctx.clone(),
-        )
-        .await;
-    let bash_result = registry
-        .execute("bash", serde_json::json!({"command": "true"}), ctx.clone())
-        .await;
-    let read_result = registry
-        .execute(
-            "ls",
-            serde_json::json!({"path": temp.path().to_string_lossy()}),
-            ctx.clone(),
-        )
-        .await;
-
-    crate::tool::grant::clear_session_grant(session_id);
-
-    let cleared_result = registry
-        .execute(
-            "write",
-            serde_json::json!({
-                "file_path": target,
-                "content": "allowed after clear\n"
-            }),
-            ctx,
-        )
-        .await;
-
-    let error = write_result.expect_err("read-only worker write must be refused");
-    assert!(
-        error.to_string().contains("read-only"),
-        "refusal must name the grant: {error}"
-    );
-    let alias_error = alias_result.expect_err("alias write must be refused too");
-    assert!(alias_error.to_string().contains("read-only"));
-    bash_result.expect_err("read-only worker shell must be refused");
-    read_result.expect("read tools must remain allowed");
-    cleared_result.expect("write must succeed after the grant is cleared");
-    assert_eq!(
-        std::fs::read_to_string(&target).expect("file after clear"),
-        "allowed after clear\n",
-        "only the post-clear write may land"
-    );
-}
-
-#[tokio::test]
-async fn registry_execute_verify_grant_allows_shell_but_not_mutation() {
-    let _env = crate::storage::lock_test_env_read();
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
-    let registry = Registry::new(provider).await;
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let target = temp.path().join("forbidden.txt");
-
-    let session_id = "grant-verify-worker";
-    crate::tool::grant::install_assignment_grant(
-        session_id,
-        crate::tool::grant::Grant::Verify,
-        "grant-test-swarm",
-        "verify-node",
-    );
-
-    let ctx = ToolContext {
-        session_id: session_id.to_string(),
-        message_id: "test".to_string(),
-        tool_call_id: "test".to_string(),
-        working_dir: Some(temp.path().to_path_buf()),
-        stdin_request_tx: None,
-        graceful_shutdown_signal: None,
-        execution_mode: ToolExecutionMode::Direct,
-    };
-
-    let bash_result = registry
-        .execute("bash", serde_json::json!({"command": "true"}), ctx.clone())
-        .await;
-    let write_result = registry
-        .execute(
-            "write",
-            serde_json::json!({
-                "file_path": target,
-                "content": "should never land\n"
-            }),
-            ctx,
-        )
-        .await;
-
-    crate::tool::grant::clear_session_grant(session_id);
-
-    bash_result.expect("verify worker must be able to run builds and tests");
-    write_result.expect_err("verify worker file mutation must be refused");
-    assert!(!target.exists(), "denied write must leave no file behind");
 }

@@ -675,6 +675,13 @@ async fn reclaim_stale_plan_assignments(
             .as_ref()
             .is_some_and(|assignee| !live_sessions.contains(assignee));
         if stale {
+            let epochs = plan.task_progress.get_mut(&item.id).map(|progress| {
+                let old_epoch = progress.assignment_epoch.unwrap_or(0);
+                let new_epoch = old_epoch.saturating_add(1);
+                progress.assignment_epoch = Some(new_epoch);
+                progress.assignment_grant = None;
+                (old_epoch, new_epoch)
+            });
             crate::logging::event_info(
                 "SWARM_LIFECYCLE",
                 vec![
@@ -685,14 +692,16 @@ async fn reclaim_stale_plan_assignments(
                         "departed_assignee",
                         item.assigned_to.clone().unwrap_or_default(),
                     ),
+                    (
+                        "old_epoch",
+                        epochs.map_or_else(|| "0".to_string(), |(old, _)| old.to_string()),
+                    ),
+                    (
+                        "new_epoch",
+                        epochs.map_or_else(|| "0".to_string(), |(_, new)| new.to_string()),
+                    ),
                 ],
             );
-            // The departed assignee's grant binding dies with its assignment,
-            // so a later revival of that session id cannot inherit authority
-            // for a node it no longer owns.
-            if let Some(ref departed) = item.assigned_to {
-                crate::tool::grant::clear_session_grant_for_task(departed, swarm_id, &item.id);
-            }
             item.assigned_to = None;
             reclaimed += 1;
         }
@@ -881,12 +890,11 @@ fn spawn_assigned_task_run(
 ) {
     let assignment_text = append_swarm_completion_report_instructions(&assignment_text);
     tokio::spawn(async move {
-        let node_kind = {
+        {
             let now_ms = now_unix_ms();
             let mut plans = swarm_plans.write().await;
-            let mut node_kind: Option<String> = None;
             if let Some(plan) = plans.get_mut(&swarm_id) {
-                node_kind = plan
+                let node_kind = plan
                     .node_meta
                     .get(&task_id)
                     .and_then(|meta| meta.kind.clone());
@@ -894,6 +902,11 @@ fn spawn_assigned_task_run(
                     item.status = "running".to_string();
                     let progress = plan.task_progress.entry(task_id.clone()).or_default();
                     progress.assigned_session_id = Some(target_session.clone());
+                    progress.assignment_grant = Some(
+                        jcode_plan::AssignmentGrant::from_node_kind(node_kind.as_deref()),
+                    );
+                    progress.assignment_epoch =
+                        Some(progress.assignment_epoch.unwrap_or(0).saturating_add(1));
                     progress.assignment_summary = Some(truncate_detail(&assignment_text, 120));
                     progress.started_at_unix_ms = Some(now_ms);
                     progress.last_heartbeat_unix_ms = Some(now_ms);
@@ -907,29 +920,7 @@ fn spawn_assigned_task_run(
                     plan.version += 1;
                 }
             }
-            node_kind
         };
-        // The worker's authority for this run comes from its node's kind, not
-        // from anything in the assignment prompt. Installed before the turn
-        // starts and cleared when it ends, so a reused worker never keeps a
-        // previous node's grant.
-        let grant = crate::tool::grant::Grant::from_node_kind(node_kind.as_deref());
-        if let Some((stale_swarm, stale_task)) = crate::tool::grant::install_assignment_grant(
-            &target_session,
-            grant,
-            &swarm_id,
-            &task_id,
-        ) {
-            crate::logging::event_warn(
-                "SWARM_GRANT",
-                vec![
-                    ("event".to_string(), "stale_grant_replaced".to_string()),
-                    ("session".to_string(), target_session.clone()),
-                    ("stale_swarm".to_string(), stale_swarm),
-                    ("stale_task".to_string(), stale_task),
-                ],
-            );
-        }
         let swarm_state = SwarmState {
             members: Arc::clone(&swarm_members),
             swarms_by_id: Arc::clone(&swarms_by_id),
@@ -1232,18 +1223,26 @@ fn spawn_assigned_task_run(
         // non-terminally — a composite awaiting synthesis, or a wake/resume
         // between turns — keeps its restricted authority in place.
         let assignment_still_held = {
-            let plans = swarm_plans.read().await;
-            plans.get(&swarm_id).is_some_and(|plan| {
+            let mut plans = swarm_plans.write().await;
+            let still_held = plans.get(&swarm_id).is_some_and(|plan| {
                 plan.items.iter().any(|item| {
                     item.id == task_id
                         && item.assigned_to.as_deref() == Some(target_session.as_str())
                         && !crate::plan::is_terminal_status(&item.status)
                 })
-            })
+            });
+            if !still_held
+                && let Some(progress) = plans
+                    .get_mut(&swarm_id)
+                    .and_then(|plan| plan.task_progress.get_mut(&task_id))
+            {
+                progress.assignment_grant = None;
+                progress.assignment_epoch =
+                    Some(progress.assignment_epoch.unwrap_or(0).saturating_add(1));
+            }
+            still_held
         };
-        if !assignment_still_held {
-            crate::tool::grant::clear_session_grant_for_task(&target_session, &swarm_id, &task_id);
-        }
+        let _ = assignment_still_held;
     });
 }
 
@@ -1699,15 +1698,7 @@ async fn handle_comm_assign_task_with_mode(
         }
     };
 
-    let (
-        selected_task_id,
-        task_content,
-        participant_ids,
-        plan_item_count,
-        blocked_reason,
-        assigned_node_kind,
-        previous_assignee,
-    ) = {
+    let (selected_task_id, task_content, participant_ids, plan_item_count, blocked_reason) = {
         // F1: release assignments held by departed sessions so the "next
         // unassigned runnable" scan below cannot be starved by a stale
         // assignee (the audited run_plan stall).
@@ -1795,6 +1786,13 @@ async fn handle_comm_assign_task_with_mode(
             item.status = "queued".to_string();
             let progress = plan.task_progress.entry(item_id.clone()).or_default();
             progress.assigned_session_id = Some(target_session.clone());
+            progress.assignment_grant = Some(jcode_plan::AssignmentGrant::from_node_kind(
+                plan.node_meta
+                    .get(&item_id)
+                    .and_then(|meta| meta.kind.as_deref()),
+            ));
+            progress.assignment_epoch =
+                Some(progress.assignment_epoch.unwrap_or(0).saturating_add(1));
             progress.assignment_summary = Some(truncate_detail(
                 &combine_assignment_text(&content, message.as_deref()),
                 120,
@@ -1814,21 +1812,15 @@ async fn handle_comm_assign_task_with_mode(
             plan.version += 1;
             plan.participants.insert(req_session_id.clone());
             plan.participants.insert(target_session.clone());
-            let assigned_node_kind = plan
-                .node_meta
-                .get(&item_id)
-                .and_then(|meta| meta.kind.clone());
             (
                 Some(item_id.clone()),
                 Some(content),
                 plan.participants.clone(),
                 plan.items.len(),
                 None,
-                assigned_node_kind,
-                previous_assignee,
             )
         } else {
-            (None, None, HashSet::new(), 0, blocked_reason, None, None)
+            (None, None, HashSet::new(), 0, blocked_reason)
         }
     };
 
@@ -1874,35 +1866,6 @@ async fn handle_comm_assign_task_with_mode(
         .await;
         return;
     };
-
-    // The grant binds at assignment time, for the assignment's lifetime. This
-    // is the only install point that covers a client-attached (headed)
-    // assignee, which never passes through `spawn_assigned_task_run`; the
-    // headless run re-installs the identical binding at turn start, which is
-    // harmless. A displaced previous assignee loses its binding here so a
-    // reassignment cannot leave two sessions holding authority for one node.
-    if let Some(ref previous) = previous_assignee
-        && *previous != target_session
-    {
-        crate::tool::grant::clear_session_grant_for_task(previous, &swarm_id, &selected_task_id);
-    }
-    let assigned_grant = crate::tool::grant::Grant::from_node_kind(assigned_node_kind.as_deref());
-    if let Some((stale_swarm, stale_task)) = crate::tool::grant::install_assignment_grant(
-        &target_session,
-        assigned_grant,
-        &swarm_id,
-        &selected_task_id,
-    ) {
-        crate::logging::event_warn(
-            "SWARM_GRANT",
-            vec![
-                ("event".to_string(), "stale_grant_replaced".to_string()),
-                ("session".to_string(), target_session.clone()),
-                ("stale_swarm".to_string(), stale_swarm),
-                ("stale_task".to_string(), stale_task),
-            ],
-        );
-    }
 
     let swarm_state = SwarmState {
         members: Arc::clone(swarm_members),
