@@ -10,7 +10,6 @@ related:
   - crates/jcode-app-core/src/tool/ambient.rs
   - crates/jcode-app-core/src/tool/bash.rs
   - docs/issues/swarm-observability-status-and-wake-gaps.md
-  - docs/issues/background-task-cross-process-write-order.md
 ---
 
 # Scheduled wakeups and background commands cannot reliably resume self-dev sessions

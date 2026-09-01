@@ -21,6 +21,7 @@ use tokio::time::{Duration, Instant as TokioInstant, MissedTickBehavior};
 
 mod model;
 mod store;
+mod store_lock;
 
 pub use model::{
     BackgroundCleanupResult, BackgroundTaskEventKind, BackgroundTaskEventRecord,
@@ -312,6 +313,31 @@ impl BackgroundTaskManager {
             return status;
         }
 
+        if status.pid.is_none() {
+            return status;
+        }
+
+        let guard = match self.store.try_locked_for(&status.task_id) {
+            Ok(Some(guard)) => guard,
+            Ok(None) => return status,
+            Err(error) => {
+                crate::logging::error(&format!(
+                    "Detached finalize lock acquisition failed: {error:#}"
+                ));
+                return status;
+            }
+        };
+        status = match self.store.read_locked(&status.task_id, &guard).await {
+            Ok(Some(status)) => status,
+            Ok(None) => return status,
+            Err(error) => {
+                crate::logging::error(&format!("Detached finalize locked read failed: {error:#}"));
+                return status;
+            }
+        };
+        if status.status != BackgroundTaskStatus::Running || !status.detached {
+            return status;
+        }
         let Some(pid) = status.pid else {
             return status;
         };
@@ -356,7 +382,7 @@ impl BackgroundTaskManager {
         let terminal_status = status.clone();
         if let Err(error) = self
             .store
-            .write_terminal(&status.task_id, move |_| terminal_status)
+            .write_terminal_locked(&status.task_id, &guard, move |_| terminal_status)
             .await
         {
             crate::logging::error(&format!("Detached finalize persistence failed: {error:#}"));
@@ -439,6 +465,28 @@ impl BackgroundTaskManager {
             return status;
         }
 
+        let guard = match self.store.try_locked_for(&status.task_id) {
+            Ok(Some(guard)) => guard,
+            Ok(None) => return status,
+            Err(error) => {
+                crate::logging::error(&format!(
+                    "Orphan finalize lock acquisition failed: {error:#}"
+                ));
+                return status;
+            }
+        };
+        status = match self.store.read_locked(&status.task_id, &guard).await {
+            Ok(Some(status)) => status,
+            Ok(None) => return status,
+            Err(error) => {
+                crate::logging::error(&format!("Orphan finalize locked read failed: {error:#}"));
+                return status;
+            }
+        };
+        if !Self::status_is_reconcilable_orphan(&status) || self.is_live_task(&status.task_id) {
+            return status;
+        }
+
         let completed_at = Utc::now();
         let duration_secs = Self::status_duration_secs(&status.started_at, completed_at);
         let error =
@@ -457,7 +505,7 @@ impl BackgroundTaskManager {
         let terminal_status = status.clone();
         if let Err(error) = self
             .store
-            .write_terminal(&status.task_id, move |_| terminal_status)
+            .write_terminal_locked(&status.task_id, &guard, move |_| terminal_status)
             .await
         {
             crate::logging::error(&format!("Orphan finalize persistence failed: {error:#}"));
@@ -518,8 +566,10 @@ impl BackgroundTaskManager {
             if self.tasks.read().await.contains_key(&status.task_id) {
                 continue;
             }
-            self.finalize_orphaned_status_if_needed(status, &path).await;
-            reconciled += 1;
+            let finalized = self.finalize_orphaned_status_if_needed(status, &path).await;
+            if finalized.status != BackgroundTaskStatus::Running {
+                reconciled += 1;
+            }
         }
         reconciled
     }
@@ -1915,5 +1965,7 @@ pub fn global() -> &'static BackgroundTaskManager {
     BACKGROUND_MANAGER.get_or_init(BackgroundTaskManager::new)
 }
 
+#[cfg(test)]
+mod store_cross_process_tests;
 #[cfg(test)]
 mod tests;

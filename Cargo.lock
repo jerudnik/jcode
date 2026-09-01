@@ -3429,6 +3429,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "dirs",
+ "fs2",
  "futures",
  "hex",
  "image",
