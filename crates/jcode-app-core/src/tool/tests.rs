@@ -66,6 +66,107 @@ fn test_resolve_skill_aliases_to_skill_manage() {
     assert_eq!(Registry::resolve_tool_name("skill_manage"), "skill_manage");
 }
 
+fn direct_tool_context(test_name: &str) -> ToolContext {
+    ToolContext {
+        session_id: format!("tool-registry-{test_name}"),
+        message_id: "message".to_string(),
+        tool_call_id: "call".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    }
+}
+
+#[tokio::test]
+async fn aliased_schedule_contract_error_echoes_bounded_backing_schema() {
+    let registry = Registry::empty();
+    registry
+        .register(
+            "schedule".to_string(),
+            Arc::new(ambient::ScheduleTool::new()),
+        )
+        .await;
+
+    let error = registry
+        .execute(
+            "ScheduleWakeup",
+            serde_json::json!({
+                "delaySeconds": 60,
+                "reason": "continue work",
+                "prompt": "resume the task"
+            }),
+            direct_tool_context("schedule-schema-echo"),
+        )
+        .await
+        .expect_err("legacy ScheduleWakeup input must fail the backing contract");
+    let text = error.to_string();
+
+    assert!(
+        text.contains("task is required for action=create"),
+        "{text}"
+    );
+    let marker = "Backing tool 'schedule' parameters schema: ";
+    let schema = text
+        .split_once(marker)
+        .map(|(_, schema)| schema)
+        .unwrap_or_else(|| panic!("missing backing schema from aliased error: {text}"));
+    for field in ["\"task\"", "\"wake_in_minutes\"", "\"wake_at\""] {
+        assert!(schema.contains(field), "missing {field} in {schema}");
+    }
+    assert!(
+        schema.chars().count() <= Registry::INPUT_SCHEMA_SUMMARY_MAX_CHARS,
+        "schema summary exceeded {} characters: {}",
+        Registry::INPUT_SCHEMA_SUMMARY_MAX_CHARS,
+        schema.chars().count()
+    );
+}
+
+struct OperationalFailureTool;
+
+#[async_trait]
+impl Tool for OperationalFailureTool {
+    fn name(&self) -> &str {
+        "bash"
+    }
+
+    fn description(&self) -> &str {
+        "test operational failure"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"]
+        })
+    }
+
+    async fn execute(&self, _input: Value, _ctx: ToolContext) -> Result<ToolOutput> {
+        Err(anyhow::anyhow!("process exited with status 17"))
+    }
+}
+
+#[tokio::test]
+async fn aliased_operational_error_does_not_echo_backing_schema() {
+    let registry = Registry::empty();
+    registry
+        .register("bash".to_string(), Arc::new(OperationalFailureTool))
+        .await;
+
+    let error = registry
+        .execute(
+            "Bash",
+            serde_json::json!({"command": "exit 17"}),
+            direct_tool_context("operational-error"),
+        )
+        .await
+        .expect_err("mock tool always fails");
+    let text = error.to_string();
+    assert_eq!(text, "process exited with status 17");
+    assert!(!text.contains("parameters schema"));
+}
+
 #[tokio::test]
 async fn test_discover_tools_not_registered_when_sponsors_disabled() {
     // sponsors.enabled defaults to false; the discovery tool must not exist.

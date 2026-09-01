@@ -10,3 +10,11 @@ jcode-message-types = { path = "../jcode-message-types" }
 jcode-provider-core = { path = "../jcode-provider-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+anyhow = "1"
+async-trait = "0.1"
+jcode-app-core = { path = "../jcode-app-core", default-features = false }
+jcode-tool-types = { path = "../jcode-tool-types" }
+serde_ignored = "0.1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
