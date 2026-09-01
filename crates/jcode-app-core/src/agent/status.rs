@@ -157,6 +157,15 @@ impl Agent {
         self.provider.display_name()
     }
 
+    /// Normalized provider profile identity for evidence events.
+    ///
+    /// This is not `name()`, which identifies the transport implementation
+    /// (`"openrouter"` for direct OpenAI-compatible profiles), or
+    /// `display_name()`, which is a human-facing label such as `"Z.AI"`.
+    pub fn evidence_provider(&self) -> String {
+        self.provider.provider_identity()
+    }
+
     pub fn provider_model(&self) -> String {
         self.provider.model().to_string()
     }

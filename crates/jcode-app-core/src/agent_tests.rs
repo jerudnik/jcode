@@ -61,6 +61,11 @@ struct ScriptedEvidenceProvider {
 }
 
 #[derive(Clone)]
+struct ProfileIdentityEvidenceProvider {
+    inner: ScriptedEvidenceProvider,
+}
+
+#[derive(Clone)]
 struct RetryEvidenceProvider {
     attempts: Arc<Mutex<VecDeque<ScriptedProviderAttempt>>>,
 }
@@ -275,6 +280,37 @@ impl Provider for ScriptedEvidenceProvider {
 }
 
 #[async_trait]
+impl Provider for ProfileIdentityEvidenceProvider {
+    async fn complete(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+        system: &str,
+        resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        self.inner
+            .complete(messages, tools, system, resume_session_id)
+            .await
+    }
+
+    fn name(&self) -> &str {
+        "openrouter"
+    }
+
+    fn provider_identity(&self) -> String {
+        "zai".to_string()
+    }
+
+    fn model(&self) -> String {
+        "r12-fixture-model".to_string()
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(self.clone())
+    }
+}
+
+#[async_trait]
 impl Provider for RetryEvidenceProvider {
     async fn complete(
         &self,
@@ -343,6 +379,13 @@ async fn fixture_agent(provider: Arc<dyn Provider>) -> Agent {
 
 async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
     fixture_agent(Arc::new(ScriptedEvidenceProvider { events })).await
+}
+
+async fn profile_identity_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
+    fixture_agent(Arc::new(ProfileIdentityEvidenceProvider {
+        inner: ScriptedEvidenceProvider { events },
+    }))
+    .await
 }
 
 async fn retry_agent(attempts: Vec<ScriptedProviderAttempt>) -> Agent {
@@ -611,6 +654,31 @@ fn assert_provider_response(
     );
 }
 
+fn assert_profile_identity_evidence(events: &[SessionLogEvent]) {
+    assert_eq!(
+        events.len(),
+        4,
+        "successful fixture must persist four events"
+    );
+    let provider_request_id = request_id(&events[1], "zai", "r12-fixture-model");
+    assert_provider_response(
+        &events[2],
+        &provider_request_id,
+        "zai",
+        "r12-fixture-model",
+        SessionLogStatus::Ok,
+        None,
+    );
+    for event in &events[1..=2] {
+        let provider = match &event.kind {
+            SessionLogEventKind::ProviderRequest { provider, .. }
+            | SessionLogEventKind::ProviderResponse { provider, .. } => provider,
+            other => panic!("expected provider evidence event, got {other:?}"),
+        };
+        assert_ne!(provider, "openrouter");
+    }
+}
+
 fn assert_turn_finished(
     event: &SessionLogEvent,
     expected_status: SessionLogStatus,
@@ -851,6 +919,58 @@ async fn r12_no_tool_turn_emits_and_persists_exactly_one_terminal_provider_respo
         replayed, events,
         "trailing malformed line must not fabricate completion"
     );
+}
+
+#[tokio::test]
+async fn evidence_uses_profile_identity_on_blocking_and_mpsc_turns() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let successful_events = || {
+        vec![
+            ScriptedProviderEvent::Event(StreamEvent::TextDelta("fixture answer".to_string())),
+            ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                stop_reason: Some("end_turn".to_string()),
+            }),
+        ]
+    };
+
+    let mut blocking_agent = profile_identity_agent(successful_events()).await;
+    let blocking_session_id = blocking_agent.session_id().to_string();
+    let output = blocking_agent
+        .run_once_capture("profile identity blocking")
+        .await
+        .expect("blocking turn should succeed");
+    assert_eq!(output, "fixture answer");
+    let blocking_events = crate::session::read_session_evidence(&blocking_session_id).unwrap();
+
+    let mut mpsc_agent = profile_identity_agent(successful_events()).await;
+    let mpsc_session_id = mpsc_agent.session_id().to_string();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    mpsc_agent
+        .run_once_streaming_mpsc("profile identity mpsc", Vec::new(), None, tx)
+        .await
+        .expect("mpsc turn should succeed");
+    let mpsc_events = crate::session::read_session_evidence(&mpsc_session_id).unwrap();
+
+    let emitted_providers = blocking_events
+        .iter()
+        .chain(&mpsc_events)
+        .filter_map(|event| match &event.kind {
+            SessionLogEventKind::ProviderRequest { provider, .. }
+            | SessionLogEventKind::ProviderResponse { provider, .. } => Some(provider.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        emitted_providers,
+        vec!["zai", "zai", "zai", "zai"],
+        "blocking and mpsc requests and responses must all use profile identity"
+    );
+
+    assert_profile_identity_evidence(&blocking_events);
+    assert_profile_identity_evidence(&mpsc_events);
 }
 
 #[tokio::test]
