@@ -1,5 +1,8 @@
-//! The ambient tier gate: which sessions are unattended, and what an
-//! unattended agent may do without a human.
+//! Ambient action tiers rank the risk of unattended tool actions.
+//!
+//! These tiers are not assignment grants. Assignment grants define a plan
+//! worker's authority and are enforced separately in `crate::tool::grant`.
+//! This module only decides what an ambient session may do without a human.
 //!
 //! A session is "ambient" for as long as it is registered here. Registration is
 //! the gate's ONLY key, which is why `AmbientSessionGuard` exists: unattended

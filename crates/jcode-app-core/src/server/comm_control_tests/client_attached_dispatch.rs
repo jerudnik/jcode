@@ -191,12 +191,12 @@ async fn assign_task_to_client_attached_session_skips_server_side_run() {
 }
 
 #[tokio::test]
-async fn assign_task_to_client_attached_session_installs_capability_tier() {
+async fn assign_task_to_client_attached_session_installs_grant() {
     let (_env, _runtime) = RuntimeEnvGuard::new();
-    let swarm_id = "swarm-client-attached-tier";
-    let requester = "coord-tier";
-    // Unique id: the capability map is process-global across parallel tests.
-    let worker = format!("worker-attached-tier-{}", std::process::id());
+    let swarm_id = "swarm-client-attached-grant";
+    let requester = "coord-grant";
+    // Unique id: the grant map is process-global across parallel tests.
+    let worker = format!("worker-attached-grant-{}", std::process::id());
     let (client_tx, mut client_rx) = mpsc::unbounded_channel();
 
     let worker_agent = test_agent().await;
@@ -208,9 +208,9 @@ async fn assign_task_to_client_attached_session_installs_capability_tier() {
 
     let (disconnect_tx, _disconnect_rx) = mpsc::unbounded_channel();
     let client_connections = Arc::new(RwLock::new(HashMap::from([(
-        "conn-tier-1".to_string(),
+        "conn-grant-1".to_string(),
         crate::server::ClientConnectionInfo {
-            client_id: "conn-tier-1".to_string(),
+            client_id: "conn-grant-1".to_string(),
             session_id: worker.clone(),
             client_instance_id: None,
             debug_client_id: None,
@@ -295,25 +295,24 @@ async fn assign_task_to_client_attached_session_installs_capability_tier() {
 
     // The security contract under review: a client-attached (headed) assignee
     // never reaches `spawn_assigned_task_run`, so the assignment itself must
-    // install the node-kind tier. Without this, headed explore/verify workers
+    // install the node-kind grant. Without this, headed explore/verify workers
     // keep full write/bash authority (fail-open).
-    let (tier, bound_swarm, bound_task) =
-        crate::tool::capability_tier::session_capability_binding(&worker)
-            .expect("assignment must install a capability tier for a headed assignee");
-    assert_eq!(tier, crate::tool::capability_tier::CapabilityTier::ReadOnly);
+    let (grant, bound_swarm, bound_task) = crate::tool::grant::session_grant_binding(&worker)
+        .expect("assignment must install a grant for a headed assignee");
+    assert_eq!(grant, crate::tool::grant::Grant::ReadOnly);
     assert_eq!(bound_swarm, swarm_id);
     assert_eq!(bound_task, "scout");
 
     // And the binding is enforced, not just recorded.
     assert!(
-        crate::tool::capability_tier::authorize_tool_call(
+        crate::tool::grant::authorize_tool_call(
             &worker,
             "bash",
             &serde_json::json!({"command": "echo hi"})
         )
         .is_err(),
-        "explore-tier headed worker must be denied write/bash tools"
+        "explore-grant headed worker must be denied write/bash tools"
     );
 
-    crate::tool::capability_tier::clear_session_capability(&worker);
+    crate::tool::grant::clear_session_grant(&worker);
 }

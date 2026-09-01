@@ -6,12 +6,12 @@ use super::{
     fanout_session_event, persist_swarm_state_for, record_swarm_event,
 };
 use crate::protocol::{NotificationType, ServerEvent, TaskGraphNodeSpec};
+use jcode_plan::NodeMeta;
 use jcode_plan::bridge::{apply_task_graph, parse_kind, to_task_graph};
 use jcode_plan::dag::{
     self, BudgetViolation, DagError, GraphBudget, HandoffArtifact, NodeSpec, NodeStatus,
     PlanSafetyLedger, PlanSafetyPolicy, PlanSafetyStatus, TaskGraph,
 };
-use jcode_plan::NodeMeta;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -808,7 +808,7 @@ pub(super) async fn handle_comm_complete_node(
             // The node is terminal: every session's authority derived from it
             // ends now, including a headed assignee that never runs through
             // the server-side turn loop and its run-end cleanup.
-            crate::tool::capability_tier::clear_task_capability(&swarm_id, &node_id);
+            crate::tool::grant::clear_assignment_grant(&swarm_id, &node_id);
             // File evidence before finalize publishes the derived done state.
             super::control_log_sync::append_control_event(
                 &swarm_id,
