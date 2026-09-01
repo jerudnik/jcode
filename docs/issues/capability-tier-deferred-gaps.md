@@ -5,7 +5,7 @@ priority: medium
 owner: maintainers
 opened: 2026-08-30
 related:
-  - crates/jcode-app-core/src/tool/capability_tier.rs
+  - crates/jcode-app-core/src/tool/grant.rs
   - docs/issues/scheduled-wake-and-background-resume-broken.md
 ---
 
@@ -13,7 +13,7 @@ related:
 
 PR for `automation/w3-capability-tiers-impl` added server-derived capability
 tiers: the server maps a task-graph node kind to a tier
-(`crates/jcode-app-core/src/tool/capability_tier.rs`), installs it at
+(`crates/jcode-app-core/src/tool/grant.rs`), installs it at
 assignment, and denies tool calls above the tier before execution. Layers
 only deny, never grant, and unknown tools fail closed. These gaps were
 deliberately deferred:

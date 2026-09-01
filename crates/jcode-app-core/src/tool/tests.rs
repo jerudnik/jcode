@@ -1314,18 +1314,18 @@ fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
 }
 
 #[tokio::test]
-async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
+async fn registry_execute_denies_mutation_for_read_only_grant() {
     let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     let temp = tempfile::TempDir::new().expect("temp dir");
     let target = temp.path().join("forbidden.txt");
 
-    let session_id = "capability-tier-read-only-worker";
-    crate::tool::capability_tier::install_session_capability(
+    let session_id = "grant-read-only-worker";
+    crate::tool::grant::install_assignment_grant(
         session_id,
-        crate::tool::capability_tier::CapabilityTier::ReadOnly,
-        "tier-test-swarm",
+        crate::tool::grant::Grant::ReadOnly,
+        "grant-test-swarm",
         "explore-node",
     );
 
@@ -1372,7 +1372,7 @@ async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
         )
         .await;
 
-    crate::tool::capability_tier::clear_session_capability(session_id);
+    crate::tool::grant::clear_session_grant(session_id);
 
     let cleared_result = registry
         .execute(
@@ -1388,13 +1388,13 @@ async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
     let error = write_result.expect_err("read-only worker write must be refused");
     assert!(
         error.to_string().contains("read-only"),
-        "refusal must name the tier: {error}"
+        "refusal must name the grant: {error}"
     );
     let alias_error = alias_result.expect_err("alias write must be refused too");
     assert!(alias_error.to_string().contains("read-only"));
     bash_result.expect_err("read-only worker shell must be refused");
     read_result.expect("read tools must remain allowed");
-    cleared_result.expect("write must succeed after the tier is cleared");
+    cleared_result.expect("write must succeed after the grant is cleared");
     assert_eq!(
         std::fs::read_to_string(&target).expect("file after clear"),
         "allowed after clear\n",
@@ -1403,18 +1403,18 @@ async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
 }
 
 #[tokio::test]
-async fn registry_execute_verify_tier_allows_shell_but_not_mutation() {
+async fn registry_execute_verify_grant_allows_shell_but_not_mutation() {
     let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     let temp = tempfile::TempDir::new().expect("temp dir");
     let target = temp.path().join("forbidden.txt");
 
-    let session_id = "capability-tier-verify-worker";
-    crate::tool::capability_tier::install_session_capability(
+    let session_id = "grant-verify-worker";
+    crate::tool::grant::install_assignment_grant(
         session_id,
-        crate::tool::capability_tier::CapabilityTier::Verify,
-        "tier-test-swarm",
+        crate::tool::grant::Grant::Verify,
+        "grant-test-swarm",
         "verify-node",
     );
 
@@ -1442,7 +1442,7 @@ async fn registry_execute_verify_tier_allows_shell_but_not_mutation() {
         )
         .await;
 
-    crate::tool::capability_tier::clear_session_capability(session_id);
+    crate::tool::grant::clear_session_grant(session_id);
 
     bash_result.expect("verify worker must be able to run builds and tests");
     write_result.expect_err("verify worker file mutation must be refused");

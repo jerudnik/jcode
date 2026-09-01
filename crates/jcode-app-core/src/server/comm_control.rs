@@ -687,13 +687,11 @@ async fn reclaim_stale_plan_assignments(
                     ),
                 ],
             );
-            // The departed assignee's tier binding dies with its assignment,
+            // The departed assignee's grant binding dies with its assignment,
             // so a later revival of that session id cannot inherit authority
             // for a node it no longer owns.
             if let Some(ref departed) = item.assigned_to {
-                crate::tool::capability_tier::clear_session_capability_for_task(
-                    departed, swarm_id, &item.id,
-                );
+                crate::tool::grant::clear_session_grant_for_task(departed, swarm_id, &item.id);
             }
             item.assigned_to = None;
             reclaimed += 1;
@@ -914,16 +912,18 @@ fn spawn_assigned_task_run(
         // The worker's authority for this run comes from its node's kind, not
         // from anything in the assignment prompt. Installed before the turn
         // starts and cleared when it ends, so a reused worker never keeps a
-        // previous node's tier.
-        let tier =
-            crate::tool::capability_tier::CapabilityTier::from_node_kind(node_kind.as_deref());
-        if let Some((stale_swarm, stale_task)) = crate::tool::capability_tier::
-            install_session_capability(&target_session, tier, &swarm_id, &task_id)
-        {
+        // previous node's grant.
+        let grant = crate::tool::grant::Grant::from_node_kind(node_kind.as_deref());
+        if let Some((stale_swarm, stale_task)) = crate::tool::grant::install_assignment_grant(
+            &target_session,
+            grant,
+            &swarm_id,
+            &task_id,
+        ) {
             crate::logging::event_warn(
-                "SWARM_CAPABILITY",
+                "SWARM_GRANT",
                 vec![
-                    ("event".to_string(), "stale_tier_replaced".to_string()),
+                    ("event".to_string(), "stale_grant_replaced".to_string()),
                     ("session".to_string(), target_session.clone()),
                     ("stale_swarm".to_string(), stale_swarm),
                     ("stale_task".to_string(), stale_task),
@@ -1226,7 +1226,7 @@ fn spawn_assigned_task_run(
                 .await;
             }
         }
-        // The tier covers the assignment, not just this turn. Checked after
+        // The grant covers the assignment, not just this turn. Checked after
         // the turn-end plan writes above so terminal outcomes (done, failed,
         // requeued elsewhere) clear it, while a node this session still holds
         // non-terminally — a composite awaiting synthesis, or a wake/resume
@@ -1242,11 +1242,7 @@ fn spawn_assigned_task_run(
             })
         };
         if !assignment_still_held {
-            crate::tool::capability_tier::clear_session_capability_for_task(
-                &target_session,
-                &swarm_id,
-                &task_id,
-            );
+            crate::tool::grant::clear_session_grant_for_task(&target_session, &swarm_id, &task_id);
         }
     });
 }
@@ -1879,7 +1875,7 @@ async fn handle_comm_assign_task_with_mode(
         return;
     };
 
-    // The tier binds at assignment time, for the assignment's lifetime. This
+    // The grant binds at assignment time, for the assignment's lifetime. This
     // is the only install point that covers a client-attached (headed)
     // assignee, which never passes through `spawn_assigned_task_run`; the
     // headless run re-installs the identical binding at turn start, which is
@@ -1888,25 +1884,19 @@ async fn handle_comm_assign_task_with_mode(
     if let Some(ref previous) = previous_assignee
         && *previous != target_session
     {
-        crate::tool::capability_tier::clear_session_capability_for_task(
-            previous,
-            &swarm_id,
-            &selected_task_id,
-        );
+        crate::tool::grant::clear_session_grant_for_task(previous, &swarm_id, &selected_task_id);
     }
-    let assigned_tier = crate::tool::capability_tier::CapabilityTier::from_node_kind(
-        assigned_node_kind.as_deref(),
-    );
-    if let Some((stale_swarm, stale_task)) = crate::tool::capability_tier::install_session_capability(
+    let assigned_grant = crate::tool::grant::Grant::from_node_kind(assigned_node_kind.as_deref());
+    if let Some((stale_swarm, stale_task)) = crate::tool::grant::install_assignment_grant(
         &target_session,
-        assigned_tier,
+        assigned_grant,
         &swarm_id,
         &selected_task_id,
     ) {
         crate::logging::event_warn(
-            "SWARM_CAPABILITY",
+            "SWARM_GRANT",
             vec![
-                ("event".to_string(), "stale_tier_replaced".to_string()),
+                ("event".to_string(), "stale_grant_replaced".to_string()),
                 ("session".to_string(), target_session.clone()),
                 ("stale_swarm".to_string(), stale_swarm),
                 ("stale_task".to_string(), stale_task),

@@ -531,10 +531,10 @@ pub(super) async fn cleanup_client_connection(
         };
         crate::session_metrics::forget(client_session_id);
         crate::session_effort::forget_session_effort(client_session_id);
-        // The capability binding follows the same lifetime as the other
-        // per-session state: gone with the member, so a reused session id
-        // cannot inherit a departed worker's tier.
-        crate::tool::capability_tier::clear_session_capability(client_session_id);
+        // The grant binding follows the same lifetime as the other per-session
+        // state: gone with the member, so a reused session id cannot inherit a
+        // departed worker's grant.
+        crate::tool::grant::clear_session_grant(client_session_id);
 
         if let Some(ref swarm_id) = swarm_id {
             record_swarm_event(
