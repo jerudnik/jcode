@@ -192,7 +192,7 @@ impl Agent {
             let provider_correlation = self.provider_evidence_correlation();
             self.append_session_evidence_with_correlation(
                 jcode_session_types::SessionLogEventKind::ProviderRequest {
-                    provider: provider.name().to_string(),
+                    provider: self.evidence_provider(),
                     model: provider.model(),
                     route: self.session.route_api_method.clone(),
                     message_count: send_messages.len(),
@@ -230,7 +230,6 @@ impl Agent {
                                 timeout
                             ));
                             return Err(self.append_and_classify_provider_error(
-                                provider.name(),
                                 provider.model(),
                                 api_start,
                                 anyhow::anyhow!(
@@ -246,7 +245,6 @@ impl Agent {
                                 "Graceful shutdown/cancel before API stream opened - stopping turn",
                             );
                             return Err(self.append_interrupted_turn_evidence(
-                                provider.name(),
                                 provider.model(),
                                 api_start,
                                 provider_correlation.clone(),
@@ -258,7 +256,6 @@ impl Agent {
                                 Err(e) => {
                                     if self.try_auto_compact_after_context_limit(&e.to_string()) {
                                         self.append_provider_error_response(
-                                            provider.name(),
                                             provider.model(),
                                             api_start,
                                             &e,
@@ -292,7 +289,6 @@ impl Agent {
                                         continue;
                                     }
                                     return Err(self.append_and_classify_provider_error(
-                                        provider.name(),
                                         provider.model(),
                                         api_start,
                                         e,
@@ -390,7 +386,6 @@ impl Agent {
                             "Graceful shutdown/cancel while waiting for API stream event - stopping stream",
                         );
                         return Err(self.append_interrupted_turn_evidence(
-                            provider.name(),
                             provider.model(),
                             api_start,
                             provider_correlation.clone(),
@@ -440,7 +435,6 @@ impl Agent {
                                 ],
                             );
                             self.append_provider_error_response(
-                                provider.name(),
                                 provider.model(),
                                 api_start,
                                 &e,
@@ -482,7 +476,6 @@ impl Agent {
                             vec![("mode", "mpsc".to_string()), ("error", err_str)],
                         );
                         return Err(self.append_and_classify_provider_error(
-                            provider.name(),
                             provider.model(),
                             api_start,
                             e,
@@ -914,7 +907,6 @@ impl Agent {
                                 ],
                             );
                             self.append_provider_error_response(
-                                provider.name(),
                                 provider.model(),
                                 api_start,
                                 &error,
@@ -967,7 +959,6 @@ impl Agent {
                         let error =
                             anyhow::Error::new(StreamError::new(message.clone(), retry_after_secs));
                         self.append_provider_error_response(
-                            provider.name(),
                             provider.model(),
                             api_start,
                             &error,
@@ -1020,7 +1011,7 @@ impl Agent {
 
             self.append_session_evidence_with_correlation(
                 jcode_session_types::SessionLogEventKind::ProviderResponse {
-                    provider: provider.name().to_string(),
+                    provider: self.evidence_provider(),
                     model: provider.model(),
                     status: jcode_session_types::SessionLogStatus::Ok,
                     duration_ms: api_elapsed.as_millis() as u64,
