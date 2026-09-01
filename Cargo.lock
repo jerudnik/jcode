@@ -3727,11 +3727,17 @@ dependencies = [
 name = "jcode-provider-anthropic"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "jcode-app-core",
  "jcode-logging",
  "jcode-message-types",
  "jcode-provider-core",
+ "jcode-tool-types",
  "serde",
+ "serde_ignored",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4215,6 +4221,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "jcode-storage",
+]
+
+[[package]]
+name = "jcode-test-lane"
+version = "0.1.0"
+dependencies = [
+ "jcode-storage",
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
