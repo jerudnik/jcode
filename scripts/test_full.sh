@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cargo_exec="$repo_root/scripts/cargo_exec.sh"
 
+if [[ -z "${JCODE_TEST_LANE_HELD:-}" ]]; then
+  exec "$repo_root/scripts/test_lane.sh" \
+    --label "${JCODE_TEST_LANE_LABEL:-test_full}" \
+    -- "$0" "$@"
+fi
+
 run_cargo() {
   (cd "$repo_root" && "$cargo_exec" "$@")
 }
