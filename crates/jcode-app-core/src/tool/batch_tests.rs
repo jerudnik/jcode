@@ -1,6 +1,6 @@
 use super::*;
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 
 #[test]
 fn test_normalize_flat_params() {
@@ -103,6 +103,7 @@ fn test_normalize_arguments_aliases_to_parameters() {
 #[test]
 fn test_schema_only_requires_tool() {
     let schema = BatchTool::new(Registry {
+        swarm_state: Arc::new(StdRwLock::new(None)),
         tools: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         skills: std::sync::Arc::new(tokio::sync::RwLock::new(
             crate::skill::SkillRegistry::default(),

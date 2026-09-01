@@ -43,7 +43,7 @@ pub(super) async fn create_headless_session(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
-    _swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     soft_interrupt_queues: &SessionInterruptQueues,
     selfdev_requested: bool,
     model_override: Option<String>,
@@ -76,7 +76,16 @@ pub(super) async fn create_headless_session(
     };
 
     let provider = provider_template.fork();
-    let registry = Registry::new(provider.clone()).await;
+    // Attach shared swarm state so grant enforcement (assignment tiers) applies
+    // to headless workers too; a None swarm_state classifies as Unrestricted.
+    let registry = Registry::new(provider.clone())
+        .await
+        .with_swarm_state(crate::server::SwarmState {
+            members: Arc::clone(swarm_members),
+            swarms_by_id: Arc::clone(swarms_by_id),
+            plans: Arc::clone(swarm_plans),
+            coordinators: Arc::clone(swarm_coordinators),
+        });
 
     registry.enable_memory_test_mode().await;
 

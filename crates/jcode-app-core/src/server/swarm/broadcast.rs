@@ -341,6 +341,15 @@ pub(in crate::server) async fn rename_plan_participant(
                 item.assigned_to = Some(new_session_id.to_string());
             }
         }
+        // Keep task_progress bindings in sync with the rename so
+        // assignment_grant_for_session's dual check (assigned_to AND
+        // assigned_session_id) still classifies the worker as Assigned
+        // after a headed clear/resume.
+        for progress in vp.task_progress.values_mut() {
+            if progress.assigned_session_id.as_deref() == Some(old_session_id) {
+                progress.assigned_session_id = Some(new_session_id.to_string());
+            }
+        }
     }
 }
 

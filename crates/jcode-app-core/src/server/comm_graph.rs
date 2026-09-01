@@ -793,6 +793,11 @@ pub(super) async fn handle_comm_complete_node(
         match dag::complete_node(&mut graph, &node_id, &req_session_id, artifact) {
             Ok(()) => {
                 apply_task_graph(plan, &graph);
+                if let Some(progress) = plan.task_progress.get_mut(&node_id) {
+                    progress.assignment_grant = None;
+                    progress.assignment_epoch =
+                        Some(progress.assignment_epoch.unwrap_or(0).saturating_add(1));
+                }
                 if salvage_takeover_allowed {
                     force_completion_closes_graph_growth(plan);
                 }
@@ -805,10 +810,6 @@ pub(super) async fn handle_comm_complete_node(
 
     match result {
         Ok(()) => {
-            // The node is terminal: every session's authority derived from it
-            // ends now, including a headed assignee that never runs through
-            // the server-side turn loop and its run-end cleanup.
-            crate::tool::grant::clear_assignment_grant(&swarm_id, &node_id);
             // File evidence before finalize publishes the derived done state.
             super::control_log_sync::append_control_event(
                 &swarm_id,

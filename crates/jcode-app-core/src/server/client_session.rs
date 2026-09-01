@@ -239,10 +239,6 @@ pub(super) async fn handle_clear_session(
         register_background_tool_signal(&new_id, agent_guard.background_tool_signal());
     }
     remove_session_interrupt_queue(soft_interrupt_queues, client_session_id).await;
-    // The grant binding follows the session across the rename, so a
-    // still-assigned worker keeps its node's grant under the new id instead of
-    // regaining full authority.
-    crate::tool::grant::rename_session_grant(client_session_id, &new_id);
 
     let swarm_id_for_update = {
         let mut members = swarm_members.write().await;
@@ -1334,7 +1330,6 @@ pub(super) async fn handle_resume_session(
                 .await;
             // As above: the grant binding is per-session state and must track
             // the rename, or a reattached assigned worker escapes its grant.
-            crate::tool::grant::rename_session_grant(&old_session_id, &session_id);
             {
                 let mut connections = client_connections.write().await;
                 if let Some(info) = connections.get_mut(client_connection_id) {
