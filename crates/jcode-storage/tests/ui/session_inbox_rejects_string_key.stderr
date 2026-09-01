@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/session_inbox_rejects_string_key.rs:4:51
+  |
+4 |     let _ = durable_path::<tag::SessionInboxItem>("nested/session".to_owned());
+  |             ------------------------------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `SessionInboxId`, found `String`
+  |             |
+  |             arguments to this function are incorrect
+  |
+note: function defined here
+ --> src/artifacts.rs
+  |
+  | pub fn durable_path<A: DurableArtifact>(key: A::Key) -> Result<DurablePath> {
+  |        ^^^^^^^^^^^^
