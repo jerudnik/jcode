@@ -1,0 +1,21 @@
+error[E0277]: the trait bound `jcode_storage::tag::ClaudeOauth: DurableArtifact` is not satisfied
+ --> tests/ui/durable_path_rejects_claude_oauth.rs:4:28
+  |
+4 |     let _ = durable_path::<tag::ClaudeOauth>(());
+  |                            ^^^^^^^^^^^^^^^^ the trait `DurableArtifact` is not implemented for `jcode_storage::tag::ClaudeOauth`
+  |
+  = help: the following other types implement trait `DurableArtifact`:
+            jcode_storage::tag::AmbientQueue
+            jcode_storage::tag::AmbientState
+            jcode_storage::tag::AmbientTranscripts
+            jcode_storage::tag::AuthRefreshState
+            jcode_storage::tag::BackgroundTaskStatus
+            jcode_storage::tag::ConfigToml
+            jcode_storage::tag::DebugControl
+            jcode_storage::tag::DeliveryCampaign
+          and $N others
+note: required by a bound in `durable_path`
+ --> src/artifacts.rs
+  |
+  | pub fn durable_path<A: DurableArtifact>(key: A::Key) -> Result<DurablePath> {
+  |                        ^^^^^^^^^^^^^^^ required by this bound in `durable_path`

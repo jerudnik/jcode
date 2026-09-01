@@ -9,6 +9,15 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 mod active_pids;
+mod artifacts;
+
+pub use artifacts::{
+    ARTIFACTS, ArtifactId, ArtifactKey, ArtifactSpec, ArtifactTag, ArtifactTier, CanonicalRoot,
+    DurableArtifact, DurableKind, DurablePath, ExternalArtifact, LegacyLocation, LegacyRoot,
+    ModelCatalogId, PinnedLegacyPath, ProviderEnvId, ReadOnlyPath, SecretPath, SensitiveArtifact,
+    SessionInboxId, TemporaryArtifact, TemporaryKind, TemporaryPath, canonical_tier_for_path,
+    durable_path, external_secret, secret_path, tag, temporary_path,
+};
 
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
