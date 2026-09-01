@@ -5,7 +5,6 @@ mod bash;
 mod batch;
 mod bg;
 mod browser;
-pub(crate) mod capability_tier;
 mod communicate;
 #[cfg(target_os = "macos")]
 mod computer;
@@ -16,6 +15,7 @@ mod edit;
 mod execution_scope;
 mod gmail;
 mod goal;
+pub(crate) mod grant;
 mod invalid;
 mod ls;
 pub mod mcp;
@@ -622,18 +622,17 @@ impl Registry {
                 return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved_name));
             }
         }
-        // Safety tier gate: an unattended (ambient) agent may not take a tier-2
-        // action without a human. Interactive sessions are never registered as
-        // ambient, so this is a no-op for them.
+        // Ambient action tier gate: rank unattended action risk, unlike the
+        // assignment grant below, which defines worker authority. Interactive
+        // sessions are never registered as ambient, so this is a no-op for them.
         ambient::check_ambient_action_tier(&ctx.session_id, resolved_name)?;
-        // Capability tier: an assigned plan worker's authority comes from its
-        // node's kind, installed server-side at assignment. Sessions without an
-        // installed tier pass through untouched.
-        if let Err(error) =
-            capability_tier::authorize_tool_call(&ctx.session_id, resolved_name, &input)
-        {
+        // Assignment grant: a plan worker's authority comes from its node kind,
+        // installed server-side at assignment. Sessions without an installed
+        // grant pass through untouched. This is distinct from the ambient action
+        // tier above, which ranks unattended action risk rather than authority.
+        if let Err(error) = grant::authorize_tool_call(&ctx.session_id, resolved_name, &input) {
             let mut fields =
-                Self::tool_lifecycle_fields("tier_blocked", name, resolved_name, &input, &ctx);
+                Self::tool_lifecycle_fields("grant_blocked", name, resolved_name, &input, &ctx);
             fields.push(("block_reason".to_string(), error.to_string()));
             crate::logging::event_warn("TOOL_LIFECYCLE", fields);
             return Err(error.into());
