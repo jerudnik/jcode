@@ -4218,6 +4218,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jcode-test-lane"
+version = "0.1.0"
+dependencies = [
+ "jcode-storage",
+ "libc",
+ "tempfile",
+]
+
+[[package]]
 name = "jcode-tool-core"
 version = "0.1.0"
 dependencies = [
