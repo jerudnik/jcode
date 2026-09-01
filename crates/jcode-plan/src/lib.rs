@@ -25,11 +25,40 @@ pub struct PlanItem {
     pub assigned_to: Option<String>,
 }
 
+/// Authority attached to a live plan assignment.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AssignmentGrant {
+    ReadOnly,
+    Verify,
+    Write,
+}
+
+impl AssignmentGrant {
+    pub fn from_node_kind(kind: Option<&str>) -> Self {
+        match kind {
+            None => Self::Write,
+            Some(kind) => match kind.trim().to_ascii_lowercase().as_str() {
+                "implement" | "fix" | "" => Self::Write,
+                "verify" => Self::Verify,
+                "explore" | "critique" | "synthesize" => Self::ReadOnly,
+                _ => Self::ReadOnly,
+            },
+        }
+    }
+}
+
 /// Durable progress associated with a swarm plan task.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SwarmTaskProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_session_id: Option<String>,
+    /// Grant captured once when this assignment is created. Reassignment
+    /// overwrites it from the node kind; no session-keyed authority copy exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignment_grant: Option<AssignmentGrant>,
+    /// Monotonic for this task. Assignment creation and release each bump it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignment_epoch: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignment_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

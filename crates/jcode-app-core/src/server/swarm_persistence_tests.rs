@@ -65,6 +65,8 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
             task_progress: HashMap::from([(
                 "task-1".to_string(),
                 SwarmTaskProgress {
+                    assignment_grant: None,
+                    assignment_epoch: None,
                     assigned_session_id: Some("session-1".to_string()),
                     assignment_summary: Some("do thing".to_string()),
                     assigned_at_unix_ms: Some(10),

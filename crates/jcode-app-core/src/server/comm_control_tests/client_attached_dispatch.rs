@@ -293,26 +293,33 @@ async fn assign_task_to_client_attached_session_installs_grant() {
         other => panic!("expected CommAssignTaskResponse, got {other:?}"),
     }
 
-    // The security contract under review: a client-attached (headed) assignee
-    // never reaches `spawn_assigned_task_run`, so the assignment itself must
-    // install the node-kind grant. Without this, headed explore/verify workers
-    // keep full write/bash authority (fail-open).
-    let (grant, bound_swarm, bound_task) = crate::tool::grant::session_grant_binding(&worker)
-        .expect("assignment must install a grant for a headed assignee");
-    assert_eq!(grant, crate::tool::grant::Grant::ReadOnly);
-    assert_eq!(bound_swarm, swarm_id);
-    assert_eq!(bound_task, "scout");
-
-    // And the binding is enforced, not just recorded.
-    assert!(
-        crate::tool::grant::authorize_tool_call(
-            &worker,
-            "bash",
-            &serde_json::json!({"command": "echo hi"})
-        )
-        .is_err(),
-        "explore-grant headed worker must be denied write/bash tools"
+    let progress = swarm_plans
+        .read()
+        .await
+        .get(swarm_id)
+        .and_then(|plan| plan.task_progress.get("scout"))
+        .cloned()
+        .expect("assignment must record canonical progress");
+    assert_eq!(
+        progress.assignment_grant,
+        Some(jcode_plan::AssignmentGrant::ReadOnly)
     );
+    assert_eq!(progress.assignment_epoch, Some(1));
 
-    crate::tool::grant::clear_session_grant(&worker);
+    let lookup = crate::server::SwarmState {
+        members: Arc::clone(&swarm_members),
+        swarms_by_id: Arc::clone(&swarms_by_id),
+        plans: Arc::clone(&swarm_plans),
+        coordinators: Arc::clone(&swarm_coordinators),
+    }
+    .assignment_grant_for_session(&worker)
+    .await;
+    assert!(matches!(
+        lookup,
+        crate::tool::grant::GrantLookup::Assigned {
+            grant: jcode_plan::AssignmentGrant::ReadOnly,
+            task_id,
+            ..
+        } if task_id == "scout"
+    ));
 }

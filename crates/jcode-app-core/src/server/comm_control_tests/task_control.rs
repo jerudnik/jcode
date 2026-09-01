@@ -406,6 +406,8 @@ async fn requeue_existing_assignment_preserves_prior_progress_history() {
             task_progress: HashMap::from([(
                 "requeue-me".to_string(),
                 crate::server::SwarmTaskProgress {
+                    assignment_grant: None,
+                    assignment_epoch: None,
                     assigned_session_id: Some(worker.to_string()),
                     assignment_summary: Some("original assignment".to_string()),
                     assigned_at_unix_ms: Some(1_000),
