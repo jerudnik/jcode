@@ -1,3 +1,7 @@
+#[allow(
+    deprecated,
+    reason = "parity coverage for the W23 compatibility bridge"
+)]
 use super::{
     broadcast_swarm_plan, broadcast_swarm_plan_with_previous, broadcast_swarm_status,
     member_status_is_dead, now_unix_ms, parse_swarm_tasks, refresh_swarm_task_staleness,
@@ -1254,6 +1258,10 @@ async fn refresh_swarm_task_staleness_marks_running_tasks_stale_and_heartbeat_re
 }
 
 #[test]
+#[allow(
+    deprecated,
+    reason = "parity coverage for the W23 compatibility bridge"
+)]
 fn member_status_is_dead_matches_terminal_non_success_states() {
     for status in ["failed", "stopped", "crashed"] {
         assert!(member_status_is_dead(status), "{status} should be dead");

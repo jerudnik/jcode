@@ -360,6 +360,11 @@ pub(in crate::server) fn swarm_terminal_member_gc_interval() -> Duration {
 /// Terminal members are historical records, not live agents. They remain
 /// visible temporarily for reports and diagnostics but must not consume the
 /// runaway-prevention spawn budget.
+#[deprecated(note = "use SwarmLifecycleStatus::is_terminal_state")]
+#[allow(
+    dead_code,
+    reason = "temporary compatibility bridge during W23 lifecycle migration"
+)]
 pub(in crate::server) fn member_status_is_terminal(status: &str) -> bool {
     jcode_swarm_core::MemberLifecycleState::from_compatibility_status(status).is_terminal()
 }
@@ -383,6 +388,7 @@ pub(in crate::server) fn expired_terminal_member_ids(
 /// Lifecycle statuses that mean a member can no longer drive an assignment:
 /// the session's agent loop is gone, so no heartbeat or turn end will ever
 /// arrive for tasks it holds.
+#[deprecated(note = "use SwarmLifecycleStatus::is_dead_state")]
 pub(in crate::server) fn member_status_is_dead(status: &str) -> bool {
     matches!(
         jcode_swarm_core::MemberLifecycleState::from_compatibility_status(status),
@@ -800,7 +806,7 @@ pub(in crate::server) async fn refresh_swarm_task_staleness(
                 let assignee_is_dead = match members.get(assignee) {
                     None => true,
                     Some(member) => {
-                        member_status_is_dead(&member.status)
+                        member.lifecycle.is_dead_state()
                             && member.last_status_change.elapsed() >= salvage_grace
                     }
                 };

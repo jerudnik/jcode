@@ -270,6 +270,53 @@ fn terminal_member_retention_preserves_recent_reports_and_prunes_expired_records
 }
 
 #[test]
+fn terminal_retention_round_trip_follows_canonical_lifecycle_when_mirror_is_stale() {
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut member = SwarmMember {
+        session_id: "session-stale-mirror".to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some("swarm-stale-mirror".to_string()),
+        swarm_enabled: true,
+        status: "spawned".to_string(),
+        lifecycle: SwarmLifecycleStatus::starting(1),
+        detail: Some("process disappeared".to_string()),
+        friendly_name: Some("marten".to_string()),
+        report_back_to_session_id: None,
+        latest_completion_report: None,
+        role: "agent".to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: true,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: None,
+        subagent_type: None,
+        initial_prompt_delivered: None,
+    };
+    assert!(member.apply_lifecycle_event(
+        MemberLifecycleEvent::ProcessLost {
+            reason: Some("process disappeared".to_string()),
+        },
+        2,
+    ));
+    member.status = "ready".to_string();
+
+    let loaded_at = 40_000_000;
+    let persisted = to_persisted_member(&member, loaded_at);
+    assert!(persisted.terminal_since_unix_ms.is_some());
+    assert_eq!(persisted.record.status.state, MemberLifecycleState::Lost);
+
+    let recovered = from_persisted_member(persisted, loaded_at, loaded_at, Duration::from_secs(60))
+        .expect("recent canonically terminal member remains inspectable");
+    assert_eq!(recovered.lifecycle.state, MemberLifecycleState::Lost);
+    assert_eq!(recovered.status, "lost");
+}
+
+#[test]
 fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
     let member = SwarmMember {
@@ -489,7 +536,7 @@ fn deep_plan_mode_and_node_meta_round_trip() {
         node_meta,
         max_nodes: Some(96),
         frozen: true,
-            safety_ledger: None,
+        safety_ledger: None,
     };
 
     persist_swarm_state("swarm-deep", Some(&plan), None, &[], 0);
@@ -1113,14 +1160,16 @@ fn reload_recovery_reads_a_persisted_status_by_state() {
     use jcode_swarm_core::MemberLifecycleState as State;
     const RECOVERED_AT: u64 = 1_787_903_000_000;
 
-    let (status, detail) = recover_member_status(persisted(State::Succeeded), None, true, RECOVERED_AT);
+    let (status, detail) =
+        recover_member_status(persisted(State::Succeeded), None, true, RECOVERED_AT);
     assert_eq!(status.state, State::Succeeded, "{detail:?}");
     assert_eq!(status.assignment_epoch, 4, "recovery keeps the assignment");
 
     let (status, _) = recover_member_status(persisted(State::Failed), None, true, RECOVERED_AT);
     assert_eq!(status.state, State::Failed);
 
-    let (status, detail) = recover_member_status(persisted(State::Running), None, true, RECOVERED_AT);
+    let (status, detail) =
+        recover_member_status(persisted(State::Running), None, true, RECOVERED_AT);
     assert_eq!(status.state, State::Lost);
     assert!(
         detail.unwrap_or_default().contains("while running"),

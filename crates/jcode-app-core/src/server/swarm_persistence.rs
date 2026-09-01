@@ -532,10 +532,9 @@ fn to_persisted_plan(plan: &VersionedPlan) -> PersistedVersionedPlan {
 }
 
 fn to_persisted_member(member: &SwarmMember, snapshot_unix_ms: u64) -> PersistedSwarmMember {
-    let terminal_since_unix_ms =
-        super::swarm::member_status_is_terminal(&member.status).then(|| {
-            snapshot_unix_ms.saturating_sub(member.last_status_change.elapsed().as_millis() as u64)
-        });
+    let terminal_since_unix_ms = member.lifecycle.is_terminal_state().then(|| {
+        snapshot_unix_ms.saturating_sub(member.last_status_change.elapsed().as_millis() as u64)
+    });
     PersistedSwarmMember {
         record: member.durable_record(),
         terminal_since_unix_ms,
@@ -579,7 +578,8 @@ fn recover_member_status(
     // its full session history and tool registry forever. Coordinators can spawn
     // a fresh worker when more work arrives.
     if is_headless && status.state == MemberLifecycleState::Ready {
-        let detail = append_recovery_detail(detail, "idle worker not restored after server restart");
+        let detail =
+            append_recovery_detail(detail, "idle worker not restored after server restart");
         status.reduce(
             MemberLifecycleEvent::StopConfirmed {
                 epoch: status.assignment_epoch,
@@ -624,26 +624,22 @@ fn from_persisted_member(
     terminal_retention: Duration,
 ) -> Option<SwarmMember> {
     let record = member.record;
-    let original_status = record.status.as_str();
-    let was_terminal_before_recovery =
-        super::swarm::member_status_is_terminal(original_status.as_ref());
+    let was_terminal_before_recovery = record.status.is_terminal_state();
     let (status, detail) = recover_member_status(
         record.status,
         record.detail,
         record.is_headless,
         loaded_at_unix_ms,
     );
-    let status_text = status.as_str();
-    let terminal_since_unix_ms = super::swarm::member_status_is_terminal(status_text.as_ref())
-        .then(|| {
-            member
-                .terminal_since_unix_ms
-                .unwrap_or(if was_terminal_before_recovery {
-                    snapshot_updated_at_unix_ms
-                } else {
-                    loaded_at_unix_ms
-                })
-        });
+    let terminal_since_unix_ms = status.is_terminal_state().then(|| {
+        member
+            .terminal_since_unix_ms
+            .unwrap_or(if was_terminal_before_recovery {
+                snapshot_updated_at_unix_ms
+            } else {
+                loaded_at_unix_ms
+            })
+    });
     if terminal_since_unix_ms.is_some_and(|terminal_since| {
         loaded_at_unix_ms.saturating_sub(terminal_since) >= terminal_retention.as_millis() as u64
     }) {
