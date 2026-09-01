@@ -37,6 +37,7 @@ toml = "0.8"
 serde_ignored = "0.1"
 
 # File operations
+fs2 = "0.4"
 
 # Utilities
 dirs = "5"               # home directory

@@ -27,6 +27,7 @@ use std::time::{Duration, SystemTime};
 use tokio::io::AsyncWriteExt;
 
 use super::model::TaskStatusFile;
+use super::store_lock::{self, StatusFileLock};
 use jcode_background_types::BackgroundTaskStatus;
 
 /// Fields that constitute the terminal truth of a task. Once persisted
@@ -72,6 +73,12 @@ static TASK_LOCKS: OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<tokio::sync::M
     OnceLock::new();
 const STALE_TEMP_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
+pub(super) struct TaskStatusStoreLock {
+    status_path: PathBuf,
+    _in_process: tokio::sync::OwnedMutexGuard<()>,
+    _cross_process: StatusFileLock,
+}
+
 impl TaskStatusStore {
     pub(super) fn new(dir: PathBuf) -> Self {
         Self { dir }
@@ -81,7 +88,7 @@ impl TaskStatusStore {
         self.dir.join(format!("{task_id}.status.json"))
     }
 
-    fn lock_for(&self, task_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    fn process_lock_for(&self, task_id: &str) -> Arc<tokio::sync::Mutex<()>> {
         let path = self.status_path(task_id);
         let mut locks = TASK_LOCKS
             .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
@@ -92,6 +99,49 @@ impl TaskStatusStore {
                 .entry(path)
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
         )
+    }
+
+    /// Lock ordering is fixed: in-process first, then cross-process. Blocking
+    /// OS lock acquisition runs off the Tokio worker pool.
+    async fn locked_for(&self, task_id: &str) -> Result<TaskStatusStoreLock> {
+        let status_path = self.status_path(task_id);
+        let in_process = self.process_lock_for(task_id).lock_owned().await;
+        let lock_target = status_path.clone();
+        let cross_process =
+            tokio::task::spawn_blocking(move || store_lock::acquire_blocking(&lock_target))
+                .await
+                .context("join background status lock acquisition")??;
+        Ok(TaskStatusStoreLock {
+            status_path,
+            _in_process: in_process,
+            _cross_process: cross_process,
+        })
+    }
+
+    /// Reconciliation never waits behind an active writer. Contention at
+    /// either serialization layer is treated as evidence that the task is live.
+    pub(super) fn try_locked_for(&self, task_id: &str) -> Result<Option<TaskStatusStoreLock>> {
+        let status_path = self.status_path(task_id);
+        let Ok(in_process) = self.process_lock_for(task_id).try_lock_owned() else {
+            return Ok(None);
+        };
+        let Some(cross_process) = store_lock::try_acquire(&status_path)? else {
+            return Ok(None);
+        };
+        Ok(Some(TaskStatusStoreLock {
+            status_path,
+            _in_process: in_process,
+            _cross_process: cross_process,
+        }))
+    }
+
+    pub(super) async fn read_locked(
+        &self,
+        task_id: &str,
+        guard: &TaskStatusStoreLock,
+    ) -> Result<Option<TaskStatusFile>> {
+        debug_assert_eq!(guard.status_path, self.status_path(task_id));
+        self.read(task_id).await
     }
 
     /// Crash-durable atomic replacement: serialize, write to a unique
@@ -150,6 +200,8 @@ impl TaskStatusStore {
     /// modification time is older than the conservative age bound. Unknown
     /// suffixes are only removed by age, never merely by name.
     pub(super) async fn cleanup_stale_temp_files(&self) -> usize {
+        // Per-task `.status.lock` sidecars are deliberately never swept. An
+        // unlink can create two lock inodes while another process holds one.
         let mut removed = 0;
         let Ok(mut entries) = tokio::fs::read_dir(&self.dir).await else {
             return removed;
@@ -231,9 +283,8 @@ impl TaskStatusStore {
     /// session, progress, or terminal truth. Malformed existing files surface
     /// as errors and are likewise never silently overwritten here.
     pub(super) async fn write_initial(&self, status: &TaskStatusFile) -> Result<()> {
-        let lock = self.lock_for(&status.task_id);
-        let _guard = lock.lock().await;
-        if let Some(existing) = self.read(&status.task_id).await? {
+        let guard = self.locked_for(&status.task_id).await?;
+        if let Some(existing) = self.read_locked(&status.task_id, &guard).await? {
             anyhow::bail!(
                 "refusing initial status for task {}: a {:?} status file already exists",
                 status.task_id,
@@ -258,9 +309,8 @@ impl TaskStatusStore {
     where
         F: FnOnce(&mut TaskStatusFile) -> bool,
     {
-        let lock = self.lock_for(task_id);
-        let _guard = lock.lock().await;
-        let Some(existing) = self.read(task_id).await? else {
+        let guard = self.locked_for(task_id).await?;
+        let Some(existing) = self.read_locked(task_id, &guard).await? else {
             return Ok(MutateOutcome::Missing);
         };
         let terminal_truth = is_terminal(&existing).then(|| existing.clone());
@@ -300,9 +350,23 @@ impl TaskStatusStore {
     where
         F: FnOnce(Option<TaskStatusFile>) -> TaskStatusFile,
     {
-        let lock = self.lock_for(task_id);
-        let _guard = lock.lock().await;
-        let existing = match self.read(task_id).await {
+        let guard = self.locked_for(task_id).await.with_context(|| {
+            format!("terminal status persistence failed for task {task_id}: acquire status lock")
+        })?;
+        self.write_terminal_locked(task_id, &guard, build).await
+    }
+
+    pub(super) async fn write_terminal_locked<F>(
+        &self,
+        task_id: &str,
+        guard: &TaskStatusStoreLock,
+        build: F,
+    ) -> Result<TerminalWriteOutcome>
+    where
+        F: FnOnce(Option<TaskStatusFile>) -> TaskStatusFile,
+    {
+        debug_assert_eq!(guard.status_path, self.status_path(task_id));
+        let existing = match self.read_locked(task_id, guard).await {
             Ok(existing) => existing,
             Err(error) => {
                 // A malformed file must not block terminal persistence: the
@@ -467,8 +531,8 @@ mod tests {
     #[tokio::test]
     async fn write_failure_is_surfaced_not_swallowed() {
         let tmp = tempfile::tempdir().unwrap();
-        // Point the store at a path that is a FILE, so its strict collision
-        // read fails before any write can be attempted.
+        // Point the store at a path that is a FILE, so the lock-first write
+        // ordering surfaces the invalid status directory before any write.
         let bogus_dir = tmp.path().join("not-a-dir");
         tokio::fs::write(&bogus_dir, b"file").await.unwrap();
         let store = TaskStatusStore::new(bogus_dir);
@@ -477,7 +541,10 @@ mod tests {
             .write_initial(&running_status("t3"))
             .await
             .expect_err("write into a non-directory must fail");
-        assert!(error.to_string().contains("read status file"), "{error:#}");
+        assert!(
+            error.to_string().contains("open background status lock"),
+            "{error:#}"
+        );
 
         let error = store
             .write_terminal("t3", |existing| terminal_from(existing, "t3"))
@@ -553,6 +620,26 @@ mod tests {
             writer.await.unwrap();
         }
         assert_eq!(terminal.await.unwrap(), TerminalWriteOutcome::Written);
+        let delivery = store
+            .mutate("race", |status| {
+                status.notify = true;
+                status.wake = true;
+                push_task_event(
+                    status,
+                    BackgroundTaskEventRecord {
+                        kind: BackgroundTaskEventKind::DeliveryUpdated,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        message: Some("delivery retained".into()),
+                        status: None,
+                        exit_code: None,
+                        progress: None,
+                    },
+                );
+                true
+            })
+            .await
+            .unwrap();
+        assert!(matches!(delivery, MutateOutcome::TerminalPreserved(_)));
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         let observed = reader.await.unwrap();
         assert!(observed > 0, "reader must have sampled the file");
@@ -563,6 +650,11 @@ mod tests {
             BackgroundTaskStatus::Completed,
             "terminal truth must survive every concurrent mutation"
         );
+        assert!(final_state.notify && final_state.wake);
+        assert!(final_state.event_history.iter().any(|event| {
+            event.kind == BackgroundTaskEventKind::DeliveryUpdated
+                && event.message.as_deref() == Some("delivery retained")
+        }));
     }
 
     #[tokio::test]
