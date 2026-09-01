@@ -1362,7 +1362,9 @@ pub(super) async fn handle_comm_list_swarms(
                 continue;
             };
             let lifecycle_status = member.lifecycle_status().to_string();
-            *members_by_status.entry(lifecycle_status.clone()).or_insert(0) += 1;
+            *members_by_status
+                .entry(lifecycle_status.clone())
+                .or_insert(0) += 1;
             *members_by_type
                 .entry(member_type_for_fleet(member, plan))
                 .or_insert(0) += 1;
@@ -1559,9 +1561,9 @@ pub(super) async fn handle_comm_stop(
             (None, None)
         }
     };
-    // A removed member's capability binding must not outlive its membership:
+    // A removed member's grant binding must not outlive its membership:
     // a later session under the same id starts with ordinary authority.
-    crate::tool::capability_tier::clear_session_capability(&target_session);
+    crate::tool::grant::clear_session_grant(&target_session);
     if let Some(ref swarm_id) = removed_swarm_id {
         record_swarm_event(
             event_history,

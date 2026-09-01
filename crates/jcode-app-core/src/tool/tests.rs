@@ -66,6 +66,107 @@ fn test_resolve_skill_aliases_to_skill_manage() {
     assert_eq!(Registry::resolve_tool_name("skill_manage"), "skill_manage");
 }
 
+fn direct_tool_context(test_name: &str) -> ToolContext {
+    ToolContext {
+        session_id: format!("tool-registry-{test_name}"),
+        message_id: "message".to_string(),
+        tool_call_id: "call".to_string(),
+        working_dir: None,
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    }
+}
+
+#[tokio::test]
+async fn aliased_schedule_contract_error_echoes_bounded_backing_schema() {
+    let registry = Registry::empty();
+    registry
+        .register(
+            "schedule".to_string(),
+            Arc::new(ambient::ScheduleTool::new()),
+        )
+        .await;
+
+    let error = registry
+        .execute(
+            "ScheduleWakeup",
+            serde_json::json!({
+                "delaySeconds": 60,
+                "reason": "continue work",
+                "prompt": "resume the task"
+            }),
+            direct_tool_context("schedule-schema-echo"),
+        )
+        .await
+        .expect_err("legacy ScheduleWakeup input must fail the backing contract");
+    let text = error.to_string();
+
+    assert!(
+        text.contains("task is required for action=create"),
+        "{text}"
+    );
+    let marker = "Backing tool 'schedule' parameters schema: ";
+    let schema = text
+        .split_once(marker)
+        .map(|(_, schema)| schema)
+        .unwrap_or_else(|| panic!("missing backing schema from aliased error: {text}"));
+    for field in ["\"task\"", "\"wake_in_minutes\"", "\"wake_at\""] {
+        assert!(schema.contains(field), "missing {field} in {schema}");
+    }
+    assert!(
+        schema.chars().count() <= Registry::INPUT_SCHEMA_SUMMARY_MAX_CHARS,
+        "schema summary exceeded {} characters: {}",
+        Registry::INPUT_SCHEMA_SUMMARY_MAX_CHARS,
+        schema.chars().count()
+    );
+}
+
+struct OperationalFailureTool;
+
+#[async_trait]
+impl Tool for OperationalFailureTool {
+    fn name(&self) -> &str {
+        "bash"
+    }
+
+    fn description(&self) -> &str {
+        "test operational failure"
+    }
+
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"]
+        })
+    }
+
+    async fn execute(&self, _input: Value, _ctx: ToolContext) -> Result<ToolOutput> {
+        Err(anyhow::anyhow!("process exited with status 17"))
+    }
+}
+
+#[tokio::test]
+async fn aliased_operational_error_does_not_echo_backing_schema() {
+    let registry = Registry::empty();
+    registry
+        .register("bash".to_string(), Arc::new(OperationalFailureTool))
+        .await;
+
+    let error = registry
+        .execute(
+            "Bash",
+            serde_json::json!({"command": "exit 17"}),
+            direct_tool_context("operational-error"),
+        )
+        .await
+        .expect_err("mock tool always fails");
+    let text = error.to_string();
+    assert_eq!(text, "process exited with status 17");
+    assert!(!text.contains("parameters schema"));
+}
+
 #[tokio::test]
 async fn test_discover_tools_not_registered_when_sponsors_disabled() {
     // sponsors.enabled defaults to false; the discovery tool must not exist.
@@ -1213,18 +1314,18 @@ fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
 }
 
 #[tokio::test]
-async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
+async fn registry_execute_denies_mutation_for_read_only_grant() {
     let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     let temp = tempfile::TempDir::new().expect("temp dir");
     let target = temp.path().join("forbidden.txt");
 
-    let session_id = "capability-tier-read-only-worker";
-    crate::tool::capability_tier::install_session_capability(
+    let session_id = "grant-read-only-worker";
+    crate::tool::grant::install_assignment_grant(
         session_id,
-        crate::tool::capability_tier::CapabilityTier::ReadOnly,
-        "tier-test-swarm",
+        crate::tool::grant::Grant::ReadOnly,
+        "grant-test-swarm",
         "explore-node",
     );
 
@@ -1271,7 +1372,7 @@ async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
         )
         .await;
 
-    crate::tool::capability_tier::clear_session_capability(session_id);
+    crate::tool::grant::clear_session_grant(session_id);
 
     let cleared_result = registry
         .execute(
@@ -1287,13 +1388,13 @@ async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
     let error = write_result.expect_err("read-only worker write must be refused");
     assert!(
         error.to_string().contains("read-only"),
-        "refusal must name the tier: {error}"
+        "refusal must name the grant: {error}"
     );
     let alias_error = alias_result.expect_err("alias write must be refused too");
     assert!(alias_error.to_string().contains("read-only"));
     bash_result.expect_err("read-only worker shell must be refused");
     read_result.expect("read tools must remain allowed");
-    cleared_result.expect("write must succeed after the tier is cleared");
+    cleared_result.expect("write must succeed after the grant is cleared");
     assert_eq!(
         std::fs::read_to_string(&target).expect("file after clear"),
         "allowed after clear\n",
@@ -1302,18 +1403,18 @@ async fn registry_execute_denies_mutation_for_read_only_capability_tier() {
 }
 
 #[tokio::test]
-async fn registry_execute_verify_tier_allows_shell_but_not_mutation() {
+async fn registry_execute_verify_grant_allows_shell_but_not_mutation() {
     let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     let temp = tempfile::TempDir::new().expect("temp dir");
     let target = temp.path().join("forbidden.txt");
 
-    let session_id = "capability-tier-verify-worker";
-    crate::tool::capability_tier::install_session_capability(
+    let session_id = "grant-verify-worker";
+    crate::tool::grant::install_assignment_grant(
         session_id,
-        crate::tool::capability_tier::CapabilityTier::Verify,
-        "tier-test-swarm",
+        crate::tool::grant::Grant::Verify,
+        "grant-test-swarm",
         "verify-node",
     );
 
@@ -1341,7 +1442,7 @@ async fn registry_execute_verify_tier_allows_shell_but_not_mutation() {
         )
         .await;
 
-    crate::tool::capability_tier::clear_session_capability(session_id);
+    crate::tool::grant::clear_session_grant(session_id);
 
     bash_result.expect("verify worker must be able to run builds and tests");
     write_result.expect_err("verify worker file mutation must be refused");

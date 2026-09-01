@@ -5,7 +5,6 @@ mod bash;
 mod batch;
 mod bg;
 mod browser;
-pub(crate) mod capability_tier;
 mod communicate;
 #[cfg(target_os = "macos")]
 mod computer;
@@ -16,6 +15,7 @@ mod edit;
 mod execution_scope;
 mod gmail;
 mod goal;
+pub(crate) mod grant;
 mod invalid;
 mod ls;
 pub mod mcp;
@@ -126,6 +126,8 @@ impl Clone for Registry {
 }
 
 impl Registry {
+    const INPUT_SCHEMA_SUMMARY_MAX_CHARS: usize = 2_048;
+
     fn shared_skills_registry() -> Arc<RwLock<SkillRegistry>> {
         SkillRegistry::shared_registry()
     }
@@ -451,6 +453,36 @@ impl Registry {
         crate::util::estimate_tokens(s)
     }
 
+    fn is_input_contract_error(error: &anyhow::Error) -> bool {
+        if error.downcast_ref::<serde_json::Error>().is_some() {
+            return true;
+        }
+
+        // Some tools enforce action-dependent required fields immediately
+        // after serde has populated an all-optional input struct. Those remain
+        // caller-correctable contract failures even though serde accepted the
+        // object (ScheduleWakeup is the compatibility case).
+        error
+            .chain()
+            .map(ToString::to_string)
+            .any(|message| message.to_ascii_lowercase().contains(" is required"))
+    }
+
+    fn parameters_schema_summary(tool: &dyn Tool) -> String {
+        let serialized = serde_json::to_string(&tool.parameters_schema())
+            .unwrap_or_else(|_| "{\"type\":\"object\"}".to_string());
+        if serialized.chars().count() <= Self::INPUT_SCHEMA_SUMMARY_MAX_CHARS {
+            return serialized;
+        }
+
+        let mut summary: String = serialized
+            .chars()
+            .take(Self::INPUT_SCHEMA_SUMMARY_MAX_CHARS.saturating_sub(1))
+            .collect();
+        summary.push('…');
+        summary
+    }
+
     fn tool_lifecycle_fields(
         phase: &str,
         requested_name: &str,
@@ -590,18 +622,17 @@ impl Registry {
                 return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved_name));
             }
         }
-        // Safety tier gate: an unattended (ambient) agent may not take a tier-2
-        // action without a human. Interactive sessions are never registered as
-        // ambient, so this is a no-op for them.
+        // Ambient action tier gate: rank unattended action risk, unlike the
+        // assignment grant below, which defines worker authority. Interactive
+        // sessions are never registered as ambient, so this is a no-op for them.
         ambient::check_ambient_action_tier(&ctx.session_id, resolved_name)?;
-        // Capability tier: an assigned plan worker's authority comes from its
-        // node's kind, installed server-side at assignment. Sessions without an
-        // installed tier pass through untouched.
-        if let Err(error) =
-            capability_tier::authorize_tool_call(&ctx.session_id, resolved_name, &input)
-        {
+        // Assignment grant: a plan worker's authority comes from its node kind,
+        // installed server-side at assignment. Sessions without an installed
+        // grant pass through untouched. This is distinct from the ambient action
+        // tier above, which ranks unattended action risk rather than authority.
+        if let Err(error) = grant::authorize_tool_call(&ctx.session_id, resolved_name, &input) {
             let mut fields =
-                Self::tool_lifecycle_fields("tier_blocked", name, resolved_name, &input, &ctx);
+                Self::tool_lifecycle_fields("grant_blocked", name, resolved_name, &input, &ctx);
             fields.push(("block_reason".to_string(), error.to_string()));
             crate::logging::event_warn("TOOL_LIFECYCLE", fields);
             return Err(error.into());
@@ -683,6 +714,15 @@ impl Registry {
         let mut output = match result {
             Ok(output) => output,
             Err(error) => {
+                let error = if name != resolved_name && Self::is_input_contract_error(&error) {
+                    let original = error.to_string();
+                    let schema = Self::parameters_schema_summary(tool.as_ref());
+                    error.context(format!(
+                        "{original}\nBacking tool '{resolved_name}' parameters schema: {schema}"
+                    ))
+                } else {
+                    error
+                };
                 let mut fields =
                     Self::tool_lifecycle_fields("error", name, resolved_name, &input, &ctx);
                 fields.push(("elapsed_ms".to_string(), latency_ms.to_string()));
