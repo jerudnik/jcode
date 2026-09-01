@@ -994,6 +994,11 @@ fn apply_control_event_to_snapshot(state: &mut PersistedSwarmState, event: Swarm
             // Evidence marker (W2). The snapshot's plan carries the full
             // artifact in node metadata already; nothing to reapply here.
         }
+        SwarmControlEvent::InboxItemDelivered { .. }
+        | SwarmControlEvent::InboxItemTerminal { .. } => {
+            // Inbox evidence is consumed by delivery/lifecycle adapters, not
+            // by the legacy swarm snapshot fold.
+        }
     }
 }
 

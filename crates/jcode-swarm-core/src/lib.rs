@@ -340,6 +340,21 @@ impl SwarmLifecycleStatus {
         self.state.is_terminal()
     }
 
+    /// Whether this lifecycle is one of the canonical terminal states.
+    pub const fn is_terminal_state(&self) -> bool {
+        self.state.is_terminal()
+    }
+
+    /// Whether the member can no longer make progress on an assignment.
+    pub const fn is_dead_state(&self) -> bool {
+        matches!(
+            self.state,
+            MemberLifecycleState::Failed
+                | MemberLifecycleState::Stopped
+                | MemberLifecycleState::Lost
+        )
+    }
+
     pub const fn next_assignment_epoch(&self) -> u64 {
         self.assignment_epoch.saturating_add(1)
     }
@@ -776,6 +791,49 @@ mod tests {
             file_scope: Vec::new(),
             blocked_by: Vec::new(),
             assigned_to: None,
+        }
+    }
+
+    #[test]
+    fn canonical_lifecycle_predicates_cover_every_compatibility_status() {
+        let cases = [
+            ("starting", false, false),
+            ("spawned", false, false),
+            ("ready", false, false),
+            ("assigned", false, false),
+            ("queued", false, false),
+            ("running", false, false),
+            ("running_stale", false, false),
+            ("streaming", false, false),
+            ("thinking", false, false),
+            ("blocked", false, false),
+            ("waiting_network", false, false),
+            ("succeeded", true, false),
+            ("completed", true, false),
+            ("done", true, false),
+            ("failed", true, true),
+            ("error", true, true),
+            ("stopped", true, true),
+            ("closed", true, true),
+            ("cancelled", true, true),
+            ("lost", true, true),
+            ("crashed", true, true),
+            ("disconnected", true, true),
+            ("unknown", true, true),
+        ];
+
+        for (compatibility_status, terminal, dead) in cases {
+            let lifecycle = SwarmLifecycleStatus::from(compatibility_status.to_string());
+            assert_eq!(
+                lifecycle.is_terminal_state(),
+                terminal,
+                "terminal classification for {compatibility_status}"
+            );
+            assert_eq!(
+                lifecycle.is_dead_state(),
+                dead,
+                "dead classification for {compatibility_status}"
+            );
         }
     }
 
