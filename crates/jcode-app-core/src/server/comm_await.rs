@@ -378,7 +378,11 @@ fn wake_relevant_event(envelope: &SwarmControlEnvelope) -> bool {
         | SwarmControlEvent::MemberStatusChanged { .. } => true,
         SwarmControlEvent::TaskHeartbeat { .. }
         | SwarmControlEvent::RoleChanged { .. }
-        | SwarmControlEvent::MemberRenamed { .. } => false,
+        | SwarmControlEvent::MemberRenamed { .. }
+        // Inbox delivery/terminal events are no-ops for await_members: member
+        // completion is decided by statuses and filed artifacts, not inbox traffic.
+        | SwarmControlEvent::InboxItemDelivered { .. }
+        | SwarmControlEvent::InboxItemTerminal { .. } => false,
     }
 }
 
