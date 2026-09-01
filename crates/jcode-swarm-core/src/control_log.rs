@@ -86,6 +86,19 @@ pub enum SwarmControlEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         confidence: Option<String>,
     },
+    /// W2: durable evidence that an inbox item reached its target session.
+    InboxItemDelivered {
+        item_id: String,
+        session_id: String,
+        class: String,
+        attempt: u32,
+    },
+    /// W2: durable evidence that inbox delivery reached a terminal outcome.
+    InboxItemTerminal {
+        item_id: String,
+        session_id: String,
+        outcome: String,
+    },
 }
 
 /// The host-agnostic envelope every event ships in.
@@ -220,6 +233,8 @@ impl SwarmControlState {
                         confidence: confidence.clone(),
                     });
             }
+            SwarmControlEvent::InboxItemDelivered { .. }
+            | SwarmControlEvent::InboxItemTerminal { .. } => {}
         }
         self.events_applied += 1;
     }
@@ -721,6 +736,52 @@ mod tests {
             state.events_applied, 2,
             "good events on both sides of garbage"
         );
+    }
+
+    #[test]
+    fn inbox_delivery_events_round_trip_through_serde() {
+        let events = [
+            SwarmControlEvent::InboxItemDelivered {
+                item_id: "inbox-1".into(),
+                session_id: "worker-1".into(),
+                class: "await_result".into(),
+                attempt: 2,
+            },
+            SwarmControlEvent::InboxItemTerminal {
+                item_id: "inbox-2".into(),
+                session_id: "worker-2".into(),
+                outcome: "expired".into(),
+            },
+        ];
+
+        for event in events {
+            let encoded = serde_json::to_string(&event).expect("serialize inbox event");
+            let decoded: SwarmControlEvent =
+                serde_json::from_str(&encoded).expect("deserialize inbox event");
+            assert_eq!(decoded, event);
+        }
+    }
+
+    #[test]
+    fn unknown_event_variant_does_not_wedge_control_log_loading() {
+        let (_dir, path) = temp_log();
+        let unknown = concat!(
+            r#"{"origin":"future","seq":0,"wall_ms":1,"swarm_id":"s","event":{"type":"future_event","value":1}}"#,
+            "\n",
+        );
+        let known = concat!(
+            r#"{"origin":"local","seq":1,"wall_ms":2,"swarm_id":"s","event":{"type":"member_left","session_id":"worker"}}"#,
+            "\n",
+        );
+        std::fs::write(&path, format!("{unknown}{known}")).expect("write fixture");
+
+        let read = read_from(&path, 0).expect("unknown variants must not fail the load");
+        assert_eq!(read.corrupt_lines.len(), 1);
+        assert_eq!(read.envelopes.len(), 1);
+        assert!(matches!(
+            &read.envelopes[0].1.event,
+            SwarmControlEvent::MemberLeft { session_id } if session_id == "worker"
+        ));
     }
 
     #[test]
