@@ -804,6 +804,9 @@ pub struct ApiTool {
 }
 
 #[cfg(test)]
+mod tool_conformance_tests;
+
+#[cfg(test)]
 mod cache_prefix_invariant_tests {
     //! Deterministic proof that injecting a trailing memory message can never move
     //! the Anthropic prefix-cache breakpoints off the stable assistant prefix.
