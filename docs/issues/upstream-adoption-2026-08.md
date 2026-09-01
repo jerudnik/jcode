@@ -24,9 +24,10 @@ gates. Cite the upstream SHA in the commit message when code is imported.
 These patches passed `git apply --check` at survey time. That result does not
 decide whether Jcode should import them.
 
-1. `250c71acd` — classify `stream_read_error` as transient so the turn retries
-   instead of failing. Directly relevant: this exact error class killed two
-   swarm workers during the 2026-08-27 provider-identity incident
+1. **Adopted in `79cef8482`:** `250c71acd` classifies `stream_read_error` as
+   transient so the turn retries instead of failing. Regression coverage ports
+   `437c6610a`. This exact error class killed two swarm workers during the
+   2026-08-27 provider-identity incident
    (docs/issues/swarm-spawn-model-identity-mismatch.md).
 2. `9e8d6e13b` — avoid persisting sessions whose content never changed.
    Complements our orphan-session cleanup and session-scoped cache work

@@ -55,6 +55,7 @@ pub fn is_transient_transport_error(error_str: &str) -> bool {
         // or RST_STREAM / GOAWAY frames from the server or an intermediary.
         || lower.contains("http2 error")
         || lower.contains("stream error")
+        || lower.contains("stream_read_error")
         || lower.contains("protocol error")
         || lower.contains("refused_stream")
         || lower.contains("refused stream")
