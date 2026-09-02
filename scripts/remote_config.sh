@@ -42,6 +42,7 @@ jcode_load_remote_config() {
     JCODE_REMOTE_SSH_BIN
     JCODE_REMOTE_TCP_PROBE
     JCODE_REMOTE_TCP_TIMEOUT
+    JCODE_REMOTE_TEST_HOST
   )
   local preserved_names=()
   local preserved_values=()

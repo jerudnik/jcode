@@ -210,6 +210,11 @@ else
     incremental_policy="${JCODE_INCREMENTAL_POLICY:-verification-off}"
     case "$incremental_policy" in
         verification-off|auto)
+            # `nextest` is intentionally NOT in this list: remote test builds
+            # stay incremental because campaign workers rerun near-identical
+            # targets in the same worktree many times, and incremental reruns
+            # are where the test_remote.sh wrapper's latency pays or doesn't.
+            # Do not "fix" this by adding nextest here.
             case "$SUBCOMMAND" in
                 test|check|clippy|bench|doc|rustdoc)
                     remote_incremental=0
@@ -357,6 +362,7 @@ cleanup_temp_files() {
 }
 trap cleanup_temp_files EXIT
 
+phase_start=$(date +%s)
 if [[ "$SYNC_SOURCE" -eq 1 ]]; then
     echo ""
     echo "[1/3] Syncing source files..."
@@ -415,6 +421,10 @@ else
     echo ""
     echo "[1/3] Skipping source sync (--no-sync); verifying retained fingerprint before Cargo"
 fi
+# Machine-greppable phase timing (consumed by scripts/test_remote.sh, useful
+# for builds too): a regression in the sync path -- e.g. rsync accidentally
+# re-copying target/ -- must show up immediately as a sync-time jump.
+echo "remote_build: phase sync $(( $(date +%s) - phase_start ))s"
 
 printf -v REMOTE_CARGO_CMD '%q ' "${CARGO_CMD[@]}"
 REMOTE_ENV=(JCODE_BUILD_METADATA_FILE=.jcode-build-meta)
@@ -444,7 +454,16 @@ printf -v REMOTE_INNER_CMD \
 printf -v REMOTE_RUN_CMD 'sh -lc %q' "$REMOTE_INNER_CMD"
 echo ""
 echo "[2/3] Running on remote..."
-remote_ssh "$REMOTE_RUN_CMD 2>&1"
+# Capture the exit code instead of letting set -e abort so the phase timing
+# line still prints on failure (failed runs are where timing matters most),
+# then propagate the original code untouched.
+phase_start=$(date +%s)
+remote_rc=0
+remote_ssh "$REMOTE_RUN_CMD 2>&1" || remote_rc=$?
+echo "remote_build: phase remote $(( $(date +%s) - phase_start ))s"
+if [[ "$remote_rc" -ne 0 ]]; then
+    exit "$remote_rc"
+fi
 
 echo ""
 if [[ "$sync_back" -eq 1 ]]; then
