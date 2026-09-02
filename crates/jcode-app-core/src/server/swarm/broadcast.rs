@@ -12,7 +12,48 @@ fn swarm_broadcast_key(
     )
 }
 
+pub(in crate::server) fn swarm_member_status_at(
+    member: &SwarmMember,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+    now_unix_ms: u64,
+) -> crate::protocol::SwarmMemberStatus {
+    crate::protocol::SwarmMemberStatus {
+        session_id: member.session_id.clone(),
+        friendly_name: member.friendly_name.clone(),
+        status: member.lifecycle_status().to_string(),
+        lifecycle: Some(member.lifecycle().state),
+        detail: member.detail.clone(),
+        task_label: member.task_label.clone(),
+        subagent_type: member.subagent_type.clone(),
+        role: Some(member.role.clone()),
+        is_headless: Some(member.is_headless),
+        live_attachments: Some(member.event_txs.len()),
+        status_age_secs: Some(status_age_secs_at(
+            member,
+            latest_control_log_evidence_unix_ms,
+            now_unix_ms,
+        )),
+        output_tail: member.output_tail.clone(),
+        report_back_to_session_id: member.report_back_to_session_id.clone(),
+        initial_prompt_delivered: member.initial_prompt_delivered,
+        todo_progress: member.todo_progress,
+        todo_items: member.todo_items.clone(),
+        runtime: crate::protocol::SwarmMemberRuntime {
+            model: member.runtime.model.clone(),
+            provider: member.runtime.provider.clone(),
+            auth_method: member.runtime.auth_method.clone(),
+            effort: member.runtime.effort.clone(),
+            elapsed_secs: if matches!(member.lifecycle_status(), "running") {
+                Some(member.joined_at.elapsed().as_secs())
+            } else {
+                Some(member.runtime.elapsed_secs.unwrap_or(0))
+            },
+        },
+    }
+}
+
 async fn broadcast_swarm_status_now(
+    swarm_id: &str,
     session_ids: Vec<String>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
 ) {
@@ -20,41 +61,20 @@ async fn broadcast_swarm_status_now(
         return;
     }
 
+    let latest_control_evidence =
+        crate::server::control_log_sync::latest_member_evidence_unix_ms([swarm_id]);
+    let now_unix_ms = now_unix_ms();
     let members_guard = swarm_members.read().await;
     let members_list: Vec<crate::protocol::SwarmMemberStatus> = session_ids
         .iter()
         .filter_map(|sid| {
-            members_guard
-                .get(sid)
-                .map(|m| crate::protocol::SwarmMemberStatus {
-                    session_id: m.session_id.clone(),
-                    friendly_name: m.friendly_name.clone(),
-                    status: m.lifecycle_status().to_string(),
-                    lifecycle: Some(m.lifecycle().state),
-                    detail: m.detail.clone(),
-                    task_label: m.task_label.clone(),
-                    subagent_type: m.subagent_type.clone(),
-                    role: Some(m.role.clone()),
-                    is_headless: Some(m.is_headless),
-                    live_attachments: Some(m.event_txs.len()),
-                    status_age_secs: Some(status_age_secs(m.last_status_change)),
-                    output_tail: m.output_tail.clone(),
-                    report_back_to_session_id: m.report_back_to_session_id.clone(),
-                    initial_prompt_delivered: m.initial_prompt_delivered,
-                    todo_progress: m.todo_progress,
-                    todo_items: m.todo_items.clone(),
-                    runtime: crate::protocol::SwarmMemberRuntime {
-                        model: m.runtime.model.clone(),
-                        provider: m.runtime.provider.clone(),
-                        auth_method: m.runtime.auth_method.clone(),
-                        effort: m.runtime.effort.clone(),
-                        elapsed_secs: if matches!(m.lifecycle_status(), "running") {
-                            Some(m.joined_at.elapsed().as_secs())
-                        } else {
-                            Some(m.runtime.elapsed_secs.unwrap_or(0))
-                        },
-                    },
-                })
+            members_guard.get(sid).map(|m| {
+                swarm_member_status_at(
+                    m,
+                    latest_control_evidence.get(&m.session_id).copied(),
+                    now_unix_ms,
+                )
+            })
         })
         .collect();
 
@@ -110,7 +130,7 @@ pub(in crate::server) async fn broadcast_swarm_status(
     }
 
     if session_ids.len() < swarm_status_debounce_member_threshold() {
-        broadcast_swarm_status_now(session_ids, swarm_members).await;
+        broadcast_swarm_status_now(swarm_id, session_ids, swarm_members).await;
         return;
     }
 
@@ -147,7 +167,7 @@ pub(in crate::server) async fn broadcast_swarm_status(
                     .map(|s| s.iter().cloned().collect())
                     .unwrap_or_default()
             };
-            broadcast_swarm_status_now(session_ids, &swarm_members).await;
+            broadcast_swarm_status_now(&swarm_id, session_ids, &swarm_members).await;
 
             let mut pending = pending_swarm_status_broadcasts()
                 .lock()

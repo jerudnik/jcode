@@ -531,14 +531,30 @@ fn to_persisted_plan(plan: &VersionedPlan) -> PersistedVersionedPlan {
     }
 }
 
-fn to_persisted_member(member: &SwarmMember, snapshot_unix_ms: u64) -> PersistedSwarmMember {
-    let terminal_since_unix_ms = member.lifecycle.is_terminal_state().then(|| {
-        snapshot_unix_ms.saturating_sub(member.last_status_change.elapsed().as_millis() as u64)
+fn to_persisted_member_with_evidence(
+    member: &SwarmMember,
+    snapshot_unix_ms: u64,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+) -> PersistedSwarmMember {
+    let lifecycle = member.lifecycle();
+    let terminal_since_unix_ms = lifecycle.is_terminal_state().then(|| {
+        crate::protocol::latest_swarm_evidence_unix_ms(
+            &lifecycle,
+            latest_control_log_evidence_unix_ms,
+        )
+        .unwrap_or_else(|| {
+            snapshot_unix_ms.saturating_sub(member.last_status_change.elapsed().as_millis() as u64)
+        })
     });
     PersistedSwarmMember {
         record: member.durable_record(),
         terminal_since_unix_ms,
     }
+}
+
+#[cfg(test)]
+fn to_persisted_member(member: &SwarmMember, snapshot_unix_ms: u64) -> PersistedSwarmMember {
+    to_persisted_member_with_evidence(member, snapshot_unix_ms, None)
 }
 
 fn append_recovery_detail(detail: Option<String>, note: &str) -> Option<String> {
@@ -1030,9 +1046,17 @@ pub(super) fn persist_swarm_state(
     }
 
     let snapshot_unix_ms = now_unix_ms();
+    let latest_control_evidence =
+        super::control_log_sync::latest_member_evidence_unix_ms([swarm_id]);
     let mut members = swarm_members
         .iter()
-        .map(|member| to_persisted_member(member, snapshot_unix_ms))
+        .map(|member| {
+            to_persisted_member_with_evidence(
+                member,
+                snapshot_unix_ms,
+                latest_control_evidence.get(&member.session_id).copied(),
+            )
+        })
         .collect::<Vec<_>>();
     members.sort_by(|left, right| left.record.session_id.cmp(&right.record.session_id));
 

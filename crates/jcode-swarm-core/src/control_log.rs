@@ -127,6 +127,9 @@ pub struct SwarmControlState {
     pub tasks: HashMap<String, TaskControlState>,
     /// Events folded so far (diagnostic; lets callers assert progress).
     pub events_applied: u64,
+    /// Latest approved liveness/delivery evidence per member, in Unix epoch
+    /// milliseconds from the control envelope's `wall_ms` clock.
+    pub latest_member_evidence_unix_ms: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -167,10 +170,28 @@ impl SwarmControlState {
             .min()
     }
 
-    /// Apply one event. Total: unknown references are tolerated (a
-    /// `TaskAssigned` for a task the fold has not seen creates it), so a
-    /// compacted log prefix or merged partial log still folds.
+    /// Apply one event without an envelope timestamp. Total: unknown
+    /// references are tolerated (a `TaskAssigned` for a task the fold has not
+    /// seen creates it), so a compacted log prefix or merged partial log still
+    /// folds.
+    ///
+    /// Member evidence is NOT recorded here: evidence is a property of the
+    /// durable envelope (`wall_ms` stamped at append time), not of the event
+    /// payload. Mixing the heartbeat payload's task-plane timestamp into the
+    /// member evidence clock makes replayed and event-only folds diverge.
+    /// Use [`Self::apply_envelope`] whenever the envelope is available (the
+    /// normal replay and write paths).
     pub fn apply(&mut self, event: &SwarmControlEvent) {
+        self.apply_at(event, None);
+    }
+
+    /// Apply an event using its durable envelope timestamp. This is the
+    /// normal replay/write path and the only one that records member evidence.
+    pub fn apply_envelope(&mut self, envelope: &SwarmControlEnvelope) {
+        self.apply_at(&envelope.event, Some(envelope.wall_ms));
+    }
+
+    fn apply_at(&mut self, event: &SwarmControlEvent, evidence_wall_ms: Option<u64>) {
         match event {
             SwarmControlEvent::MemberJoined {
                 session_id,
@@ -188,6 +209,7 @@ impl SwarmControlState {
             }
             SwarmControlEvent::MemberLeft { session_id } => {
                 self.members.remove(session_id);
+                self.latest_member_evidence_unix_ms.remove(session_id);
             }
             SwarmControlEvent::RoleChanged { session_id, role } => {
                 self.members.entry(session_id.clone()).or_default().role = role.clone();
@@ -205,10 +227,15 @@ impl SwarmControlState {
                 self.tasks.entry(task_id.clone()).or_default().status = status.clone();
             }
             SwarmControlEvent::TaskHeartbeat { task_id, wall_ms } => {
-                self.tasks
-                    .entry(task_id.clone())
-                    .or_default()
-                    .last_heartbeat_ms = Some(*wall_ms);
+                let assigned_to = {
+                    let task = self.tasks.entry(task_id.clone()).or_default();
+                    task.last_heartbeat_ms = Some(*wall_ms);
+                    task.assigned_to.clone()
+                };
+                if let (Some(session_id), Some(evidence_wall_ms)) = (assigned_to, evidence_wall_ms)
+                {
+                    self.record_member_evidence(&session_id, evidence_wall_ms);
+                }
             }
             SwarmControlEvent::TaskRemoved { task_id } => {
                 self.tasks.remove(task_id);
@@ -232,11 +259,26 @@ impl SwarmControlState {
                         session_id: session_id.clone(),
                         confidence: confidence.clone(),
                     });
+                if let Some(evidence_wall_ms) = evidence_wall_ms {
+                    self.record_member_evidence(session_id, evidence_wall_ms);
+                }
             }
-            SwarmControlEvent::InboxItemDelivered { .. }
-            | SwarmControlEvent::InboxItemTerminal { .. } => {}
+            SwarmControlEvent::InboxItemDelivered { session_id, .. }
+            | SwarmControlEvent::InboxItemTerminal { session_id, .. } => {
+                if let Some(evidence_wall_ms) = evidence_wall_ms {
+                    self.record_member_evidence(session_id, evidence_wall_ms);
+                }
+            }
         }
         self.events_applied += 1;
+    }
+
+    fn record_member_evidence(&mut self, session_id: &str, wall_ms: u64) {
+        let latest = self
+            .latest_member_evidence_unix_ms
+            .entry(session_id.to_string())
+            .or_default();
+        *latest = (*latest).max(wall_ms);
     }
 }
 
@@ -244,7 +286,7 @@ impl SwarmControlState {
 pub fn fold<'a>(events: impl IntoIterator<Item = &'a SwarmControlEnvelope>) -> SwarmControlState {
     let mut state = SwarmControlState::default();
     for envelope in events {
-        state.apply(&envelope.event);
+        state.apply_envelope(envelope);
     }
     state
 }
@@ -822,6 +864,51 @@ mod tests {
             session_id: "b".into(),
         });
         assert_eq!(state.coordinator(), None);
+    }
+
+    #[test]
+    fn fold_tracks_latest_member_evidence_from_envelope_wall_milliseconds() {
+        let events = vec![
+            SwarmControlEnvelope {
+                origin: LOCAL_ORIGIN.to_string(),
+                seq: 0,
+                wall_ms: 10_000,
+                swarm_id: "swarm-1".to_string(),
+                event: SwarmControlEvent::MemberJoined {
+                    session_id: "worker-1".to_string(),
+                    friendly_name: None,
+                    role: "agent".to_string(),
+                },
+            },
+            SwarmControlEnvelope {
+                origin: LOCAL_ORIGIN.to_string(),
+                seq: 1,
+                wall_ms: 11_000,
+                swarm_id: "swarm-1".to_string(),
+                event: SwarmControlEvent::TaskAssigned {
+                    task_id: "task-1".to_string(),
+                    assigned_to: Some("worker-1".to_string()),
+                },
+            },
+            SwarmControlEnvelope {
+                origin: LOCAL_ORIGIN.to_string(),
+                seq: 2,
+                wall_ms: 12_345,
+                swarm_id: "swarm-1".to_string(),
+                event: SwarmControlEvent::TaskHeartbeat {
+                    task_id: "task-1".to_string(),
+                    wall_ms: 12_300,
+                },
+            },
+        ];
+
+        let state = fold(&events);
+
+        assert_eq!(
+            state.latest_member_evidence_unix_ms.get("worker-1"),
+            Some(&12_345),
+            "evidence age uses the envelope Unix-ms clock shared with lifecycle timestamps"
+        );
     }
 
     #[test]

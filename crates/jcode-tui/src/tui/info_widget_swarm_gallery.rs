@@ -37,25 +37,16 @@ fn member_icon(member: &SwarmMemberStatus) -> Option<String> {
     }
 }
 
-/// Age marker appended to member bodies. Live members render evidence activity,
-/// while terminal members keep lifecycle age because late evidence does not
-/// advance their retention clock.
+/// Last-evidence age marker appended to member bodies. The server derives this
+/// from lifecycle and durable control-log evidence, never repaint/focus state.
 /// `humanize_age` already yields "now" for fresh updates, which reads wrong
 /// with an "ago" suffix.
-fn age_marker(member: &SwarmMemberStatus, age: u64) -> String {
+fn age_marker(age: u64) -> String {
     let human = humanize_age(age);
-    let terminal = member.lifecycle_state().is_terminal();
-    if terminal {
-        return if human == "now" {
-            "· now".to_string()
-        } else {
-            format!("· {human} ago")
-        };
-    }
     if human == "now" {
-        "· active now".to_string()
+        "· evidence now".to_string()
     } else {
-        format!("· active {human} ago")
+        format!("· evidence {human} ago")
     }
 }
 
@@ -67,7 +58,7 @@ fn member_body(member: &SwarmMemberStatus) -> Vec<String> {
     if let Some(tail) = member.output_tail.as_ref().filter(|t| !t.trim().is_empty()) {
         let mut body: Vec<String> = tail.lines().map(|l| l.to_string()).collect();
         if let Some(age) = member.status_age_secs {
-            body.push(age_marker(member, age));
+            body.push(age_marker(age));
         }
         return body;
     }
@@ -76,7 +67,7 @@ fn member_body(member: &SwarmMemberStatus) -> Vec<String> {
         body.push(detail.clone());
     }
     if let Some(age) = member.status_age_secs {
-        body.push(age_marker(member, age));
+        body.push(age_marker(age));
     }
     body
 }
@@ -627,29 +618,27 @@ mod tests {
     }
 
     #[test]
-    fn running_member_renders_recent_evidence_activity_instead_of_old_status_age() {
+    fn running_member_renders_last_evidence_age() {
         let mut m = member("alpha", "running", Some("waiting on provider"), None);
         m.status_age_secs = Some(7);
 
         let body = member_body(&m);
 
         assert!(
-            body.iter().any(|line| line == "· active 7s ago"),
+            body.iter().any(|line| line == "· evidence 7s ago"),
             "body={body:?}"
         );
-        assert!(!body.iter().any(|line| line == "· 7s ago"), "body={body:?}");
     }
 
     #[test]
-    fn terminal_member_keeps_lifecycle_age_wording() {
+    fn terminal_member_renders_last_evidence_age() {
         let mut m = member("alpha", "succeeded", Some("finished"), None);
         m.status_age_secs = Some(7);
 
         let body = member_body(&m);
 
-        assert!(body.iter().any(|line| line == "· 7s ago"), "body={body:?}");
         assert!(
-            !body.iter().any(|line| line == "· active 7s ago"),
+            body.iter().any(|line| line == "· evidence 7s ago"),
             "body={body:?}"
         );
     }
