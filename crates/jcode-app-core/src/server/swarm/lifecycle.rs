@@ -389,6 +389,7 @@ pub(in crate::server) fn expired_terminal_member_ids(
 /// the session's agent loop is gone, so no heartbeat or turn end will ever
 /// arrive for tasks it holds.
 #[deprecated(note = "use SwarmLifecycleStatus::is_dead_state")]
+#[allow(dead_code, reason = "parity bridge kept for the W23 compatibility tests")]
 pub(in crate::server) fn member_status_is_dead(status: &str) -> bool {
     matches!(
         jcode_swarm_core::MemberLifecycleState::from_compatibility_status(status),
