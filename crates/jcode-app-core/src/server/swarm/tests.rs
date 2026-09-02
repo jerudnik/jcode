@@ -6,7 +6,8 @@ use super::{
     broadcast_swarm_plan, broadcast_swarm_plan_with_previous, broadcast_swarm_status,
     member_status_is_dead, now_unix_ms, parse_swarm_tasks, refresh_swarm_task_staleness,
     remove_session_from_swarm, salvage_assignments_of_dead_member, swarm_ancestors,
-    swarm_is_self_or_ancestor, swarm_spawn_depth, terminal_status_for_turn_error,
+    swarm_is_self_or_ancestor, swarm_member_status_at, swarm_spawn_depth,
+    terminal_status_for_turn_error,
     touch_swarm_task_progress, update_member_status, update_member_status_with_report,
 };
 use crate::plan::PlanItem;
@@ -203,6 +204,95 @@ fn swarm_member(
         },
         event_rx,
     )
+}
+
+#[test]
+fn evidence_age_is_freshened_by_heartbeat_and_grows_without_repaint_input() {
+    use jcode_swarm_core::control_log::{SwarmControlEnvelope, SwarmControlEvent, fold};
+
+    const NOW_UNIX_MS: u64 = 100_000;
+    let (mut live, _live_rx) = swarm_member("worker-live", "agent", true);
+    live.apply_compatibility_lifecycle_status("running", None, false, 40_000);
+    live.last_status_change = Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .expect("test instant");
+    let control_events = vec![
+        SwarmControlEnvelope {
+            origin: "local".to_string(),
+            seq: 0,
+            wall_ms: 98_000,
+            swarm_id: "swarm-1".to_string(),
+            event: SwarmControlEvent::TaskAssigned {
+                task_id: "task-live".to_string(),
+                assigned_to: Some(live.session_id.clone()),
+            },
+        },
+        SwarmControlEnvelope {
+            origin: "local".to_string(),
+            seq: 1,
+            wall_ms: 99_500,
+            swarm_id: "swarm-1".to_string(),
+            event: SwarmControlEvent::TaskHeartbeat {
+                task_id: "task-live".to_string(),
+                wall_ms: 99_500,
+            },
+        },
+    ];
+    let folded = fold(&control_events);
+    let heartbeat_unix_ms = folded
+        .latest_member_evidence_unix_ms
+        .get(&live.session_id)
+        .copied();
+
+    let live_status = swarm_member_status_at(&live, heartbeat_unix_ms, NOW_UNIX_MS);
+    assert_eq!(
+        live_status.status_age_secs,
+        Some(0),
+        "an unfocused live worker's heartbeat must keep evidence age fresh"
+    );
+
+    let (mut dead, _dead_rx) = swarm_member("worker-dead", "agent", true);
+    dead.apply_compatibility_lifecycle_status("running", None, false, 70_000);
+    dead.apply_compatibility_lifecycle_status("crashed", None, false, 90_000);
+    dead.last_status_change = Instant::now();
+    let first_age = swarm_member_status_at(&dead, None, NOW_UNIX_MS)
+        .status_age_secs
+        .expect("status age");
+    dead.last_status_change = Instant::now();
+    let later_age = swarm_member_status_at(&dead, None, NOW_UNIX_MS + 5_000)
+        .status_age_secs
+        .expect("status age");
+
+    assert_eq!(first_age, 10);
+    assert_eq!(later_age, 15);
+    assert!(
+        later_age > first_age,
+        "dead-worker age must grow monotonically"
+    );
+}
+
+#[test]
+fn evidence_age_preserves_monotonic_fallback_for_legacy_members() {
+    const NOW_UNIX_MS: u64 = 100_000;
+    let (mut legacy, _legacy_rx) = swarm_member("worker-legacy", "agent", true);
+    legacy.status = "crashed".to_string();
+    legacy.lifecycle = Default::default();
+    legacy.last_status_change = Instant::now()
+        .checked_sub(Duration::from_secs(60))
+        .expect("test instant");
+
+    assert!(
+        swarm_member_status_at(&legacy, None, NOW_UNIX_MS)
+            .status_age_secs
+            .expect("status age")
+            >= 60
+    );
+    assert!(super::evidence_age_at_least(
+        &legacy,
+        None,
+        NOW_UNIX_MS,
+        Duration::from_secs(60),
+    ));
 }
 
 fn member_with_parent(session_id: &str, parent: Option<&str>) -> SwarmMember {

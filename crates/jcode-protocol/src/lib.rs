@@ -232,7 +232,7 @@ pub struct AgentInfo {
     /// Number of currently attached live client connections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_attachments: Option<usize>,
-    /// Seconds since the last status change.
+    /// Seconds since the latest lifecycle or control-log evidence event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_age_secs: Option<u64>,
     /// Seconds since the last observed activity (token usage, turn start,
@@ -538,7 +538,7 @@ pub struct SwarmMemberStatus {
     /// Number of currently attached live client connections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_attachments: Option<usize>,
-    /// Seconds since the last status change.
+    /// Seconds since the latest lifecycle or control-log evidence event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_age_secs: Option<u64>,
     /// Recent streamed output tail for live inline rendering (last few lines of
@@ -582,6 +582,37 @@ impl SwarmMemberStatus {
     pub fn normalize_lifecycle(&mut self) {
         self.lifecycle = Some(self.lifecycle_state());
     }
+}
+
+/// Latest known evidence timestamp for a swarm member, in Unix epoch
+/// milliseconds. Lifecycle transitions and control-log evidence deliberately
+/// share one wall-clock unit so display age and terminal retention cannot
+/// disagree. A zero lifecycle timestamp is the legacy/unknown sentinel.
+pub fn latest_swarm_evidence_unix_ms(
+    lifecycle: &jcode_swarm_core::SwarmLifecycleStatus,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+) -> Option<u64> {
+    [
+        (lifecycle.updated_at_unix_ms > 0).then_some(lifecycle.updated_at_unix_ms),
+        latest_control_log_evidence_unix_ms,
+    ]
+    .into_iter()
+    .flatten()
+    .max()
+}
+
+/// Seconds since the member's latest lifecycle or control-log evidence event.
+/// All arguments use Unix epoch milliseconds; subtraction saturates across
+/// clock skew. Legacy members with no timestamp report fresh age until their
+/// first lifecycle/evidence event instead of appearing decades old.
+pub fn swarm_status_age_secs(
+    now_unix_ms: u64,
+    lifecycle: &jcode_swarm_core::SwarmLifecycleStatus,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+) -> u64 {
+    latest_swarm_evidence_unix_ms(lifecycle, latest_control_log_evidence_unix_ms)
+        .map(|updated_at| now_unix_ms.saturating_sub(updated_at) / 1_000)
+        .unwrap_or(0)
 }
 
 impl SwarmFleetMember {

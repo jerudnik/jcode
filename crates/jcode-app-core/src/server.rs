@@ -119,9 +119,15 @@ async fn prune_expired_terminal_swarm_members(
     swarm_state: &SwarmState,
 ) -> usize {
     let retention = swarm::swarm_terminal_member_retention();
+    let now_unix_ms = swarm::now_unix_ms();
     let mut candidates = {
         let members = swarm_state.members.read().await;
-        expired_terminal_member_ids(&members, retention)
+        let swarm_ids = members
+            .values()
+            .filter_map(|member| member.swarm_id.as_deref())
+            .collect::<HashSet<_>>();
+        let latest_control_evidence = control_log_sync::latest_member_evidence_unix_ms(swarm_ids);
+        expired_terminal_member_ids(&members, &latest_control_evidence, now_unix_ms, retention)
     };
     candidates.truncate(SWARM_TERMINAL_MEMBER_GC_BATCH_SIZE);
     if candidates.is_empty() {
@@ -136,11 +142,27 @@ async fn prune_expired_terminal_swarm_members(
         if live_sessions.contains(&session_id) || sessions.read().await.contains_key(&session_id) {
             continue;
         }
+        let latest_control_evidence_unix_ms = {
+            let members = swarm_state.members.read().await;
+            members
+                .get(&session_id)
+                .and_then(|member| member.swarm_id.as_deref())
+                .and_then(|swarm_id| {
+                    control_log_sync::latest_member_evidence_unix_ms([swarm_id])
+                        .get(&session_id)
+                        .copied()
+                })
+        };
         let removed_swarm_id = {
             let mut members = swarm_state.members.write().await;
             let still_expired = members.get(&session_id).is_some_and(|member| {
                 member.lifecycle.is_terminal_state()
-                    && member.last_status_change.elapsed() >= retention
+                    && swarm::evidence_age_at_least(
+                        member,
+                        latest_control_evidence_unix_ms,
+                        swarm::now_unix_ms(),
+                        retention,
+                    )
             });
             if still_expired {
                 members

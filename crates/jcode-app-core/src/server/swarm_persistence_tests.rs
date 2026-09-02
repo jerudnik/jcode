@@ -297,17 +297,21 @@ fn terminal_retention_round_trip_follows_canonical_lifecycle_when_mirror_is_stal
         subagent_type: None,
         initial_prompt_delivered: None,
     };
+    let loaded_at = 40_000_000;
+    // The loss lands just before the load so the record is canonically
+    // terminal AND recent under the evidence clock (C4): retention is judged
+    // from lifecycle evidence, not from last_status_change or the snapshot's
+    // rewrite time.
+    let lost_at_unix_ms = loaded_at - 5_000;
     assert!(member.apply_lifecycle_event(
         MemberLifecycleEvent::ProcessLost {
             reason: Some("process disappeared".to_string()),
         },
-        2,
+        lost_at_unix_ms,
     ));
     member.status = "ready".to_string();
 
-    let loaded_at = 40_000_000;
     let persisted = to_persisted_member(&member, loaded_at);
-    assert!(persisted.terminal_since_unix_ms.is_some());
     assert_eq!(persisted.record.status.state, MemberLifecycleState::Lost);
 
     let recovered = from_persisted_member(persisted, loaded_at, loaded_at, Duration::from_secs(60))
@@ -319,7 +323,7 @@ fn terminal_retention_round_trip_follows_canonical_lifecycle_when_mirror_is_stal
 #[test]
 fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
-    let member = SwarmMember {
+    let mut member = SwarmMember {
         session_id: "session-legacy-terminal".to_string(),
         event_tx,
         event_txs: HashMap::new(),
@@ -345,7 +349,19 @@ fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
         initial_prompt_delivered: None,
     };
     let loaded_at = 20_000_000;
+    member.last_status_change = Instant::now()
+        .checked_sub(Duration::from_secs(20))
+        .expect("test instant");
     let mut persisted = to_persisted_member(&member, loaded_at);
+    let persisted_age_ms = loaded_at.saturating_sub(
+        persisted
+            .terminal_since_unix_ms
+            .expect("legacy monotonic age should persist"),
+    );
+    assert!(
+        (20_000..21_000).contains(&persisted_age_ms),
+        "legacy monotonic age should survive persistence: {persisted_age_ms}ms"
+    );
     persisted.terminal_since_unix_ms = None;
 
     assert!(

@@ -34,6 +34,9 @@ pub(super) async fn handle_comm_list(
     let swarm_id = swarm_id_for_session(&req_session_id, swarm_members).await;
 
     if let Some(swarm_id) = swarm_id {
+        let latest_control_evidence =
+            super::control_log_sync::latest_member_evidence_unix_ms([swarm_id.as_str()]);
+        let now_unix_ms = super::swarm::now_unix_ms();
         let swarm_session_ids: Vec<String> = {
             let swarms = swarms_by_id.read().await;
             swarms
@@ -88,7 +91,11 @@ pub(super) async fn handle_comm_list(
                             report_back_to_session_id: member.report_back_to_session_id.clone(),
                             latest_completion_report: member.latest_completion_report.clone(),
                             live_attachments: member.event_txs.len(),
-                            status_age_secs: member.last_status_change.elapsed().as_secs(),
+                            status_age_secs: super::swarm::status_age_secs_at(
+                                member,
+                                latest_control_evidence.get(sid).copied(),
+                                now_unix_ms,
+                            ),
                         }
                     })
                 })

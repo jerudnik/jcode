@@ -306,6 +306,12 @@ pub(super) async fn handle_comm_status(
             }
         };
 
+        let latest_control_evidence_unix_ms = member.swarm_id.as_deref().and_then(|swarm_id| {
+            super::control_log_sync::latest_member_evidence_unix_ms([swarm_id])
+                .get(&target_session)
+                .copied()
+        });
+
         AgentStatusSnapshot {
             session_id: member.session_id.clone(),
             friendly_name: member.friendly_name.clone(),
@@ -315,7 +321,10 @@ pub(super) async fn handle_comm_status(
             role: Some(member.role.clone()),
             is_headless: Some(member.is_headless),
             live_attachments: Some(member.event_txs.len()),
-            status_age_secs: Some(member.last_status_change.elapsed().as_secs()),
+            status_age_secs: Some(super::swarm::status_age_secs(
+                member,
+                latest_control_evidence_unix_ms,
+            )),
             last_activity_age_secs: crate::session_metrics::last_activity_age_secs(&target_session),
             joined_age_secs: Some(member.joined_at.elapsed().as_secs()),
             files_touched,

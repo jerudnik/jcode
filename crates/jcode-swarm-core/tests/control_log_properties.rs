@@ -95,8 +95,10 @@ fn replay_matches_in_memory_fold_for_arbitrary_sequences() {
                 writer = ControlLogWriter::open(&path, "swarm-prop", LOCAL_ORIGIN).expect("reopen");
             }
             let event = arbitrary_event(&mut rng);
-            expected.apply(&event);
-            writer.append(event).expect("append");
+            let envelope = writer.append(event).expect("append");
+            // Evidence timestamps live on the envelope, so the expected fold
+            // is built from envelopes as written, exactly what replay reads.
+            expected.apply_envelope(&envelope);
         }
 
         let (replayed, _offset) = replay(&path).expect("replay");

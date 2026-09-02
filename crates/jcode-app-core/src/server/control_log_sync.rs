@@ -170,8 +170,8 @@ fn sync_control_log_inner(
 
         for event in diff_events(&handle.fold, &target_members, target_tasks.as_ref()) {
             match handle.writer.append(event.clone()) {
-                Ok(_) => {
-                    handle.fold.apply(&event);
+                Ok(envelope) => {
+                    handle.fold.apply_envelope(&envelope);
                     appended = true;
                 }
                 Err(error) => {
@@ -202,7 +202,7 @@ pub(super) fn append_control_event(swarm_id: &str, event: SwarmControlEvent) -> 
         let mut logs = CONTROL_LOGS.lock().ok()?;
         let handle = open_handle(&mut logs, swarm_id, &path)?;
         match handle.writer.append(event.clone()) {
-            Ok(_) => handle.fold.apply(&event),
+            Ok(envelope) => handle.fold.apply_envelope(&envelope),
             Err(error) => {
                 crate::logging::warn(&format!(
                     "control log append failed for {}: {}",
@@ -262,6 +262,24 @@ pub(super) fn fold_swarm_control_log(swarm_id: &str) -> SwarmControlState {
         Ok((state, _offset)) => state,
         Err(_) => SwarmControlState::default(),
     }
+}
+
+/// Latest approved evidence timestamp per member across the requested swarms.
+/// Values are Unix epoch milliseconds from control-envelope `wall_ms`, the
+/// same unit as `SwarmLifecycleStatus.updated_at_unix_ms`.
+pub(super) fn latest_member_evidence_unix_ms<'a>(
+    swarm_ids: impl IntoIterator<Item = &'a str>,
+) -> HashMap<String, u64> {
+    let mut latest: HashMap<String, u64> = HashMap::new();
+    for swarm_id in swarm_ids {
+        for (session_id, evidence_unix_ms) in
+            fold_swarm_control_log(swarm_id).latest_member_evidence_unix_ms
+        {
+            let current = latest.entry(session_id).or_default();
+            *current = (*current).max(evidence_unix_ms);
+        }
+    }
+    latest
 }
 
 /// The current resume offset (byte length) of a swarm's control log, or `0` if

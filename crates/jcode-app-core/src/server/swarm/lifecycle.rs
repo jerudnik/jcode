@@ -1,7 +1,37 @@
 use super::*;
 
-pub(in crate::server) fn status_age_secs(last_status_change: Instant) -> u64 {
-    last_status_change.elapsed().as_secs()
+pub(in crate::server) fn status_age_secs_at(
+    member: &SwarmMember,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+    now_unix_ms: u64,
+) -> u64 {
+    let lifecycle = member.lifecycle();
+    crate::protocol::latest_swarm_evidence_unix_ms(&lifecycle, latest_control_log_evidence_unix_ms)
+        .map(|updated_at| now_unix_ms.saturating_sub(updated_at) / 1_000)
+        .unwrap_or_else(|| member.last_status_change.elapsed().as_secs())
+}
+
+pub(in crate::server) fn status_age_secs(
+    member: &SwarmMember,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+) -> u64 {
+    status_age_secs_at(member, latest_control_log_evidence_unix_ms, now_unix_ms())
+}
+
+pub(in crate::server) fn evidence_age_at_least(
+    member: &SwarmMember,
+    latest_control_log_evidence_unix_ms: Option<u64>,
+    now_unix_ms: u64,
+    duration: Duration,
+) -> bool {
+    let latest_evidence = crate::protocol::latest_swarm_evidence_unix_ms(
+        &member.lifecycle(),
+        latest_control_log_evidence_unix_ms,
+    );
+    latest_evidence.map_or_else(
+        || member.last_status_change.elapsed() >= duration,
+        |updated_at| now_unix_ms.saturating_sub(updated_at) >= duration.as_millis() as u64,
+    )
 }
 
 /// Maximum number of live members (agents) in a single swarm. Re-exported from
@@ -375,12 +405,23 @@ pub(in crate::server) fn member_consumes_swarm_capacity(member: &SwarmMember) ->
 
 pub(in crate::server) fn expired_terminal_member_ids(
     members: &HashMap<String, SwarmMember>,
+    latest_control_evidence_unix_ms: &HashMap<String, u64>,
+    now_unix_ms: u64,
     retention: Duration,
 ) -> Vec<String> {
     members
         .values()
         .filter(|member| member.lifecycle().is_terminal())
-        .filter(|member| member.last_status_change.elapsed() >= retention)
+        .filter(|member| {
+            evidence_age_at_least(
+                member,
+                latest_control_evidence_unix_ms
+                    .get(&member.session_id)
+                    .copied(),
+                now_unix_ms,
+                retention,
+            )
+        })
         .map(|member| member.session_id.clone())
         .collect()
 }
@@ -787,6 +828,12 @@ pub(in crate::server) async fn refresh_swarm_task_staleness(
     // recovery briefly marks resumable members `crashed` before restoring
     // them, and salvaging inside that window would double-assign their work.
     let salvage_grace = swarm_task_stale_after();
+    let evidence_by_member = {
+        let plans = swarm_plans.read().await;
+        crate::server::control_log_sync::latest_member_evidence_unix_ms(
+            plans.keys().map(String::as_str),
+        )
+    };
     let salvage_candidates: Vec<(String, String)> = {
         let plans = swarm_plans.read().await;
         let members = swarm_members.read().await;
@@ -808,7 +855,12 @@ pub(in crate::server) async fn refresh_swarm_task_staleness(
                     None => true,
                     Some(member) => {
                         member.lifecycle.is_dead_state()
-                            && member.last_status_change.elapsed() >= salvage_grace
+                            && evidence_age_at_least(
+                                member,
+                                evidence_by_member.get(assignee).copied(),
+                                now_ms,
+                                salvage_grace,
+                            )
                     }
                 };
                 if assignee_is_dead {

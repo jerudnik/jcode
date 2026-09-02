@@ -1319,8 +1319,6 @@ pub(super) async fn handle_comm_list_swarms(
     let swarms = swarms_by_id.read().await.clone();
     let coordinators = swarm_coordinators.read().await.clone();
     let plans = swarm_plans.read().await.clone();
-    let members = swarm_members.read().await;
-    let agent_sessions = sessions.read().await;
 
     let mut swarm_ids: Vec<String> = swarms
         .keys()
@@ -1331,6 +1329,12 @@ pub(super) async fn handle_comm_list_swarms(
         .into_iter()
         .collect();
     swarm_ids.sort();
+    let latest_control_evidence = super::control_log_sync::latest_member_evidence_unix_ms(
+        swarm_ids.iter().map(String::as_str),
+    );
+    let now_unix_ms = super::swarm::now_unix_ms();
+    let members = swarm_members.read().await;
+    let agent_sessions = sessions.read().await;
 
     let mut entries = Vec::with_capacity(swarm_ids.len());
     for swarm_id in swarm_ids {
@@ -1380,7 +1384,11 @@ pub(super) async fn handle_comm_list_swarms(
                 assigned_instance_id: assigned_instance_id_for_fleet(member, plan),
             });
             needs_operator_input |= status_needs_operator_input(&lifecycle_status);
-            let status_age = member.last_status_change.elapsed().as_secs();
+            let status_age = super::swarm::status_age_secs_at(
+                member,
+                latest_control_evidence.get(member_id).copied(),
+                now_unix_ms,
+            );
             last_activity_age_secs =
                 Some(last_activity_age_secs.map_or(status_age, |age| age.min(status_age)));
             if let Some(age) = crate::session_metrics::last_activity_age_secs(member_id) {

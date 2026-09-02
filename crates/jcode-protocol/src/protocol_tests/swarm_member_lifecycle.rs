@@ -52,3 +52,29 @@ fn fleet_member_lifecycle_is_backward_compatible_and_prefers_typed_state() {
     member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Failed);
     assert_eq!(member.lifecycle_status(), "failed");
 }
+
+#[test]
+fn swarm_status_age_uses_latest_epoch_millisecond_evidence() {
+    let lifecycle = jcode_swarm_core::SwarmLifecycleStatus::starting(10_000);
+
+    assert_eq!(latest_swarm_evidence_unix_ms(&lifecycle, None), Some(10_000));
+    assert_eq!(swarm_status_age_secs(15_999, &lifecycle, None), 5);
+    assert_eq!(
+        latest_swarm_evidence_unix_ms(&lifecycle, Some(15_000)),
+        Some(15_000)
+    );
+    assert_eq!(swarm_status_age_secs(15_999, &lifecycle, Some(15_000)), 0);
+    assert_eq!(
+        swarm_status_age_secs(14_000, &lifecycle, Some(15_000)),
+        0,
+        "wall-clock skew must saturate instead of underflowing"
+    );
+}
+
+#[test]
+fn swarm_status_age_treats_zero_lifecycle_timestamp_as_unknown() {
+    let lifecycle = jcode_swarm_core::SwarmLifecycleStatus::default();
+
+    assert_eq!(latest_swarm_evidence_unix_ms(&lifecycle, None), None);
+    assert_eq!(swarm_status_age_secs(1_800_000_000_000, &lifecycle, None), 0);
+}
