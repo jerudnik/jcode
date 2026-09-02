@@ -489,6 +489,11 @@ pub struct SwarmFleetMember {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub friendly_name: Option<String>,
     pub status: String,
+    /// Typed lifecycle state, same forward-compat pattern as
+    /// `SwarmMemberStatus.lifecycle`. Older servers omit it; clients parse
+    /// once from `status` at the protocol boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<jcode_swarm_core::MemberLifecycleState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subagent_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -509,6 +514,10 @@ pub struct SwarmMemberStatus {
     /// Canonical lifecycle state: starting, ready, assigned, running,
     /// succeeded, failed, stopped, or lost.
     pub status: String,
+    /// Typed lifecycle state. Older servers omit this field, so clients must
+    /// fall back to parsing `status` once at their protocol boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<jcode_swarm_core::MemberLifecycleState>,
     /// Optional detail (task, error, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -557,6 +566,34 @@ pub struct SwarmMemberStatus {
     /// Ephemeral runtime metadata used by the live swarm card.
     #[serde(default, skip_serializing_if = "SwarmMemberRuntime::is_empty")]
     pub runtime: SwarmMemberRuntime,
+}
+
+impl SwarmMemberStatus {
+    pub fn lifecycle_state(&self) -> jcode_swarm_core::MemberLifecycleState {
+        self.lifecycle.unwrap_or_else(|| {
+            jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&self.status)
+        })
+    }
+
+    pub fn lifecycle_status(&self) -> &'static str {
+        self.lifecycle_state().as_str()
+    }
+
+    pub fn normalize_lifecycle(&mut self) {
+        self.lifecycle = Some(self.lifecycle_state());
+    }
+}
+
+impl SwarmFleetMember {
+    pub fn lifecycle_state(&self) -> jcode_swarm_core::MemberLifecycleState {
+        self.lifecycle.unwrap_or_else(|| {
+            jcode_swarm_core::MemberLifecycleState::from_compatibility_status(&self.status)
+        })
+    }
+
+    pub fn lifecycle_status(&self) -> &'static str {
+        self.lifecycle_state().as_str()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

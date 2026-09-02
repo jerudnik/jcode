@@ -51,9 +51,7 @@ fn member_label(member: &SwarmMemberStatus) -> String {
 /// carries older spellings of the same state, so matching literals here would
 /// drop a real completion reported as `completed` and would announce a
 /// spurious transition when a member's spelling changed but its state did not.
-fn classify(prev_status: &str, next_status: &str) -> Option<Transition> {
-    let prev = MemberLifecycleState::from_compatibility_status(prev_status);
-    let next = MemberLifecycleState::from_compatibility_status(next_status);
+fn classify(prev: MemberLifecycleState, next: MemberLifecycleState) -> Option<Transition> {
     if prev == next {
         return None;
     }
@@ -88,9 +86,9 @@ pub(in crate::tui::app) fn swarm_status_transition_notice(
     if prev.is_empty() || next.is_empty() {
         return None;
     }
-    let prev_status: std::collections::HashMap<&str, &str> = prev
+    let prev_status: std::collections::HashMap<&str, MemberLifecycleState> = prev
         .iter()
-        .map(|m| (m.session_id.as_str(), m.status.as_str()))
+        .map(|m| (m.session_id.as_str(), m.lifecycle_state()))
         .collect();
 
     let mut buckets: Vec<(Transition, Vec<String>)> = Vec::new();
@@ -99,7 +97,7 @@ pub(in crate::tui::app) fn swarm_status_transition_notice(
             // New member: spawning is user/agent initiated and already visible.
             continue;
         };
-        if let Some(transition) = classify(prev_status, &member.status) {
+        if let Some(transition) = classify(*prev_status, member.lifecycle_state()) {
             match buckets.iter_mut().find(|(t, _)| *t == transition) {
                 Some((_, names)) => names.push(member_label(member)),
                 None => buckets.push((transition, vec![member_label(member)])),
@@ -118,7 +116,10 @@ pub(in crate::tui::app) fn swarm_status_transition_notice(
 
     // Tail: the same "M/N active" tally the strip shows, or a wrap-up line
     // when nothing is working anymore.
-    let active = next.iter().filter(|m| is_active_status(&m.status)).count();
+    let active = next
+        .iter()
+        .filter(|m| is_active_status(m.lifecycle_status()))
+        .count();
     segments.push(if active > 0 {
         format!("{active}/{} active", next.len())
     } else {
@@ -138,6 +139,7 @@ mod tests {
             session_id: id.to_string(),
             friendly_name: Some(id.to_string()),
             status: status.to_string(),
+            lifecycle: None,
             detail: None,
             task_label: None,
             subagent_type: None,

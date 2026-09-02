@@ -27,6 +27,7 @@ fn chat_swarm_member(session_id: &str) -> crate::protocol::SwarmMemberStatus {
         session_id: session_id.to_string(),
         friendly_name: Some("cow".to_string()),
         status: "running".to_string(),
+        lifecycle: None,
         detail: None,
         task_label: Some("API reviewer".to_string()),
         role: Some("agent".to_string()),
@@ -90,6 +91,7 @@ fn nested_chat_swarm_member(
     member.todo_items = vec![crate::protocol::SwarmTodoItem {
         content: todo.to_string(),
         status: "in_progress".to_string(),
+        lifecycle: None,
         tool_intents: Vec::new(),
     }];
     member

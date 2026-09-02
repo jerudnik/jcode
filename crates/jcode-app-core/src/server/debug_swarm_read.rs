@@ -54,7 +54,7 @@ pub(super) async fn maybe_handle_swarm_read_command(
                 "friendly_name": member.friendly_name,
                 "swarm_id": member.swarm_id,
                 "working_dir": member.working_dir,
-                "status": member.status,
+                "status": member.lifecycle_status(),
                 "detail": member.detail,
                 "role": member.role,
                 "is_headless": member.is_headless,
@@ -89,7 +89,9 @@ pub(super) async fn maybe_handle_swarm_read_command(
                 .iter()
                 .filter_map(|session_id| members.get(session_id))
                 .map(|member| {
-                    *status_counts.entry(member.status.clone()).or_default() += 1;
+                    *status_counts
+                        .entry(member.lifecycle_status().to_string())
+                        .or_default() += 1;
                     if member.is_headless {
                         headless_count += 1;
                     }
@@ -100,7 +102,7 @@ pub(super) async fn maybe_handle_swarm_read_command(
                     serde_json::json!({
                         "session_id": member.session_id,
                         "friendly_name": member.friendly_name,
-                        "status": member.status,
+                        "status": member.lifecycle_status(),
                         "detail": member.detail,
                         "role": member.role,
                         "is_headless": member.is_headless,
@@ -180,7 +182,7 @@ pub(super) async fn maybe_handle_swarm_read_command(
                 "friendly_name": member.friendly_name,
                 "role": member.role,
                 "swarm_id": member.swarm_id,
-                "status": member.status,
+                "status": member.lifecycle_status(),
                 "is_coordinator": is_coordinator,
             }));
         }
@@ -527,7 +529,7 @@ pub(super) async fn maybe_handle_swarm_read_command(
                         serde_json::json!({
                             "session_id": m.session_id,
                             "friendly_name": m.friendly_name,
-                            "status": m.status,
+                            "status": m.lifecycle_status(),
                             "detail": m.detail,
                             "working_dir": m.working_dir,
                         })
@@ -611,14 +613,14 @@ pub(super) async fn maybe_handle_swarm_read_command(
             };
 
             let is_processing = member_info
-                .map(|m| m.status == "running")
+                .map(|m| m.lifecycle_status() == "running")
                 .unwrap_or(agent_state.is_none());
 
             serde_json::json!({
                 "session_id": target_session,
                 "friendly_name": member_info.and_then(|m| m.friendly_name.clone()),
                 "swarm_id": member_info.and_then(|m| m.swarm_id.clone()),
-                "status": member_info.map(|m| m.status.clone()),
+                "status": member_info.map(SwarmMember::lifecycle_status),
                 "detail": member_info.and_then(|m| m.detail.clone()),
                 "joined_secs_ago": member_info.map(|m| m.joined_at.elapsed().as_secs()),
                 "status_changed_secs_ago": member_info.map(|m| m.last_status_change.elapsed().as_secs()),

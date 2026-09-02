@@ -1372,6 +1372,7 @@ pub(super) async fn handle_comm_list_swarms(
                 session_id: member.session_id.clone(),
                 friendly_name: member.friendly_name.clone(),
                 status: lifecycle_status.clone(),
+                lifecycle: Some(member.lifecycle().state),
                 subagent_type: member.subagent_type.clone(),
                 task_label: member.task_label.clone(),
                 swarm_id: member.swarm_id.clone(),

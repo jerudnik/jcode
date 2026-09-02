@@ -1360,6 +1360,7 @@ fn test_redacted_for_export_redacts_replay_events() -> Result<()> {
         session_id: "session_fox".to_string(),
         friendly_name: Some("fox".to_string()),
         status: "running".to_string(),
+        lifecycle: None,
         detail: Some("ANTHROPIC_API_KEY=sk-ant-secret-value".to_string()),
         role: Some("agent".to_string()),
         is_headless: None,

@@ -74,6 +74,7 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
         session_id: id.to_string(),
         friendly_name: Some(id.to_string()),
         status: status.to_string(),
+        lifecycle: None,
         detail: None,
         task_label: None,
         subagent_type: None,

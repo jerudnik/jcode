@@ -338,7 +338,10 @@ pub(in crate::tui::app) fn render_swarm_fleet(swarms: &[SwarmFleetEntry]) -> Str
                     .as_ref()
                     .map(|i| format!("  node:{i}"))
                     .unwrap_or_default();
-                lines.push(format!("    • {name}  {}  {kind}{node}", member.status));
+                lines.push(format!(
+                    "    • {name}  {}  {kind}{node}",
+                    member.lifecycle_status()
+                ));
             }
             let more = swarm.members.len().saturating_sub(8);
             if more > 0 {
@@ -390,7 +393,12 @@ pub(in crate::tui::app) fn render_swarm_roster(
             .and_then(|item| phases_by_id.get(&item.id).map(String::as_str))
             .or_else(|| instance.and(member.subagent_type.as_deref()));
         let resolved = resolve_member_type(assigned_phase, None, member.subagent_type.as_deref());
-        let mut line = format!("• {} — {} — {}", name, member.status, resolved.display());
+        let mut line = format!(
+            "• {} — {} — {}",
+            name,
+            member.lifecycle_status(),
+            resolved.display()
+        );
         if let Some(role) = member.role.as_deref()
             && role == "coordinator"
         {
@@ -488,6 +496,7 @@ mod tests {
             session_id: session_id.to_string(),
             friendly_name: Some(session_id.to_string()),
             status: status.to_string(),
+            lifecycle: None,
             detail: None,
             task_label: None,
             subagent_type: tag.map(str::to_string),

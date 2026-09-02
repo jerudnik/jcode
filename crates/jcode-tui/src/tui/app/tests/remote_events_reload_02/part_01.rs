@@ -781,6 +781,7 @@ fn test_swarm_completion_notification_inserts_agent_snapshot_without_report_pros
         session_id: session_id.to_string(),
         friendly_name: Some("cow".to_string()),
         status: "completed".to_string(),
+        lifecycle: None,
         detail: None,
         task_label: Some("card demo".to_string()),
         role: Some("agent".to_string()),

@@ -1852,7 +1852,10 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_side_panel_snapshot(snapshot);
             false
         }
-        ServerEvent::SwarmStatus { members } => {
+        ServerEvent::SwarmStatus { mut members } => {
+            for member in &mut members {
+                member.normalize_lifecycle();
+            }
             let members_changed = app.remote_swarm_members != members;
             if app.swarm_enabled {
                 // Surface terminal transitions only within this session's managed subtree.
@@ -2319,8 +2322,9 @@ pub(in crate::tui::app) fn handle_server_event(
                     .find(|member| member.session_id == from_session)
                     .cloned()
                 {
-                    if member.status == "running" {
+                    if member.lifecycle_state() == jcode_swarm_core::MemberLifecycleState::Running {
                         member.status = "succeeded".to_string();
+                        member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Succeeded);
                     }
                     if let Some(snapshot) = crate::tui::ui::encode_swarm_agent_snapshot(&member) {
                         app.push_display_message(DisplayMessage::swarm(

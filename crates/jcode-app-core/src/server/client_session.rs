@@ -1353,7 +1353,6 @@ pub(super) async fn handle_resume_session(
                         }
                     }
                     member.session_id = session_id.clone();
-                    member.status = member.lifecycle_status().to_string();
                     member.detail = None;
                     members.insert(session_id.clone(), member);
                 }
