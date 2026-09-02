@@ -81,7 +81,7 @@ fn notify_control_log_append(path: &PathBuf, offset: u64) {
 }
 
 /// Project the server's in-memory member records into the fold's member view.
-fn target_member_view(members: &[SwarmMember]) -> HashMap<String, MemberControlState> {
+pub(super) fn target_member_view(members: &[SwarmMember]) -> HashMap<String, MemberControlState> {
     members
         .iter()
         .map(|member| {
@@ -89,7 +89,7 @@ fn target_member_view(members: &[SwarmMember]) -> HashMap<String, MemberControlS
                 member.session_id.clone(),
                 MemberControlState {
                     role: member.role.clone(),
-                    status: member.status.clone(),
+                    status: member.lifecycle_status().to_string(),
                     friendly_name: member.friendly_name.clone(),
                 },
             )
