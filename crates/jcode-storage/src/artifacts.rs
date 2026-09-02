@@ -808,6 +808,17 @@ artifact_map! {
         may_contain_secrets: false,
         example_key: "session",
     },
+    DurableInbox {
+        marker: Durable,
+        key: (),
+        tier: ArtifactTier::Durable(DurableKind::Inbox),
+        canonical_root: CanonicalRoot::DurableInbox,
+        canonical: "",
+        legacy: None,
+        pinned: None,
+        may_contain_secrets: false,
+        example_key: "",
+    },
     SessionInboxItem {
         marker: Durable,
         key: SessionInboxId,

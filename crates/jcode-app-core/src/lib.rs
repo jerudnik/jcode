@@ -21,7 +21,7 @@
 pub use jcode_base::{
     auth, background, browser, bus, cache_invalidation, cache_tracker, client_input, compaction,
     config, copilot_usage, dictation, embedding_backend, env, gateway, generated_image, gmail,
-    goal, hooks, id, import, live_tests, logging, login_qr, mcp, memory, memory_agent,
+    goal, hooks, id, import, inbox, live_tests, logging, login_qr, mcp, memory, memory_agent,
     memory_graph, memory_judge_metrics, memory_log, memory_rerank, memory_types, message,
     mobile_server, model_pricing, plan, platform, power_inhibit, process_memory, process_title,
     prompt, protocol, provider, provider_activity, provider_catalog, registry, runtime_memory_log,

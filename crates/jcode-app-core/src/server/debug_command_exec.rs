@@ -4,6 +4,7 @@ use super::debug_jobs::{DebugJob, maybe_start_async_debug_job};
 use super::{ServerIdentity, SessionControlHandle, SessionInterruptQueues};
 use crate::agent::Agent;
 use crate::build;
+use crate::inbox::store::{InboxBounds, InboxStore};
 use crate::mcp::McpConfig;
 use anyhow::Result;
 use jcode_agent_runtime::{InterruptSignal, SoftInterruptSource};
@@ -160,6 +161,17 @@ pub(super) async fn execute_debug_command(
     interrupt_context: Option<DebugInterruptContext>,
 ) -> Result<String> {
     let trimmed = command.trim();
+
+    if trimmed == "inbox" || trimmed.starts_with("inbox:") {
+        let requested_session = trimmed
+            .strip_prefix("inbox:")
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let snapshot =
+            InboxStore::new(InboxBounds::default())?.debug_snapshot(requested_session)?;
+        return Ok(serde_json::to_string_pretty(&snapshot)
+            .unwrap_or_else(|_| "{\"items\":[],\"quarantined\":[]}".to_string()));
+    }
 
     if let Some(output) =
         maybe_start_async_debug_job(Arc::clone(&agent), trimmed, Arc::clone(&debug_jobs)).await?
@@ -652,11 +664,14 @@ pub(super) async fn execute_debug_command(
 mod tests {
     use super::{DebugInterruptContext, execute_debug_command, resolve_debug_session};
     use crate::agent::Agent;
+    use crate::inbox::store::{InboxBounds, InboxStore};
+    use crate::inbox::{DeliveryPolicy, InboxClass, InboxItemDraft};
     use crate::provider::{EventStream, Provider};
     use crate::tool::Registry;
     use anyhow::Result;
     use async_trait::async_trait;
     use jcode_agent_runtime::InterruptSignal;
+    use serde_json::json;
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::sync::Arc;
@@ -715,6 +730,41 @@ mod tests {
         let provider: Arc<dyn Provider> = Arc::new(TestProvider);
         let registry = Registry::new(provider.clone()).await;
         Arc::new(AsyncMutex::new(Agent::new(provider, registry)))
+    }
+
+    #[tokio::test]
+    async fn debug_inbox_command_redacts_payload_bodies() -> Result<()> {
+        let _env_lock = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp JCODE_HOME");
+        let _home = EnvGuard::set("JCODE_HOME", &temp_home.path().to_string_lossy());
+        let secret = "debug-inbox-payload-must-not-leak";
+        let store = InboxStore::new(InboxBounds::default())?;
+        assert_eq!(store.root(), temp_home.path().join("state/inbox"));
+        let id = store.enqueue(
+            InboxItemDraft {
+                class: InboxClass::Dm,
+                target_session_id: "debug-session".to_string(),
+                swarm_id: Some("debug-swarm".to_string()),
+                payload: json!({"body": secret}),
+                delivery_policy: DeliveryPolicy::default(),
+                due_at: 100,
+                ttl_ms: 1_000,
+            },
+            100,
+        )?;
+
+        let output = execute_debug_command(
+            test_agent().await,
+            "inbox:debug-session",
+            Arc::new(RwLock::new(HashMap::new())),
+            None,
+            None,
+        )
+        .await?;
+        assert!(output.contains(id.as_str()), "{output}");
+        assert!(output.contains("[REDACTED]"), "{output}");
+        assert!(!output.contains(secret), "{output}");
+        Ok(())
     }
 
     #[tokio::test]
