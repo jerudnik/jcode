@@ -70,3 +70,14 @@ fn lint_fixture_rejects_a_direct_member_status_output_read() {
     let fixture = r#"let output = member.status.clone();"#;
     assert_eq!(prohibited_reads(fixture), vec![(1, "member.status")]);
 }
+
+#[test]
+fn server_swarm_member_status_field_remains_type_keyed_deprecated() {
+    let state = include_str!("../src/server/state.rs");
+    assert!(
+        state.contains(
+            "#[deprecated(note = \"compatibility mirror only; use lifecycle() or lifecycle_status()\")]\n    pub status: String,"
+        ),
+        "SwarmMember.status must remain deprecated so rustc and the zero-warning budget reject new typed mirror reads"
+    );
+}

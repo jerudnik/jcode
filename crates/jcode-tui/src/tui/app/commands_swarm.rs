@@ -513,6 +513,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn swarm_roster_prefers_typed_lifecycle_over_stale_compatibility_status() {
+        let mut member = member("worker-1", "ready", None);
+        member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Failed);
+
+        let rendered = render_swarm_roster(&[member], &[], &BTreeMap::new());
+
+        assert!(rendered.contains("worker-1 — failed"), "{rendered}");
+        assert!(!rendered.contains("worker-1 — ready"), "{rendered}");
+    }
+
     fn item(id: &str, status: &str, assigned_to: Option<&str>) -> PlanItem {
         PlanItem {
             content: format!("work {id}"),
@@ -711,6 +722,7 @@ mod tests {
                     session_id: "session_bat".to_string(),
                     friendly_name: Some("bat".to_string()),
                     status: "running".to_string(),
+                    lifecycle: None,
                     subagent_type: Some("implement".to_string()),
                     task_label: Some("Build feature".to_string()),
                     swarm_id: Some("swarm-a".to_string()),
@@ -720,6 +732,7 @@ mod tests {
                     session_id: "session_verify".to_string(),
                     friendly_name: Some("verifier".to_string()),
                     status: "ready".to_string(),
+                    lifecycle: None,
                     subagent_type: None,
                     task_label: None,
                     swarm_id: Some("swarm-a".to_string()),

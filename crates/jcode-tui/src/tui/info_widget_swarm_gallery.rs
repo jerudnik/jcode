@@ -532,6 +532,16 @@ mod tests {
         assert_eq!(tiles[0].role_glyph.as_deref(), Some("★"));
     }
 
+    #[test]
+    fn gallery_prefers_typed_lifecycle_over_stale_compatibility_status() {
+        let mut member = member("alpha", "ready", None, None);
+        member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Failed);
+
+        let gallery = members_to_gallery(&[member]);
+
+        assert_eq!(gallery[0].status, "failed");
+    }
+
     /// Regression: pop-out selection resolves `swarm_panel_selected` through
     /// `members_display_order`, so its order must match what the renderer
     /// actually draws (tile order) for mixed roles, ties, and unnamed

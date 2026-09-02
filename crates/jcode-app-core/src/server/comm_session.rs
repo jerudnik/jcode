@@ -663,6 +663,7 @@ where
     clippy::too_many_arguments,
     reason = "visible spawn registration updates swarm state, event history, and UI delivery metadata together"
 )]
+#[allow(deprecated)]
 async fn register_visible_spawned_member(
     session_id: &str,
     swarm_id: &str,

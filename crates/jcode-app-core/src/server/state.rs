@@ -269,6 +269,7 @@ pub struct SwarmMember {
     /// Whether swarm coordination is enabled for this member
     pub swarm_enabled: bool,
     /// Lifecycle status (ready, running, completed, failed, stopped, etc.)
+    #[deprecated(note = "compatibility mirror only; use lifecycle() or lifecycle_status()")]
     pub status: String,
     /// Canonical assignment lifecycle. Legacy `status` remains a
     /// compatibility mirror while callers migrate, but no output surface
@@ -318,6 +319,7 @@ pub struct SwarmMember {
     pub runtime: crate::protocol::SwarmMemberRuntime,
 }
 
+#[allow(deprecated)]
 impl SwarmMember {
     pub fn lifecycle(&self) -> SwarmLifecycleStatus {
         let mut lifecycle = self.lifecycle.clone();

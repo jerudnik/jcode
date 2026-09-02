@@ -309,6 +309,7 @@ pub(super) async fn handle_clear_session(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(deprecated)]
 async fn ensure_client_swarm_member(
     client_session_id: &str,
     client_connection_id: &str,

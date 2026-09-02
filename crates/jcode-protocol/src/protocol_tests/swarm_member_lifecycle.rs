@@ -34,3 +34,21 @@ fn typed_swarm_member_lifecycle_wins_over_stale_compatibility_status() {
     assert_eq!(member.lifecycle_status(), "failed");
     assert_eq!(member.status, "ready", "compatibility output remains intact");
 }
+
+#[test]
+fn fleet_member_lifecycle_is_backward_compatible_and_prefers_typed_state() {
+    let mut member: SwarmFleetMember = serde_json::from_value(serde_json::json!({
+        "session_id": "worker-1",
+        "friendly_name": null,
+        "status": "completed"
+    }))
+    .unwrap();
+    assert_eq!(
+        member.lifecycle_state(),
+        jcode_swarm_core::MemberLifecycleState::Succeeded
+    );
+
+    member.status = "ready".to_string();
+    member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Failed);
+    assert_eq!(member.lifecycle_status(), "failed");
+}

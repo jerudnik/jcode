@@ -91,7 +91,6 @@ fn nested_chat_swarm_member(
     member.todo_items = vec![crate::protocol::SwarmTodoItem {
         content: todo.to_string(),
         status: "in_progress".to_string(),
-        lifecycle: None,
         tool_intents: Vec::new(),
     }];
     member
