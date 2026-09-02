@@ -583,8 +583,8 @@ async fn resolve_assignment_target_session(
             .get(&right.session_id)
             .copied()
             .unwrap_or(0);
-        let left_rank = if left.status == "ready" { 0 } else { 1 };
-        let right_rank = if right.status == "ready" { 0 } else { 1 };
+        let left_rank = if left.lifecycle().state == jcode_swarm_core::MemberLifecycleState::Ready { 0 } else { 1 };
+        let right_rank = if right.lifecycle().state == jcode_swarm_core::MemberLifecycleState::Ready { 0 } else { 1 };
         left_load
             .cmp(&right_load)
             .then_with(|| left_rank.cmp(&right_rank))
@@ -866,8 +866,8 @@ async fn resolve_assignment_target_for_task(
             .get(&right.session_id)
             .copied()
             .unwrap_or(0);
-        let left_rank = if left.status == "ready" { 0 } else { 1 };
-        let right_rank = if right.status == "ready" { 0 } else { 1 };
+        let left_rank = if left.lifecycle().state == jcode_swarm_core::MemberLifecycleState::Ready { 0 } else { 1 };
+        let right_rank = if right.lifecycle().state == jcode_swarm_core::MemberLifecycleState::Ready { 0 } else { 1 };
         right_carry
             .cmp(&left_carry)
             .then_with(|| right_meta.cmp(&left_meta))

@@ -338,7 +338,10 @@ pub(in crate::tui::app) fn render_swarm_fleet(swarms: &[SwarmFleetEntry]) -> Str
                     .as_ref()
                     .map(|i| format!("  node:{i}"))
                     .unwrap_or_default();
-                lines.push(format!("    • {name}  {}  {kind}{node}", member.status));
+                lines.push(format!(
+                    "    • {name}  {}  {kind}{node}",
+                    member.lifecycle_status()
+                ));
             }
             let more = swarm.members.len().saturating_sub(8);
             if more > 0 {
@@ -390,7 +393,12 @@ pub(in crate::tui::app) fn render_swarm_roster(
             .and_then(|item| phases_by_id.get(&item.id).map(String::as_str))
             .or_else(|| instance.and(member.subagent_type.as_deref()));
         let resolved = resolve_member_type(assigned_phase, None, member.subagent_type.as_deref());
-        let mut line = format!("• {} — {} — {}", name, member.status, resolved.display());
+        let mut line = format!(
+            "• {} — {} — {}",
+            name,
+            member.lifecycle_status(),
+            resolved.display()
+        );
         if let Some(role) = member.role.as_deref()
             && role == "coordinator"
         {
@@ -488,6 +496,7 @@ mod tests {
             session_id: session_id.to_string(),
             friendly_name: Some(session_id.to_string()),
             status: status.to_string(),
+            lifecycle: None,
             detail: None,
             task_label: None,
             subagent_type: tag.map(str::to_string),
@@ -502,6 +511,17 @@ mod tests {
             initial_prompt_delivered: None,
             runtime: crate::protocol::SwarmMemberRuntime::default(),
         }
+    }
+
+    #[test]
+    fn swarm_roster_prefers_typed_lifecycle_over_stale_compatibility_status() {
+        let mut member = member("worker-1", "ready", None);
+        member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Failed);
+
+        let rendered = render_swarm_roster(&[member], &[], &BTreeMap::new());
+
+        assert!(rendered.contains("worker-1 — failed"), "{rendered}");
+        assert!(!rendered.contains("worker-1 — ready"), "{rendered}");
     }
 
     fn item(id: &str, status: &str, assigned_to: Option<&str>) -> PlanItem {
@@ -702,6 +722,7 @@ mod tests {
                     session_id: "session_bat".to_string(),
                     friendly_name: Some("bat".to_string()),
                     status: "running".to_string(),
+                    lifecycle: None,
                     subagent_type: Some("implement".to_string()),
                     task_label: Some("Build feature".to_string()),
                     swarm_id: Some("swarm-a".to_string()),
@@ -711,6 +732,7 @@ mod tests {
                     session_id: "session_verify".to_string(),
                     friendly_name: Some("verifier".to_string()),
                     status: "ready".to_string(),
+                    lifecycle: None,
                     subagent_type: None,
                     task_label: None,
                     swarm_id: Some("swarm-a".to_string()),

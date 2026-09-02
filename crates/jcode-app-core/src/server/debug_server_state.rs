@@ -88,7 +88,7 @@ pub(super) async fn maybe_handle_server_state_command(
         let mut out: Vec<serde_json::Value> = Vec::new();
         for (sid, agent_arc) in &connected_agents {
             let member_info = members.get(sid);
-            let member_status = member_info.map(|m| m.status.as_str());
+            let member_status = member_info.map(SwarmMember::lifecycle_status);
             let (provider, model, is_processing, working_dir_str, token_usage): (
                 Option<String>,
                 Option<String>,
@@ -127,7 +127,7 @@ pub(super) async fn maybe_handle_server_state_command(
                 "is_processing": is_processing,
                 "working_dir": final_working_dir,
                 "swarm_id": member_info.and_then(|m| m.swarm_id.clone()),
-                "status": member_info.map(|m| m.status.clone()),
+                "status": member_info.map(SwarmMember::lifecycle_status),
                 "detail": member_info.and_then(|m| m.detail.clone()),
                 "token_usage": token_usage,
                 "server_name": server_identity.name,
@@ -260,7 +260,7 @@ pub(super) async fn maybe_handle_server_state_command(
                 "friendly_name": member.and_then(|m| m.friendly_name.clone()),
                 "working_dir": member.and_then(|m| m.working_dir.clone()),
                 "swarm_id": member.and_then(|m| m.swarm_id.clone()),
-                "status": member.map(|m| m.status.clone()),
+                "status": member.map(SwarmMember::lifecycle_status),
                 "detail": member.and_then(|m| m.detail.clone()),
                 "connected_secs_ago": info.connected_at.elapsed().as_secs(),
                 "last_seen_secs_ago": info.last_seen.elapsed().as_secs(),
@@ -456,7 +456,7 @@ async fn build_server_memory_payload(
     let swarm_member_estimate_bytes: usize =
         members.values().map(estimate_swarm_member_bytes).sum();
     let swarm_status_counts =
-        summarize_status_counts(members.values().map(|member| member.status.as_str()));
+        summarize_status_counts(members.values().map(SwarmMember::lifecycle_status));
     let swarm_member_count = members.len();
     drop(members);
 
@@ -673,7 +673,7 @@ fn estimate_client_connection_bytes(info: &ClientConnectionInfo) -> usize {
 
 fn estimate_swarm_member_bytes(member: &SwarmMember) -> usize {
     member.session_id.len()
-        + member.status.len()
+        + member.lifecycle_status().len()
         + member.detail.as_ref().map(|value| value.len()).unwrap_or(0)
         + member
             .friendly_name

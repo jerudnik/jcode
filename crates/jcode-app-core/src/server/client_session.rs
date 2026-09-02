@@ -309,6 +309,7 @@ pub(super) async fn handle_clear_session(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(deprecated)]
 async fn ensure_client_swarm_member(
     client_session_id: &str,
     client_connection_id: &str,
@@ -1353,7 +1354,6 @@ pub(super) async fn handle_resume_session(
                         }
                     }
                     member.session_id = session_id.clone();
-                    member.status = member.lifecycle_status().to_string();
                     member.detail = None;
                     members.insert(session_id.clone(), member);
                 }

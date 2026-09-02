@@ -171,6 +171,7 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
                 session_id: "sess_worker".to_string(),
                 friendly_name: Some("marten".to_string()),
                 status: "running".to_string(),
+                lifecycle: None,
                 subagent_type: Some("verify".to_string()),
                 task_label: Some("Check fleet picker".to_string()),
                 swarm_id: Some("swarm_123".to_string()),

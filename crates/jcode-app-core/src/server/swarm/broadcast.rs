@@ -30,6 +30,7 @@ async fn broadcast_swarm_status_now(
                     session_id: m.session_id.clone(),
                     friendly_name: m.friendly_name.clone(),
                     status: m.lifecycle_status().to_string(),
+                    lifecycle: Some(m.lifecycle().state),
                     detail: m.detail.clone(),
                     task_label: m.task_label.clone(),
                     subagent_type: m.subagent_type.clone(),
@@ -47,10 +48,7 @@ async fn broadcast_swarm_status_now(
                         provider: m.runtime.provider.clone(),
                         auth_method: m.runtime.auth_method.clone(),
                         effort: m.runtime.effort.clone(),
-                        elapsed_secs: if matches!(
-                            m.lifecycle_status(),
-                            "running"
-                        ) {
+                        elapsed_secs: if matches!(m.lifecycle_status(), "running") {
                             Some(m.joined_at.elapsed().as_secs())
                         } else {
                             Some(m.runtime.elapsed_secs.unwrap_or(0))

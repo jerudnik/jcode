@@ -447,6 +447,9 @@ pub(super) fn apply_replay_event(
         ReplayEvent::SwarmStatus { members } => {
             app.swarm_enabled = true;
             app.remote_swarm_members = members.clone();
+            for member in &mut app.remote_swarm_members {
+                member.normalize_lifecycle();
+            }
         }
         ReplayEvent::SwarmPlan {
             swarm_id,

@@ -44,10 +44,7 @@ fn member_icon(member: &SwarmMemberStatus) -> Option<String> {
 /// with an "ago" suffix.
 fn age_marker(member: &SwarmMemberStatus, age: u64) -> String {
     let human = humanize_age(age);
-    let terminal = matches!(
-        member.status.as_str(),
-        "succeeded" | "failed" | "stopped" | "lost"
-    );
+    let terminal = member.lifecycle_state().is_terminal();
     if terminal {
         return if human == "now" {
             "· now".to_string()
@@ -91,7 +88,7 @@ pub(crate) fn members_to_gallery(members: &[SwarmMemberStatus]) -> Vec<GalleryMe
         .map(|member| GalleryMember {
             label: member_label(member),
             icon: member_icon(member),
-            status: member.status.clone(),
+            status: member.lifecycle_status().to_string(),
             task: member.task_label.clone(),
             role: member.role.clone(),
             body: member_body(member),
@@ -507,6 +504,7 @@ mod tests {
             session_id: id.to_string(),
             friendly_name: Some(id.to_string()),
             status: status.to_string(),
+            lifecycle: None,
             detail: detail.map(str::to_string),
             task_label: None,
             subagent_type: None,
@@ -532,6 +530,16 @@ mod tests {
         let tiles = members_to_tiles(&members_to_gallery(&members));
         assert_eq!(tiles[0].title, "alpha");
         assert_eq!(tiles[0].role_glyph.as_deref(), Some("★"));
+    }
+
+    #[test]
+    fn gallery_prefers_typed_lifecycle_over_stale_compatibility_status() {
+        let mut member = member("alpha", "ready", None, None);
+        member.lifecycle = Some(jcode_swarm_core::MemberLifecycleState::Failed);
+
+        let gallery = members_to_gallery(&[member]);
+
+        assert_eq!(gallery[0].status, "failed");
     }
 
     /// Regression: pop-out selection resolves `swarm_panel_selected` through

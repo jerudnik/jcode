@@ -19,6 +19,7 @@ fn strip_member(id: &str, name: &str, status: &str) -> SwarmMemberStatus {
         session_id: id.to_string(),
         friendly_name: Some(name.to_string()),
         status: status.to_string(),
+        lifecycle: None,
         detail: Some("working on task".to_string()),
         task_label: None,
         subagent_type: None,

@@ -27,6 +27,7 @@ fn chat_swarm_member(session_id: &str) -> crate::protocol::SwarmMemberStatus {
         session_id: session_id.to_string(),
         friendly_name: Some("cow".to_string()),
         status: "running".to_string(),
+        lifecycle: None,
         detail: None,
         task_label: Some("API reviewer".to_string()),
         role: Some("agent".to_string()),
