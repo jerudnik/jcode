@@ -73,7 +73,7 @@ pub fn status_glyph(status: &str, spinner_frame: usize) -> &'static str {
         "running" | "streaming" | "thinking" => {
             STRIP_SPINNER_FRAMES[spinner_frame % STRIP_SPINNER_FRAMES.len()]
         }
-        "completed" | "done" => "✓",
+        "completed" | "done" | "succeeded" => "✓",
         "ready" => "•",
         "blocked" | "waiting_network" => "⏸",
         "failed" | "crashed" => "✗",
@@ -90,7 +90,7 @@ pub fn status_glyph(status: &str, spinner_frame: usize) -> &'static str {
 fn card_status_glyph(status: &str) -> &'static str {
     match status {
         "running" | "streaming" | "thinking" => "●",
-        "completed" | "done" => "✓",
+        "completed" | "done" | "succeeded" => "✓",
         "ready" => "•",
         "blocked" | "waiting_network" => "⏸",
         "failed" | "crashed" => "✗",
