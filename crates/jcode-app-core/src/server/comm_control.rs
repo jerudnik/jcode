@@ -60,10 +60,21 @@ fn filter_swarm_agent_candidates<'a>(
             member.session_id != req_session_id
                 && member.swarm_id.as_deref() == Some(swarm_id)
                 && member.role == "agent"
-                && matches!(member.status.as_str(), "ready" | "succeeded")
+                && member_is_assignment_eligible(member)
                 && is_drivable_auto_worker(member, req_session_id)
         })
         .collect()
+}
+
+/// The single lifecycle definition for whether a worker may receive a new
+/// assignment. Keep the historical ready/succeeded set while reading it from
+/// canonical state rather than the compatibility mirror.
+fn member_is_assignment_eligible(member: &SwarmMember) -> bool {
+    matches!(
+        member.lifecycle().state,
+        jcode_swarm_core::MemberLifecycleState::Ready
+            | jcode_swarm_core::MemberLifecycleState::Succeeded
+    )
 }
 
 /// Whether `member` can be auto-assigned a task and be relied on to run it.
@@ -724,7 +735,6 @@ async fn reclaim_stale_plan_assignments(
 /// per-node by [`crate::plan::MAX_DEAD_ASSIGNEE_RECLAIMS`] to respect the
 /// repeat-failure policy: beyond the cap only explicit `retry`/`assign_task`
 /// move the node.
-#[allow(deprecated, reason = "migrated to canonical lifecycle state in W23-C2")]
 async fn next_runnable_task_id_reclaiming_stranded(
     swarm_id: &str,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
@@ -737,17 +747,17 @@ async fn next_runnable_task_id_reclaiming_stranded(
     // Snapshot member liveness first so the plans write lock is not held
     // across the members read lock (avoids lock-order inversions with paths
     // that lock members before plans).
-    let member_statuses: HashMap<String, String> = {
+    let member_lifecycles: HashMap<String, jcode_swarm_core::SwarmLifecycleStatus> = {
         let members = swarm_members.read().await;
         members
             .values()
             .filter(|member| member.swarm_id.as_deref() == Some(swarm_id))
-            .map(|member| (member.session_id.clone(), member.status.clone()))
+            .map(|member| (member.session_id.clone(), member.lifecycle()))
             .collect()
     };
     let assignee_is_dead = move |session_id: &str| -> bool {
-        match member_statuses.get(session_id) {
-            Some(status) => super::swarm::member_status_is_dead(status),
+        match member_lifecycles.get(session_id) {
+            Some(lifecycle) => lifecycle.is_dead_state(),
             // Not a member of this swarm anymore: nothing can drive it.
             None => true,
         }

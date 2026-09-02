@@ -5,6 +5,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
+pub(super) fn comm_context_member_status(member: &SwarmMember) -> String {
+    member.lifecycle_status().to_string()
+}
+
 async fn swarm_id_for_session(
     session_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -75,7 +79,7 @@ pub(super) async fn handle_comm_list(
                             session_id: sid.clone(),
                             friendly_name: member.friendly_name.clone(),
                             files,
-                            status: member.status.clone(),
+                            status: comm_context_member_status(member),
                             detail: member.detail.clone(),
                             task_label: member.task_label.clone(),
                             subagent_type: member.subagent_type.clone(),

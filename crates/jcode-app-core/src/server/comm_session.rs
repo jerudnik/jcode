@@ -1665,11 +1665,8 @@ async fn resolve_stop_target_session(
     }
 }
 
-fn swarm_member_status_is_stale_for_coordination(status: &str) -> bool {
-    matches!(
-        status,
-        "crashed" | "failed" | "stopped" | "closed" | "disconnected"
-    )
+pub(super) fn swarm_member_is_stale_for_coordination(member: &SwarmMember) -> bool {
+    member.lifecycle().is_dead_state()
 }
 
 async fn ensure_spawn_coordinator_swarm(
@@ -1725,7 +1722,7 @@ async fn ensure_spawn_coordinator_swarm(
                 let unreachable = member.event_tx.is_closed()
                     && member.event_txs.values().all(|tx| tx.is_closed());
                 member.swarm_id.as_deref() == swarm_id.as_deref()
-                    && !swarm_member_status_is_stale_for_coordination(&member.status)
+                    && !swarm_member_is_stale_for_coordination(member)
                     && !unreachable
             })
         });
