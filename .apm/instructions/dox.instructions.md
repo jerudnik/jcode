@@ -16,9 +16,6 @@ applyTo: "**"
 
 - `docs/` holds current docs; `docs/issues/` holds open issues (delete solved). Use the operator's project notes repository for proposals, incident evidence, and PM tracking; keep other records out of `docs/`.
 
-## Child DOX index
+## Nested contracts
 
-- `.apm/AGENTS.md`: APM rules.
-- `docs/AGENTS.md`: docs placement rules.
-- `docs/issues/AGENTS.md`: open issue rules.
-- `crates/jcode-desktop/AGENTS.md`: desktop self-development rules.
+- A nested `AGENTS.md` exists wherever APM places a scoped primitive; the set is not enumerated here. `apm compile --dry-run` prints the current placement.

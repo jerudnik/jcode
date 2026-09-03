@@ -270,6 +270,16 @@ exclusion.
 
 Generated files are intentionally ignored and local. After compilation, use Jcode prompt diagnostics such as `/info` to confirm that project `AGENTS.md`, `.jcode/preferred-tools.md`, and `.jcode/prompt-overlay.md` were loaded.
 
+APM places each instruction by scoring how many project directories its
+`applyTo` matches; an instruction that matches most directories is folded
+into the root `AGENTS.md`. Two settings keep that decision stable:
+`compilation.exclude` in `apm.yml` keeps build output out of the directory
+census, and `testing.instructions.md` targets test files rather than all of
+`crates/**` so it nests at `crates/AGENTS.md` instead of consuming the root
+prompt budget. `.apm/README.md` keeps a plain file in `.apm/` because the
+optimizer nests only into directories that contain a file. Check placement
+with `apm compile --dry-run` before changing any of the three.
+
 Run the repository drift check after any instruction change:
 
 ```bash

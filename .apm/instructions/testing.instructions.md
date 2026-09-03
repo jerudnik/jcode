@@ -1,6 +1,6 @@
 ---
 description: Testing contract for Rust crates — tests must be able to fail.
-applyTo: "crates/**"
+applyTo: "crates/**/tests/**,crates/**/*test*.rs"
 ---
 
 # Testing contract

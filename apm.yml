@@ -13,3 +13,9 @@ dependencies:
   mcp: []
 includes: auto
 scripts: {}
+# Placement is decided by APM's optimizer from the directory census. Build
+# output is excluded so the census does not change with build state.
+compilation:
+  exclude:
+    - "target/**"
+    - "target-ttest*/**"

@@ -30,6 +30,7 @@ CHILD_GENERATED = {
     Path("crates/jcode-desktop/AGENTS.md"): Path(
         ".apm/instructions/dox-desktop.instructions.md"
     ),
+    Path("crates/AGENTS.md"): Path(".apm/instructions/testing.instructions.md"),
 }
 JCODE_PROMPTS = (
     Path(".jcode/preferred-tools.md"),
