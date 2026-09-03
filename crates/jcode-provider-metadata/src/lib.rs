@@ -787,7 +787,7 @@ mod tests {
                 api_key_fallback: false,
             }
         );
-        assert_eq!(GROK_DIRECT_PROFILE.default_model, Some("grok-4.5"));
+        assert_eq!(GROK_DIRECT_PROFILE.default_model, Some("grok-4.6"));
         assert_eq!(
             resolve_login_provider("grok").map(|provider| provider.id),
             Some("grok-build")
