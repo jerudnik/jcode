@@ -1,25 +1,371 @@
 lockfile_version: '1'
 generated_at: '2026-06-23T04:50:43.754323+00:00'
 dependencies: []
+deployments:
+- kind: project-relative
+  target: agents
+  value: .agents/skills/agent-workflow
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/agent-workflow/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
+- kind: project-relative
+  target: agents
+  value: .agents/skills/docs-ops
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/docs-ops/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
+- kind: project-relative
+  target: agents
+  value: .agents/skills/optimization
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/optimization/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
+- kind: project-relative
+  target: agents
+  value: .agents/skills/plain-language
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/plain-language/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:367e6959f1330a16d03b6d23d7123d30e0078631f3f47df4d7aeedbcee08621c
+- kind: project-relative
+  target: agents
+  value: .agents/skills/testing
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/testing/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
+- kind: project-relative
+  target: claude
+  value: .claude/rules/dox-apm.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:26e40c9a9e90db4d83df215fcf9297c190bd79e319968550c5406bdcb058842a
+- kind: project-relative
+  target: claude
+  value: .claude/rules/dox-desktop.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:1b4ac891b831d07eb70979e65ceec539191c3b4167141d19051b12a1c4119d9c
+- kind: project-relative
+  target: claude
+  value: .claude/rules/dox-docs.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:f942989304908c2c70b0283012167e478bf41125559bdee8254a52f836fdcd96
+- kind: project-relative
+  target: claude
+  value: .claude/rules/dox-issues.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e269267abcebe0be5eaea662c3cce8984416cd47888a9a4f75e62c199041fd9a
+- kind: project-relative
+  target: claude
+  value: .claude/rules/dox.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:36558aa13a95bd703b173eb32cf913f215a9dbeea5bf5a1a8d8736b2062d096d
+- kind: project-relative
+  target: claude
+  value: .claude/rules/fork-branch-rails.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:81f0be20abe8baa7387f088c0a8b9d9734b4def2b2e32c328e62c9ba03334e2f
+- kind: project-relative
+  target: claude
+  value: .claude/rules/main.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a64c8668dbee3f2e99b0f7fbb9d45b65f4701dcfbfa45b874a8eb5201b3724dc
+- kind: project-relative
+  target: claude
+  value: .claude/rules/testing.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:8ba0c67b72f9590c8e28f8f2ad73f499e02e2c554bdd7e5ed8b0e2291db394a6
+- kind: project-relative
+  target: claude
+  value: .claude/skills/agent-workflow
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/agent-workflow/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
+- kind: project-relative
+  target: claude
+  value: .claude/skills/docs-ops
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/docs-ops/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
+- kind: project-relative
+  target: claude
+  value: .claude/skills/optimization
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/optimization/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
+- kind: project-relative
+  target: claude
+  value: .claude/skills/testing
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/testing/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/dox-apm.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:de70cb96d7ab0788672dab3006fcdae7d47c11ee683b1b95d3aae304d2569226
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/dox-desktop.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2480ae565677d577cb335dec1fb969b729f6add831e8fc9d6f37ba13c46b7cef
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/dox-docs.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:2e22c0095b649130d7abe16d517c597f44f4847e35d86f36aef530609286d21e
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/dox-issues.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:483b72988092e6334c70fff5864caf75e5f9068bd6da34d4f2d05982dac0d917
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/dox.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:3001302ba6fb4000093b7b3ae1bd8b289a06ecde431ad2ee4559c5378ade9b3a
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/fork-branch-rails.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a288cc7a3c6ec58b4c803ace10cb4c60cf4ff3ce7ccaaef4ba2d2cd2ffe77bf3
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/main.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:fb849ba8ea67f67447958adf9327db1783adb5ece270bdea5e162fadaf48213c
+- kind: project-relative
+  target: copilot
+  value: .github/instructions/testing.instructions.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:cd0363a59dda36816f7f0345dc51f27ec78ff2467fda3c1c6d872bedb3ec7bf2
 local_deployed_files:
+- .agents/skills/agent-workflow
+- .agents/skills/agent-workflow/SKILL.md
+- .agents/skills/docs-ops
+- .agents/skills/docs-ops/SKILL.md
+- .agents/skills/optimization
+- .agents/skills/optimization/SKILL.md
+- .agents/skills/plain-language
+- .agents/skills/plain-language/SKILL.md
+- .agents/skills/testing
+- .agents/skills/testing/SKILL.md
 - .claude/rules/dox-apm.md
 - .claude/rules/dox-desktop.md
 - .claude/rules/dox-docs.md
+- .claude/rules/dox-issues.md
 - .claude/rules/dox.md
+- .claude/rules/fork-branch-rails.md
 - .claude/rules/main.md
+- .claude/rules/testing.md
+- .claude/skills/agent-workflow
+- .claude/skills/agent-workflow/SKILL.md
+- .claude/skills/docs-ops
+- .claude/skills/docs-ops/SKILL.md
+- .claude/skills/optimization
+- .claude/skills/optimization/SKILL.md
+- .claude/skills/testing
+- .claude/skills/testing/SKILL.md
 - .github/instructions/dox-apm.instructions.md
 - .github/instructions/dox-desktop.instructions.md
 - .github/instructions/dox-docs.instructions.md
+- .github/instructions/dox-issues.instructions.md
 - .github/instructions/dox.instructions.md
+- .github/instructions/fork-branch-rails.instructions.md
 - .github/instructions/main.instructions.md
+- .github/instructions/testing.instructions.md
 local_deployed_file_hashes:
-  .claude/rules/dox-apm.md: sha256:cc13fd2d15d199573c123bc3fd571b15763a5e46052ff418e060ab0f1db08f55
+  .agents/skills/agent-workflow/SKILL.md: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
+  .agents/skills/docs-ops/SKILL.md: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
+  .agents/skills/optimization/SKILL.md: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
+  .agents/skills/plain-language/SKILL.md: sha256:367e6959f1330a16d03b6d23d7123d30e0078631f3f47df4d7aeedbcee08621c
+  .agents/skills/testing/SKILL.md: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
+  .claude/rules/dox-apm.md: sha256:26e40c9a9e90db4d83df215fcf9297c190bd79e319968550c5406bdcb058842a
   .claude/rules/dox-desktop.md: sha256:1b4ac891b831d07eb70979e65ceec539191c3b4167141d19051b12a1c4119d9c
-  .claude/rules/dox-docs.md: sha256:681427b8d0729a145b5d4e2e1686c121d15384eb40184417e25ce3c4032247e1
-  .claude/rules/dox.md: sha256:b34363a3061f8bdf73fc2f9dcddc23da51226e7b853715f6386de76949a64e8c
-  .claude/rules/main.md: sha256:6beba789d07021de1d293f9af5e0cf40e3e7713f39d5ee702acf3e4274afd574
-  .github/instructions/dox-apm.instructions.md: sha256:a30317849c42b9277b14a3ea5923ecbde1a2a188ee41c5df9effaab77e251a54
+  .claude/rules/dox-docs.md: sha256:f942989304908c2c70b0283012167e478bf41125559bdee8254a52f836fdcd96
+  .claude/rules/dox-issues.md: sha256:e269267abcebe0be5eaea662c3cce8984416cd47888a9a4f75e62c199041fd9a
+  .claude/rules/dox.md: sha256:36558aa13a95bd703b173eb32cf913f215a9dbeea5bf5a1a8d8736b2062d096d
+  .claude/rules/fork-branch-rails.md: sha256:81f0be20abe8baa7387f088c0a8b9d9734b4def2b2e32c328e62c9ba03334e2f
+  .claude/rules/main.md: sha256:a64c8668dbee3f2e99b0f7fbb9d45b65f4701dcfbfa45b874a8eb5201b3724dc
+  .claude/rules/testing.md: sha256:8ba0c67b72f9590c8e28f8f2ad73f499e02e2c554bdd7e5ed8b0e2291db394a6
+  .claude/skills/agent-workflow/SKILL.md: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
+  .claude/skills/docs-ops/SKILL.md: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
+  .claude/skills/optimization/SKILL.md: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
+  .claude/skills/testing/SKILL.md: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
+  .github/instructions/dox-apm.instructions.md: sha256:de70cb96d7ab0788672dab3006fcdae7d47c11ee683b1b95d3aae304d2569226
   .github/instructions/dox-desktop.instructions.md: sha256:2480ae565677d577cb335dec1fb969b729f6add831e8fc9d6f37ba13c46b7cef
-  .github/instructions/dox-docs.instructions.md: sha256:7e37cf7efe144409cab7e04f9d98857dc90bd99935036c2f7612942b5a2a176f
-  .github/instructions/dox.instructions.md: sha256:2d09371203a6d96c12eb520d905251c310954ce9b074fbb43eba3df951db6955
-  .github/instructions/main.instructions.md: sha256:acb2f3f2036cc0a0066b1c214730ed93290f3c1a44dc74283871e6e15f286c25
+  .github/instructions/dox-docs.instructions.md: sha256:2e22c0095b649130d7abe16d517c597f44f4847e35d86f36aef530609286d21e
+  .github/instructions/dox-issues.instructions.md: sha256:483b72988092e6334c70fff5864caf75e5f9068bd6da34d4f2d05982dac0d917
+  .github/instructions/dox.instructions.md: sha256:3001302ba6fb4000093b7b3ae1bd8b289a06ecde431ad2ee4559c5378ade9b3a
+  .github/instructions/fork-branch-rails.instructions.md: sha256:a288cc7a3c6ec58b4c803ace10cb4c60cf4ff3ce7ccaaef4ba2d2cd2ffe77bf3
+  .github/instructions/main.instructions.md: sha256:fb849ba8ea67f67447958adf9327db1783adb5ece270bdea5e162fadaf48213c
+  .github/instructions/testing.instructions.md: sha256:cd0363a59dda36816f7f0345dc51f27ec78ff2467fda3c1c6d872bedb3ec7bf2

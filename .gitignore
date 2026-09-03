@@ -18,20 +18,14 @@ target-ttest*/
 /*.mp4
 /*.png
 
-# APM dependencies
+# APM: generated agent surfaces (AGENTS.md, GEMINI.md, CLAUDE.md, .claude/rules/,
+# .claude/skills/, .agents/skills/, .github/instructions/, .codex/, .gemini/) are
+# committed and drift-checked by `apm audit` and scripts/check_agent_instructions.py.
+# Only the dependency cache and MCP client configs stay ignored: apm_modules/ is
+# re-fetched by `apm install`, and the MCP files are machine-local and may carry
+# credentials (apm.yml declares no MCP servers, so APM writes none today).
 apm_modules/
-
-# APM-generated agent primitives — regenerated locally from .apm/ + apm.yml
-AGENTS.md
-GEMINI.md
-CLAUDE.md
-/.claude/rules/
-/.claude/skills/
-/.agents/skills/
-/.github/instructions/
 /.mcp.json
-/.codex/
-/.gemini/
 /.claude/mcp.json
 
 # qmd generated databases

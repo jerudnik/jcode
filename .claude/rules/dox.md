@@ -1,6 +1,6 @@
 ---
-description: DOX hierarchy and generated instruction ownership contract.
-applyTo: "**"
+paths:
+  - "**"
 ---
 
 # DOX contract

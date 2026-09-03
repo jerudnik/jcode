@@ -1,6 +1,6 @@
 ---
-description: DOX contract for .apm/ — the APM source-of-truth that generates the AGENTS.md tree.
-applyTo: ".apm/**"
+paths:
+  - ".apm/**"
 ---
 
 # .apm/ — APM primitives (DOX)
