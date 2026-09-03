@@ -5,6 +5,7 @@
 //! notify/wake/background flags are delivery policy and do not participate in
 //! identity. The delivery engine is intentionally outside this module.
 
+pub mod delivery;
 pub mod store;
 
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ impl fmt::Display for InboxItemId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InboxClass {
     ScheduledWake,
