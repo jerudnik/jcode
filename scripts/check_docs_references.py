@@ -287,6 +287,10 @@ def check_moved_path_references(root: Path, base: str, head: str = "HEAD") -> li
         "docs/architecture/FORK_HARDENING_BLUE_BRIEF.md",
     }
     moved = moved_or_deleted_paths(root, base, head)
+    # A bare basename only identifies the removed file when no surviving
+    # tracked file shares it. Deleting one SKILL.md among many must not flag
+    # every doc that mentions the generic name.
+    tracked_basenames = {Path(p).name for p in _tracked_files(str(root))}
     findings: list[Finding] = []
     for path in markdown_files(root):
         rel = path.relative_to(root).as_posix()
@@ -301,7 +305,9 @@ def check_moved_path_references(root: Path, base: str, head: str = "HEAD") -> li
             for change in moved:
                 basename = Path(change.old).name
                 old_path_hit = change.old in line
-                basename_hit = basename in line
+                basename_hit = basename in line and (
+                    change.new is not None or basename not in tracked_basenames
+                )
                 updated_path_hit = change.new is not None and change.new in line
                 if not old_path_hit and (not basename_hit or updated_path_hit):
                     continue
