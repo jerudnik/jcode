@@ -449,7 +449,10 @@ pub fn openai_compatible_profile_static_models(profile: OpenAiCompatibleProfile)
             push("kimi-k2-thinking");
             push("kimi-k2-thinking-turbo");
         }
-        "grok-direct" => push("grok-4.5"),
+        "grok-direct" => {
+            push("grok-4.6");
+            push("grok-4.5");
+        }
         "firmware" => {
             push("kimi-k2.5");
             push("zai-glm-5-1");
@@ -585,7 +588,7 @@ pub fn openai_compatible_profile_context_limit(profile_id: &str, model: &str) ->
     let model = model.trim().to_ascii_lowercase();
 
     match profile_id.as_str() {
-        "grok-direct" if model == "grok-4.5" => Some(500_000),
+        "grok-direct" if model == "grok-4.5" || model == "grok-4.6" => Some(500_000),
         // DeepSeek V4 direct API models advertise a 1M token context window. The
         // direct profile runs through the OpenRouter/OpenAI-compatible provider
         // implementation, whose live catalog can be unavailable during startup.
