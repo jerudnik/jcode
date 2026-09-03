@@ -72,3 +72,34 @@ harness:
 1. Flag semantics + quiesce + smoke-check rollback (selfdev crate only, no swarm changes).
 2. Task-graph wiring (`on_complete` flag) + post-reload session resume.
 3. Docs: when to set the flag (chunk boundaries, before coordination-heavy chunks).
+
+## Motivating incident (2026-09-02, first real occurrence)
+
+Sequence observed during the W23 campaign:
+
+1. A `build-reload` was attempted while the coordinator session and user TUI were
+   attached. The build succeeded (remote) but the reload step failed before any swap:
+   the running daemon binary had been **built remotely**, so its embedded compile-time
+   `CARGO_MANIFEST_DIR` points at the remote build host's sync cache (the
+   remote-source tree used by `scripts/remote_build.sh`), which does not exist on the
+   local machine. `get_repo_dir()` fell through all four discovery paths
+   (env var, compile-time path, exe-relative, cwd) and returned `None`, so the reload
+   orchestration could not even resolve the source repo to publish from.
+2. Every subsequent reload attempt failed identically ("Could not find the jcode
+   repository directory") — the daemon cannot self-locate the repo it came from,
+   ever, when built via the default remote path.
+3. A manual publish (`cp` the fresh selfdev binary into `~/.jcode/current`) plus
+   `jcode server reload` exec'd the daemon while sessions were attached. The user's
+   TUI tore mid-exec ("weird symbols and strings printed into the input line") and
+   the session did not restart; the user had to close the terminal and relaunch.
+   A fork of the coordinator session created around the same window was mistaken
+   for the live session.
+
+**Implications for this issue:**
+- Repo discovery needs a fifth path: the `jcode.source.json` metadata published
+  alongside `~/.jcode/current/jcode` should carry the originating repo dir (or the
+  remote build should sync `JCODE_REPO_DIR` through the publish step).
+- Reload must quiesce attached clients or hand them off gracefully; the current
+  exec-under-attach behavior corrupts client state with no recovery path.
+- Reload-resume must not create fork sessions that are indistinguishable from the
+  live session (or must mark forks visibly).
