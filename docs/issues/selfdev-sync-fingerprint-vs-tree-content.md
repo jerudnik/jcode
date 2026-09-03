@@ -45,17 +45,39 @@ evaluate in a small planning pass:
 Also consider: `--delete` on rsync so removed files don't linger in the remote tree,
 and a per-worktree lock to serialize concurrent syncs into one remote dir.
 
+## Root cause (verified 2026-09-03)
+
+Two independent defects compound:
+
+1. **Fingerprint is not content-aware** (as described above): a mixed remote tree
+   claimed a verified match because the diff-hash component was the empty-blob
+   sentinel. A forced full re-sync did NOT fix the build — because the content was
+   already identical, rsync transferred nothing.
+2. **Stale-rmeta poisoning survives re-sync**: during the mixed-tree window, cargo
+   built `libjcode_storage*.rmeta` from a stale `lib.rs` (missing the root re-exports).
+   rsync `-a` preserves source mtimes, so the synced `lib.rs` stayed *older* than the
+   poisoned rmeta; cargo's mtime comparison considered jcode-storage fresh forever and
+   kept reusing the bad rmeta. Every unresolved name was exactly a root re-export.
+
+The fix that worked: `touch` the synced source file on the remote so its mtime exceeds
+the rmeta's. Cargo invalidated jcode-storage, rebuilt it, cascaded to jcode-base, and
+E0432 disappeared (verified: `Finished selfdev profile in 1m 33s`).
+
+## Fix direction
+
+- After rsync, `touch` every file rsync actually transferred (rsync `-i`/itemize
+  output lists them) — precise invalidation even when the fingerprint lies.
+- Make the fingerprint content-aware (`git write-tree`-style tree hash) so a mixed
+  tree can never claim a match; on fingerprint change/full re-sync, touch the synced
+  tree or `cargo clean -p` the affected workspace members.
+- Add `--delete` to rsync and a per-host sync lock so concurrent sessions cannot
+  interleave two syncs into one remote dir.
+
 ## Reproduction
 
-1. On the remote host, revert any synced file to an older commit's content
-   (`git -C ~/.cache/remote-builds/jcode/jcode checkout <old-ref> -- <path>`).
-2. Run `scripts/test_remote.sh -p <crate>` (or any dev_cargo build) from the repo.
-3. Observe: fingerprint verification passes, cargo fails with errors about missing
-   symbols from the newer commit.
-
-## Acceptance
-
-- A tampered/partially-synced remote tree is detected and either re-synced or refused,
-  never passed to cargo.
-- Test: plant a stale file remotely, run the wrapper, assert it either fixes or exits
-  with a fingerprint-mismatch error.
+1. Poison state: sync a tree, then remotely revert one `.rs` file to older content
+   and run a build (produces artifacts from mixed content), then restore the file
+   with `rsync -a` (mtime stays old).
+2. Run `scripts/test_remote.sh -p <crate>`: fingerprint verifies, E0432-style
+   unresolved-import errors about re-exports persist across any number of re-syncs.
+3. `ssh <host> touch <remote-tree>/<that file>` and rerun: green.
