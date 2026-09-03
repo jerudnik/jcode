@@ -18,4 +18,4 @@ ordinary word works, use it and do not add entries.
 | APM | The tool that compiles `.apm/instructions/*.instructions.md` into `AGENTS.md`. |
 
 Retired vocabulary: prefer the plain column above in all new writing. Do not
-coin successors. See `.apm/skills/plain-language/SKILL.md`.
+coin successors. See the shared `plain-language` skill deployed to `~/.agents/skills`.

@@ -19,7 +19,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:f3330cd10679c78181ca28c7ec4521a36bd30ff2025bd70f59486f0f58b7cb47
+  content_hash: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
 - kind: project-relative
   target: agents
   value: .agents/skills/docs-ops
@@ -181,7 +181,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:f3330cd10679c78181ca28c7ec4521a36bd30ff2025bd70f59486f0f58b7cb47
+  content_hash: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
 - kind: project-relative
   target: claude
   value: .claude/skills/docs-ops
@@ -218,24 +218,6 @@ deployments:
   - .
   active_owner: .
   content_hash: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
-- kind: project-relative
-  target: claude
-  value: .claude/skills/plain-language
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: null
-- kind: project-relative
-  target: claude
-  value: .claude/skills/plain-language/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:367e6959f1330a16d03b6d23d7123d30e0078631f3f47df4d7aeedbcee08621c
 - kind: project-relative
   target: claude
   value: .claude/skills/testing
@@ -351,8 +333,6 @@ local_deployed_files:
 - .claude/skills/docs-ops/SKILL.md
 - .claude/skills/optimization
 - .claude/skills/optimization/SKILL.md
-- .claude/skills/plain-language
-- .claude/skills/plain-language/SKILL.md
 - .claude/skills/testing
 - .claude/skills/testing/SKILL.md
 - .github/instructions/dox-apm.instructions.md
@@ -364,7 +344,7 @@ local_deployed_files:
 - .github/instructions/main.instructions.md
 - .github/instructions/testing.instructions.md
 local_deployed_file_hashes:
-  .agents/skills/agent-workflow/SKILL.md: sha256:f3330cd10679c78181ca28c7ec4521a36bd30ff2025bd70f59486f0f58b7cb47
+  .agents/skills/agent-workflow/SKILL.md: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
   .agents/skills/docs-ops/SKILL.md: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
   .agents/skills/optimization/SKILL.md: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
   .agents/skills/plain-language/SKILL.md: sha256:367e6959f1330a16d03b6d23d7123d30e0078631f3f47df4d7aeedbcee08621c
@@ -377,10 +357,9 @@ local_deployed_file_hashes:
   .claude/rules/fork-branch-rails.md: sha256:81f0be20abe8baa7387f088c0a8b9d9734b4def2b2e32c328e62c9ba03334e2f
   .claude/rules/main.md: sha256:a64c8668dbee3f2e99b0f7fbb9d45b65f4701dcfbfa45b874a8eb5201b3724dc
   .claude/rules/testing.md: sha256:8ba0c67b72f9590c8e28f8f2ad73f499e02e2c554bdd7e5ed8b0e2291db394a6
-  .claude/skills/agent-workflow/SKILL.md: sha256:f3330cd10679c78181ca28c7ec4521a36bd30ff2025bd70f59486f0f58b7cb47
+  .claude/skills/agent-workflow/SKILL.md: sha256:81062740fd63e2126c7cbe405994d7e44eeb03c3ed484e670fc40ba255208f6a
   .claude/skills/docs-ops/SKILL.md: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
   .claude/skills/optimization/SKILL.md: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
-  .claude/skills/plain-language/SKILL.md: sha256:367e6959f1330a16d03b6d23d7123d30e0078631f3f47df4d7aeedbcee08621c
   .claude/skills/testing/SKILL.md: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
   .github/instructions/dox-apm.instructions.md: sha256:9310050656f7373de2685eb435d0ae40a718c3f92567153616069d8fc382dcfa
   .github/instructions/dox-desktop.instructions.md: sha256:2480ae565677d577cb335dec1fb969b729f6add831e8fc9d6f37ba13c46b7cef

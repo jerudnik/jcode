@@ -257,16 +257,16 @@ restoration from that lock, and CI audit to check lock consistency and deployed
 file drift. Jcode rejects duplicate declared skill names across all discovery
 paths; consolidate or rename a collision instead of depending on path order.
 
-### Governed migration blocker
+### Local plain-language skill retired
 
-The tracked lock remains the pre-migration lock until the governed local
-`.apm/skills/plain-language` promotion candidate is approved for cleanup. APM
-0.28 root-project integration deploys every local skill; neither `includes` nor
-`--skill` filters root `.apm` content. Refreshing the lock before that retirement
-would project a second `plain-language` beside the shared canonical skill, so it
-must not be treated as a valid frozen-restoration result. Preserve the source in
-place and complete the approval gate rather than adding an override or hidden
-exclusion.
+The local `.apm/skills/plain-language` promotion candidate was retired on
+2026-09-03 (decision D13). The canonical skill lives in the infrastructure
+skills package and is deployed to `~/.agents/skills`. APM 0.28 root-project
+integration deploys every local skill and neither `includes` nor `--skill`
+filters root `.apm` content, so a local copy would have projected a duplicate
+beside the canonical one, and Jcode rejects duplicate skill names. With the
+source gone, the tracked lock is refreshed and `apm install --frozen` is a
+valid restoration check again.
 
 Generated files are intentionally ignored and local. After compilation, use Jcode prompt diagnostics such as `/info` to confirm that project `AGENTS.md`, `.jcode/preferred-tools.md`, and `.jcode/prompt-overlay.md` were loaded.
 
