@@ -101,6 +101,7 @@ pub enum InboxTransition {
     Ack,
     Cancel,
     Expire,
+    MarkUndeliverable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -576,6 +577,9 @@ fn apply_transition(
         }
         (_, InboxTransition::Expire) if now_ms >= item.expires_at => {
             item.state = InboxState::Expired;
+        }
+        (_, InboxTransition::MarkUndeliverable) => {
+            item.state = InboxState::Undeliverable;
         }
         (state, operation) => {
             bail!("invalid inbox transition {operation:?} from {state:?}");
