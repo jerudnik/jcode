@@ -4,9 +4,7 @@ use crate::protocol::ServerEvent;
 use jcode_agent_runtime::{
     InterruptSignal, SoftInterruptMessage, SoftInterruptQueue, SoftInterruptSource,
 };
-use jcode_swarm_core::{
-    MemberLifecycleEvent, SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole,
-};
+use jcode_swarm_core::{MemberLifecycleEvent, SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
@@ -162,58 +160,82 @@ impl SwarmState {
         }
     }
 
-    /// Snapshot assignment authority without retaining either swarm lock. Only
-    /// sessions classified as swarm agents are subject to assignment grants;
-    /// human, coordinator, and bootstrap identities fail open.
+    /// Snapshot assignment authority without retaining either swarm lock.
+    ///
+    /// Classification order:
+    /// 1. Fail open (`Unrestricted`) when the session is not a member, has no
+    ///    swarm id, has swarm coordination disabled, is not role "agent", or
+    ///    is the swarm's current coordinator. The coordinator check runs
+    ///    before the assignment scan: a re-elected coordinator may still hold
+    ///    an assignment, and coordinator status must dominate.
+    /// 2. A live (non-terminal) plan assignment held by this session binds
+    ///    for its lifetime (`Assigned`), including for client-attached
+    ///    sessions explicitly assigned a node.
+    /// 3. With no live assignment, only a spawned-worker identity
+    ///    (`SwarmMember::has_spawn_worker_identity`) is `Unassigned`.
+    /// 4. Human, coordinator, bootstrap, and ambiguous/legacy identities
+    ///    fail open to `Unrestricted`.
     pub(crate) async fn assignment_grant_for_session(
         &self,
         session_id: &str,
     ) -> crate::tool::grant::GrantLookup {
-        let swarm_id = {
+        let (swarm_id, spawn_worker_identity) = {
             let members = self.members.read().await;
             let Some(member) = members.get(session_id) else {
                 return crate::tool::grant::GrantLookup::Unrestricted;
             };
-            if member.role != "agent" {
+            if member.role != "agent" || !member.swarm_enabled {
                 return crate::tool::grant::GrantLookup::Unrestricted;
             }
-            member.swarm_id.clone()
+            (member.swarm_id.clone(), member.has_spawn_worker_identity())
         };
         let Some(swarm_id) = swarm_id else {
             return crate::tool::grant::GrantLookup::Unrestricted;
         };
 
-        let plans = self.plans.read().await;
-        let Some(plan) = plans.get(&swarm_id) else {
-            return crate::tool::grant::GrantLookup::Unassigned { reclaimed: false };
-        };
-        for item in &plan.items {
-            if item.assigned_to.as_deref() != Some(session_id)
-                || crate::plan::is_terminal_status(&item.status)
-            {
-                continue;
-            }
-            let Some(progress) = plan.task_progress.get(&item.id) else {
-                continue;
-            };
-            if progress.assigned_session_id.as_deref() != Some(session_id) {
-                continue;
-            }
-            if let (Some(grant), Some(epoch)) =
-                (progress.assignment_grant, progress.assignment_epoch)
-            {
-                return crate::tool::grant::GrantLookup::Assigned {
-                    grant,
-                    swarm_id,
-                    task_id: item.id.clone(),
-                    epoch,
-                };
+        {
+            let coordinators = self.coordinators.read().await;
+            if coordinators.get(&swarm_id).map(String::as_str) == Some(session_id) {
+                return crate::tool::grant::GrantLookup::Unrestricted;
             }
         }
 
-        let reclaimed = plan.task_progress.values().any(|progress| {
-            progress.assigned_session_id.as_deref() == Some(session_id)
-                && progress.assignment_grant.is_none()
+        let plans = self.plans.read().await;
+        let plan = plans.get(&swarm_id);
+        if let Some(plan) = plan {
+            for item in &plan.items {
+                if item.assigned_to.as_deref() != Some(session_id)
+                    || crate::plan::is_terminal_status(&item.status)
+                {
+                    continue;
+                }
+                let Some(progress) = plan.task_progress.get(&item.id) else {
+                    continue;
+                };
+                if progress.assigned_session_id.as_deref() != Some(session_id) {
+                    continue;
+                }
+                if let (Some(grant), Some(epoch)) =
+                    (progress.assignment_grant, progress.assignment_epoch)
+                {
+                    return crate::tool::grant::GrantLookup::Assigned {
+                        grant,
+                        swarm_id,
+                        task_id: item.id.clone(),
+                        epoch,
+                    };
+                }
+            }
+        }
+
+        if !spawn_worker_identity {
+            return crate::tool::grant::GrantLookup::Unrestricted;
+        }
+        let reclaimed = plan.is_some_and(|plan| {
+            plan.task_progress.values().any(|progress| {
+                progress.assigned_session_id.as_deref() == Some(session_id)
+                    && progress.assignment_grant.is_none()
+            })
         });
         crate::tool::grant::GrantLookup::Unassigned { reclaimed }
     }
@@ -321,6 +343,23 @@ pub struct SwarmMember {
 
 #[allow(deprecated)]
 impl SwarmMember {
+    /// Whether this member carries durable spawn-path identity: one of the
+    /// fields written only when a swarm worker is spawned
+    /// (`spawn_swarm_agent` / `handle_comm_spawn` /
+    /// `register_visible_spawned_member` in `comm_session.rs`). Plain
+    /// interactive clients, coordinators, and records recovered from
+    /// control-log replay leave all three unset and must fail open.
+    ///
+    /// Deliberately excludes fields that look similar but are set on
+    /// non-spawn paths: `task_label` (also set by the assignment paths),
+    /// `latest_completion_report` (set whenever any member reports), and
+    /// `is_headless` (set by recovery/debug paths on non-workers).
+    pub(crate) fn has_spawn_worker_identity(&self) -> bool {
+        self.report_back_to_session_id.is_some()
+            || self.initial_prompt_delivered.is_some()
+            || self.subagent_type.is_some()
+    }
+
     pub fn lifecycle(&self) -> SwarmLifecycleStatus {
         let mut lifecycle = self.lifecycle.clone();
         let compatibility_state =
@@ -378,10 +417,8 @@ impl SwarmMember {
                 );
             }
             "ready" => {
-                changed |= self.apply_lifecycle_event(
-                    MemberLifecycleEvent::WorkerReady,
-                    updated_at_unix_ms,
-                );
+                changed |= self
+                    .apply_lifecycle_event(MemberLifecycleEvent::WorkerReady, updated_at_unix_ms);
             }
             "assigned" | "queued" => {
                 changed |= self.apply_lifecycle_event(
@@ -962,3 +999,7 @@ pub(super) async fn queue_soft_interrupt_for_session(
         })
     }
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod state_tests;
