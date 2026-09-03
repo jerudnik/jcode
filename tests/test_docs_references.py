@@ -82,6 +82,7 @@ class DocsReferencesTest(unittest.TestCase):
         *,
         delete: bool = False,
         doc_path: str = "docs/a.md",
+        extra_files: dict[str, str] | None = None,
     ) -> list[mod.Finding]:
         """Create two real commits and run the reverse check across the move."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,6 +93,10 @@ class DocsReferencesTest(unittest.TestCase):
             doc.parent.mkdir(parents=True, exist_ok=True)
             doc.write_text(doc_before, encoding="utf-8")
             (root / "src/old.rs").write_text("fn old() {}\n", encoding="utf-8")
+            for rel, body in (extra_files or {}).items():
+                extra = root / rel
+                extra.parent.mkdir(parents=True, exist_ok=True)
+                extra.write_text(body, encoding="utf-8")
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
             subprocess.run(
@@ -186,6 +191,26 @@ class DocsReferencesTest(unittest.TestCase):
         findings = self.run_move_check("See old.rs for the implementation.\n", delete=True)
         self.assertEqual(self.rules(findings), {"moved-path-reference"})
         self.assertIn("matched 'old.rs'", findings[0].detail)
+
+    def test_delete_check_ignores_a_basename_shared_with_tracked_files(self):
+        """Deleting one SKILL.md among many must not flag every doc that
+        mentions the generic name. Retiring one skill flagged nine docs whose
+        lines cite the surviving skills/<name>/SKILL.md convention."""
+        findings = self.run_move_check(
+            "Every skill ships an old.rs manifest.\n",
+            delete=True,
+            extra_files={"src/other/old.rs": "fn other() {}\n"},
+        )
+        self.assertEqual(findings, [])
+
+    def test_delete_check_still_flags_the_full_path_when_basename_is_shared(self):
+        """The control: citing the deleted path itself must keep flagging."""
+        findings = self.run_move_check(
+            "See [src/old.rs](../src/old.rs).\n",
+            delete=True,
+            extra_files={"src/other/old.rs": "fn other() {}\n"},
+        )
+        self.assertEqual(self.rules(findings), {"moved-path-reference"})
 
     def test_delete_check_exempts_the_historical_records(self):
         """The decision log records deletions by naming the deleted path, and

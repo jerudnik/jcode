@@ -394,7 +394,7 @@ pub const GROK_DIRECT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile
     api_key_aliases: &[],
     env_file: "grok-direct.env",
     setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
-    default_model: Some("grok-4.5"),
+    default_model: Some("grok-4.6"),
     auth_strategy: OpenAiCompatibleAuthStrategy::ManagedOAuth {
         provider: ManagedOAuthProvider::GrokDirect,
         api_key_fallback: false,
