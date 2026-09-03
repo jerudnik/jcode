@@ -73,6 +73,18 @@ E0432 disappeared (verified: `Finished selfdev profile in 1m 33s`).
 - Add `--delete` to rsync and a per-host sync lock so concurrent sessions cannot
   interleave two syncs into one remote dir.
 
+## Related defect: sync-back ignores --target (2026-09-03)
+
+`scripts/remote_build.sh` sync-back looks for artifacts under `target/<profile>/`
+only. A build invoked with `--target <triple>` (as `scripts/ci_local.sh` does for
+the release leg) writes to `target/<triple>/<profile>/`, so sync-back reports
+"Skipping sync-back: target/release/jcode not found on remote" and the local
+recipe then fails with `./target/<triple>/release/jcode: No such file or
+directory`. Observed twice on 2026-09-03: session tiger fetched the artifact
+manually, and a `just pre-pr` run on the apm-hygiene worktree failed its final
+leg the same way after an otherwise green remote build. Sync-back must honor
+the target triple when composing both the remote and local artifact paths.
+
 ## Reproduction
 
 1. Poison state: sync a tree, then remotely revert one `.rs` file to older content
