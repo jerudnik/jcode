@@ -246,15 +246,17 @@ silently accepting an older package.
 ```bash
 apm compile --validate
 apm compile --dry-run
-apm compile
 apm install
+apm compile --clean
 apm install --frozen
 apm audit --ci --no-fail-fast
 ```
 
-Use normal install to refresh `apm.lock.yaml`, frozen install to prove exact
-restoration from that lock, and CI audit to check lock consistency and deployed
-file drift. Jcode rejects duplicate declared skill names across all discovery
+Run install before compile: compile reads the deployed rules copies to decide
+whether `CLAUDE.md` files are needed, and stale copies make it emit nested
+`CLAUDE.md` files that the docs checks reject. Use normal install to refresh
+`apm.lock.yaml`, frozen install to prove exact restoration from that lock, and
+CI audit to check lock consistency and deployed file drift. Jcode rejects duplicate declared skill names across all discovery
 paths; consolidate or rename a collision instead of depending on path order.
 
 ### Local plain-language skill retired
@@ -268,7 +270,7 @@ beside the canonical one, and Jcode rejects duplicate skill names. With the
 source gone, the tracked lock is refreshed and `apm install --frozen` is a
 valid restoration check again.
 
-Generated files are intentionally ignored and local. After compilation, use Jcode prompt diagnostics such as `/info` to confirm that project `AGENTS.md`, `.jcode/preferred-tools.md`, and `.jcode/prompt-overlay.md` were loaded.
+Generated files are committed; commit them with the primitive change. After compilation, use Jcode prompt diagnostics such as `/info` to confirm that project `AGENTS.md`, `.jcode/preferred-tools.md`, and `.jcode/prompt-overlay.md` were loaded.
 
 APM places each instruction by scoring how many project directories its
 `applyTo` matches; an instruction that matches most directories is folded
@@ -286,7 +288,7 @@ Run the repository drift check after any instruction change:
 python3 scripts/check_agent_instructions.py
 ```
 
-The check enforces the prompt budget, required source paths, link integrity, and the rule that operational command blocks live here rather than in prompt-loaded files. When ignored generated surfaces are present locally, it also verifies that their compiled bodies match the APM sources. Hermetic and CI checkouts validate the source projection because those generated files are intentionally not tracked.
+The check enforces the prompt budget, required source paths, link integrity, and the rule that operational command blocks live here rather than in prompt-loaded files. It also verifies that the committed generated surfaces match their APM sources, so a primitive edit without a recompile fails the check.
 
 ## Finish
 

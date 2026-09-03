@@ -100,7 +100,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:3cdd49128cd12fc6d7a7a0024e5761553e92b5fac27643b9ab352176c44cd94c
+  content_hash: sha256:26e40c9a9e90db4d83df215fcf9297c190bd79e319968550c5406bdcb058842a
 - kind: project-relative
   target: claude
   value: .claude/rules/dox-desktop.md
@@ -244,7 +244,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:9310050656f7373de2685eb435d0ae40a718c3f92567153616069d8fc382dcfa
+  content_hash: sha256:de70cb96d7ab0788672dab3006fcdae7d47c11ee683b1b95d3aae304d2569226
 - kind: project-relative
   target: copilot
   value: .github/instructions/dox-desktop.instructions.md
@@ -349,7 +349,7 @@ local_deployed_file_hashes:
   .agents/skills/optimization/SKILL.md: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
   .agents/skills/plain-language/SKILL.md: sha256:367e6959f1330a16d03b6d23d7123d30e0078631f3f47df4d7aeedbcee08621c
   .agents/skills/testing/SKILL.md: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
-  .claude/rules/dox-apm.md: sha256:3cdd49128cd12fc6d7a7a0024e5761553e92b5fac27643b9ab352176c44cd94c
+  .claude/rules/dox-apm.md: sha256:26e40c9a9e90db4d83df215fcf9297c190bd79e319968550c5406bdcb058842a
   .claude/rules/dox-desktop.md: sha256:1b4ac891b831d07eb70979e65ceec539191c3b4167141d19051b12a1c4119d9c
   .claude/rules/dox-docs.md: sha256:f942989304908c2c70b0283012167e478bf41125559bdee8254a52f836fdcd96
   .claude/rules/dox-issues.md: sha256:e269267abcebe0be5eaea662c3cce8984416cd47888a9a4f75e62c199041fd9a
@@ -361,7 +361,7 @@ local_deployed_file_hashes:
   .claude/skills/docs-ops/SKILL.md: sha256:bd828efa8c0f48f228c24aed421fff14c3990ad6cf9d91979512ad32ecbfb8ff
   .claude/skills/optimization/SKILL.md: sha256:fe0427bb421c2ea1089aa7af2b0f0d59242e876926a83b9a73359641e4f7fddd
   .claude/skills/testing/SKILL.md: sha256:4e29ec9d61562aaca6f7f356f35332244f241d2fe0f5527fdac5b5c8a715f06b
-  .github/instructions/dox-apm.instructions.md: sha256:9310050656f7373de2685eb435d0ae40a718c3f92567153616069d8fc382dcfa
+  .github/instructions/dox-apm.instructions.md: sha256:de70cb96d7ab0788672dab3006fcdae7d47c11ee683b1b95d3aae304d2569226
   .github/instructions/dox-desktop.instructions.md: sha256:2480ae565677d577cb335dec1fb969b729f6add831e8fc9d6f37ba13c46b7cef
   .github/instructions/dox-docs.instructions.md: sha256:2e22c0095b649130d7abe16d517c597f44f4847e35d86f36aef530609286d21e
   .github/instructions/dox-issues.instructions.md: sha256:483b72988092e6334c70fff5864caf75e5f9068bd6da34d4f2d05982dac0d917
