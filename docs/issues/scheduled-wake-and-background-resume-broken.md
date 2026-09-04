@@ -26,6 +26,34 @@ operation must hold its turn open with `sleep` and poll inline. That consumes an
 active turn, hits the shell timeout ceiling, and still cannot guarantee that
 work resumes without another human message.
 
+## Verified narrowing (2026-09-04)
+
+Live testing during the stall-guard investigation moved most of this issue
+from suspected to resolved:
+
+- **Wake delivery works end to end.** A background command with `wake: true`
+  (set through `bg delivery`) completed after the originating turn had fully
+  yielded, and the session was woken 0.4 seconds later with the completion
+  delivered as a message. The seam this issue feared was broken is healthy
+  when the flag is actually set.
+- **The flag could never be set from the model side.** The curated Claude
+  OAuth `Bash` schema hid `notify`/`wake` (`BashInput.wake` also defaults
+  false), so agents blocked in `bg wait` instead of yielding. Fixed: the
+  curated schema now advertises both fields, and the provider-boundary drift
+  ledger shrank accordingly.
+- **Blocking waits were then killed by the client stall guard**, which
+  cancels any turn with no server events for `stream_idle_timeout + 30s`
+  (630s observed four times on 2026-09-03, `trigger=stall_guard`). Fixed:
+  the server now emits keepalive Pongs for as long as a tool executes, and
+  the client Pong handler refreshes its activity clock (it previously did
+  not, despite the #451 commit message assuming it did).
+
+Still open, unchanged: the `ScheduleWakeup` payload contract mismatch
+(`delaySeconds`/`reason`/`prompt` advertised vs `action`/`task`/
+`wake_in_minutes` executed). The conformance drift ledger in
+`crates/jcode-provider-anthropic/src/tool_conformance_tests.rs` pins the
+exact divergence; the acceptance tests below still apply to that half.
+
 ## Live reproduction
 
 Observed on 2026-08-29 in the running self-dev session `mouse`
