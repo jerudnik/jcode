@@ -718,9 +718,19 @@ impl McpClient {
         config: &McpServerConfig,
         child_tracker: Arc<McpChildTracker>,
     ) -> Result<Self> {
+        Self::connect_in_dir_with_tracker(name, config, None, child_tracker).await
+    }
+
+    pub(crate) async fn connect_in_dir_with_tracker(
+        name: String,
+        config: &McpServerConfig,
+        working_dir: Option<&std::path::Path>,
+        child_tracker: Arc<McpChildTracker>,
+    ) -> Result<Self> {
+        let working_dir = working_dir.filter(|dir| dir.is_dir());
         crate::logging::info(&format!(
-            "MCP: Connecting to '{}' ({} {:?})",
-            name, config.command, config.args
+            "MCP: Connecting to '{}' ({} {:?}) cwd={:?}",
+            name, config.command, config.args, working_dir
         ));
 
         // MCP servers are user-configured and user-trusted: the user explicitly
@@ -741,12 +751,17 @@ impl McpClient {
             child_tracker.owner_pid().to_string(),
         );
 
-        let mut child = Command::new(&config.command)
+        let mut command = Command::new(&config.command);
+        command
             .args(&config.args)
             .envs(&env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(dir) = working_dir {
+            command.current_dir(dir);
+        }
+        let mut child = command
             .spawn()
             .with_context(|| format!("Failed to spawn MCP server: {}", config.command))?;
 
@@ -1002,6 +1017,89 @@ impl McpClient {
 
     pub async fn refresh_tools(&self) -> Result<()> {
         self.handle.refresh_tools().await
+    }
+}
+
+#[cfg(all(test, unix))]
+mod working_dir_tests {
+    use super::McpClient;
+    use crate::mcp::protocol::McpServerConfig;
+
+    /// A minimal fake stdio MCP server that reports its process cwd as its name.
+    fn fake_server_config() -> McpServerConfig {
+        let script = r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"%s","version":"0"}}}\n' "$PWD"
+      ;;
+    *'"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n'
+      ;;
+  esac
+done
+"#;
+        McpServerConfig {
+            command: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            env: Default::default(),
+            shared: false,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_in_dir_sets_subprocess_cwd() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let expected = dir.path().canonicalize().expect("canonicalize");
+
+        let client = McpClient::connect_in_dir_with_tracker(
+            "cwd-test".to_string(),
+            &fake_server_config(),
+            Some(dir.path()),
+            super::McpChildTracker::process(),
+        )
+        .await
+        .expect("connect");
+
+        let reported = client.server_info().expect("server info").name;
+        assert_eq!(
+            std::path::Path::new(&reported)
+                .canonicalize()
+                .expect("canonicalize reported"),
+            expected
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_in_dir_missing_dir_falls_back_to_inherited_cwd() {
+        let _env_guard = crate::storage::lock_test_env_read();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("missing");
+        let expected = std::env::current_dir()
+            .expect("current dir")
+            .canonicalize()
+            .expect("canonicalize current dir");
+
+        let client = McpClient::connect_in_dir_with_tracker(
+            "cwd-fallback-test".to_string(),
+            &fake_server_config(),
+            Some(&missing),
+            super::McpChildTracker::process(),
+        )
+        .await
+        .expect("connect should fall back to inherited cwd");
+
+        let reported = client.server_info().expect("server info").name;
+        assert_eq!(
+            std::path::Path::new(&reported)
+                .canonicalize()
+                .expect("canonicalize reported"),
+            expected
+        );
     }
 }
 
