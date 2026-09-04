@@ -31,8 +31,9 @@ apm_modules/
 # qmd generated databases
 .qmd/
 
-# Per-project Serena MCP data (language servers, memories) is machine-local.
-.serena/
+# Serena MCP project state: project.yml is tracked, memories/caches are machine-local.
+.serena/*
+!.serena/project.yml
 
 # direnv local cache (per-machine).
 .direnv/
