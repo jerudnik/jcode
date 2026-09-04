@@ -29,10 +29,6 @@ static KNOWN_DRIFT: LazyLock<Vec<Drift>> = LazyLock::new(|| {
             "Agent",
             "capability hidden: backing schema property model is not advertised",
         ),
-        semantic(
-            "Bash",
-            "capability hidden: backing schema properties notify and wake are not advertised",
-        ),
         semantic("Glob", "Glob deserializes with mode=grep; expected find"),
         ignored("Grep", "-A"),
         ignored("Grep", "-B"),
@@ -174,10 +170,7 @@ fn tool_cases() -> [ToolCase; 9] {
             backing: "bash",
             mirror: MirrorKind::Bash,
             variants: BASH_REQUIREMENTS,
-            hidden_capability_note: Some((
-                &["notify", "wake"],
-                "capability hidden: backing schema properties notify and wake are not advertised",
-            )),
+            hidden_capability_note: None,
             expected_mode: None,
         },
         ToolCase {
