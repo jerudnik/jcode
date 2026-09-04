@@ -368,7 +368,7 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
                     name: "Bash".to_string(),
                     description: "Executes a given bash command and returns its output."
                         .to_string(),
-                    input_schema: json!({"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"},"run_in_background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}),
+                    input_schema: json!({"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"},"run_in_background":{"type":"boolean"},"notify":{"type":"boolean","description":"Notify on completion (default true)."},"wake":{"type":"boolean","description":"Wake this session when a background command completes, so you can yield the turn instead of blocking in a wait."}},"required":["command"],"additionalProperties":false}),
                     cache_control: None,
                 },
             ),

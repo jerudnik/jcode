@@ -808,7 +808,12 @@ pub(in crate::tui::app) fn handle_server_event(
             app.update_terminal_title();
             false
         }
-        ServerEvent::Pong { .. } => false,
+        ServerEvent::Pong { .. } => {
+            // Server keepalives (hidden reasoning, long tool execution) exist
+            // to feed the stall guard; counting them here is the whole point.
+            app.last_stream_activity = Some(Instant::now());
+            false
+        }
         ServerEvent::ConnectionPhase { phase } => {
             let cp = match phase.as_str() {
                 "authenticating" => crate::message::ConnectionPhase::Authenticating,
