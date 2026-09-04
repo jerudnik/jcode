@@ -1451,38 +1451,53 @@ impl Agent {
                 let allow_reload_handoff = tc.name == "bash";
                 let tool_result;
                 let mut tool_handle = tool_handle;
-                tokio::select! {
-                    biased;
-                    res = &mut tool_handle => {
-                        tool_result = Some(match res {
-                            Ok(r) => r,
-                            Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
-                        });
-                    }
-                    _ = async {
-                        tokio::select! {
-                            _ = bg_signal.notified() => {}
-                            _ = shutdown_signal.notified() => {}
-                        }
-                    } => {
-                        if self.is_graceful_shutdown() && allow_reload_handoff {
-                            tool_result = match tokio::time::timeout(
-                                Duration::from_millis(750),
-                                &mut tool_handle,
-                            )
-                            .await
-                            {
-                                Ok(res) => Some(match res {
-                                    Ok(r) => r,
-                                    Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
-                                }),
-                                Err(_) => None,
-                            };
-                        } else {
-                            tool_result = None;
-                        }
+                // A long-running tool (bg wait, a slow build, a network fetch)
+                // emits no server events, so an attached client cannot tell a
+                // working tool from a dead connection and its stall guard
+                // cancels a healthy turn at the idle budget. Prove liveness
+                // with periodic keepalives for as long as the tool runs.
+                let mut tool_keepalive = stream_keepalive_ticker();
+                let interrupt = async {
+                    tokio::select! {
+                        _ = bg_signal.notified() => {}
+                        _ = shutdown_signal.notified() => {}
                     }
                 };
+                tokio::pin!(interrupt);
+                loop {
+                    tokio::select! {
+                        biased;
+                        res = &mut tool_handle => {
+                            tool_result = Some(match res {
+                                Ok(r) => r,
+                                Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
+                            });
+                            break;
+                        }
+                        _ = &mut interrupt => {
+                            if self.is_graceful_shutdown() && allow_reload_handoff {
+                                tool_result = match tokio::time::timeout(
+                                    Duration::from_millis(750),
+                                    &mut tool_handle,
+                                )
+                                .await
+                                {
+                                    Ok(res) => Some(match res {
+                                        Ok(r) => r,
+                                        Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
+                                    }),
+                                    Err(_) => None,
+                                };
+                            } else {
+                                tool_result = None;
+                            }
+                            break;
+                        }
+                        _ = tool_keepalive.tick() => {
+                            send_stream_keepalive_mpsc(&event_tx);
+                        }
+                    }
+                }
 
                 self.unlock_tools_if_needed(&tc.name);
                 let tool_elapsed = tool_start.elapsed();

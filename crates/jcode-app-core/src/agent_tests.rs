@@ -1316,6 +1316,94 @@ async fn run_turn_streaming_mpsc_emits_keepalive_while_provider_is_quiet() {
     task.await.unwrap().unwrap();
 }
 
+#[tokio::test]
+async fn run_turn_streaming_mpsc_emits_keepalive_while_tool_is_executing() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    // Turn 1: the model calls a tool that takes a while to run. A client
+    // watching the event stream sees nothing while the tool executes, so the
+    // server must prove liveness with keepalives or the client stall guard
+    // cancels a healthy turn (observed live: four 630s stall-guard cancels of
+    // `bg wait` turns on 2026-09-03). Turn 2: the model finishes.
+    let provider: Arc<dyn Provider> = Arc::new(RetryEvidenceProvider {
+        attempts: Arc::new(Mutex::new(VecDeque::from(vec![
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseStart {
+                    id: "tc-slow-1".to_string(),
+                    name: "bash".to_string(),
+                }),
+                ScriptedProviderEvent::Event(StreamEvent::ToolInputDelta(
+                    "{\"command\":\"sleep 0.4\"}".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseEnd),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("tool_use".to_string()),
+                }),
+            ]),
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::TextDelta("done".to_string())),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }),
+            ]),
+        ]))),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.memory_enabled = false;
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "run something slow".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(async move { agent.run_turn_streaming_mpsc(tx).await });
+
+    // Keepalives count only between ToolExec and ToolDone: that window is the
+    // silent tool execution the stall guard cannot otherwise distinguish from
+    // a dead connection.
+    let mut tool_exec_seen = false;
+    let mut keepalive_during_tool = false;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
+            Ok(Some(ServerEvent::ToolExec { .. })) => {
+                tool_exec_seen = true;
+            }
+            Ok(Some(ServerEvent::Pong { id })) => {
+                assert_eq!(id, STREAM_KEEPALIVE_PONG_ID);
+                if tool_exec_seen {
+                    keepalive_during_tool = true;
+                }
+            }
+            Ok(Some(ServerEvent::ToolDone { .. })) => {
+                break;
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("channel closed before tool finished"),
+            Err(_) => {
+                assert!(
+                    !task.is_finished(),
+                    "streaming task finished before tool events arrived"
+                );
+            }
+        }
+    }
+
+    assert!(tool_exec_seen, "expected the slow tool to start executing");
+    assert!(
+        keepalive_during_tool,
+        "expected at least one keepalive Pong while the tool was executing"
+    );
+    task.await.unwrap().unwrap();
+}
+
 /// Provider that transparently switches its model mid-stream, mimicking the
 /// Anthropic retired-model fallback (`claude-fable-5` -> `claude-opus-4-8`).
 struct MidStreamModelSwitchProvider {

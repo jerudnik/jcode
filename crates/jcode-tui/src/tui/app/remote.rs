@@ -1369,10 +1369,11 @@ async fn detect_and_cancel_stall(app: &mut App, remote: &mut RemoteConnection) {
                 return;
             }
             crate::logging::warn(&format!(
-                "Stream stall detected: no server events for {:?}, cancelling",
+                "Stream stall detected: no server events for {:?} (status={:?}), cancelling",
                 app.last_stream_activity
                     .map(|t| t.elapsed())
-                    .or(app.processing_started.map(|t| t.elapsed()))
+                    .or(app.processing_started.map(|t| t.elapsed())),
+                app.status
             ));
             let _ = remote.cancel_with_reason("stall_guard").await;
             app.is_processing = false;
