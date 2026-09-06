@@ -648,7 +648,11 @@ impl Registry {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         let grant_lookup = match swarm_state {
-            Some(swarm_state) => swarm_state.assignment_grant_for_session(&ctx.session_id).await,
+            Some(swarm_state) => {
+                swarm_state
+                    .assignment_grant_for_session(&ctx.session_id)
+                    .await
+            }
             None => grant::GrantLookup::Unrestricted,
         };
         if let Err(error) =
@@ -902,14 +906,16 @@ impl Registry {
             // authority; every MCP call (pooled, owned, connect-on-first-
             // call) then pins the daemon against idle exit. Pool-less
             // managers are local/test harnesses and keep the no-op default.
-            Arc::new(RwLock::new(
+            let manager = Arc::new(RwLock::new(
                 McpManager::with_shared_pool_for_dir_and_activity(
-                    pool,
+                    Arc::clone(&pool),
                     sid,
                     working_dir,
                     crate::server::shutdown::activity_authority(),
                 ),
-            ))
+            ));
+            pool.track_session_manager(&manager);
+            manager
         } else {
             Arc::new(RwLock::new(McpManager::new()))
         };
