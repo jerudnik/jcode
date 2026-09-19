@@ -186,6 +186,37 @@ impl App {
             .filter(|provider| !provider.trim().is_empty())
     }
 
+    /// Cache policy needs credential identity, not a display label or just OpenAI.
+    pub(super) fn cache_provider_identity(&self, provider: &str) -> String {
+        if !provider.eq_ignore_ascii_case("openai") {
+            return provider.to_string();
+        }
+        // Unlike a display hint, only authoritative credential metadata can
+        // turn generic OpenAI into a documented API cache policy. Do not infer
+        // a timer from credentials merely present on the client's machine.
+        let credential = if self.uses_server_or_replay_metadata() {
+            self.remote_resolved_credential.or_else(|| {
+                self.session
+                    .route_api_method
+                    .as_deref()
+                    .and_then(jcode_provider_core::AuthRoute::parse)
+                    .filter(|route| {
+                        route.active_provider() == jcode_provider_core::ActiveProvider::OpenAI
+                    })
+                    .map(|route| route.resolved_credential())
+            })
+        } else {
+            // This helper also runs on every frame. Auto resolution can read
+            // credentials from disk, so leave unpinned local routes unknown.
+            self.provider.active_explicit_credential()
+        };
+        match credential {
+            Some(jcode_provider_core::ResolvedCredential::ApiKey) => "openai-api".to_string(),
+            Some(jcode_provider_core::ResolvedCredential::Oauth) => "openai-oauth".to_string(),
+            None => "openai".to_string(),
+        }
+    }
+
     fn widget_route_info(&self, model: Option<&str>) -> WidgetRouteInfo {
         let uses_remote_widget_metadata = self.is_remote || self.is_replay_runtime();
         let remote_provider_name = if uses_remote_widget_metadata {

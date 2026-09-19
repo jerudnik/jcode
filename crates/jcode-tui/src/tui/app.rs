@@ -2220,13 +2220,14 @@ impl App {
     }
 
     fn kv_cache_provider_name(&self) -> String {
-        if self.uses_server_or_replay_metadata() {
+        let provider = if self.uses_server_or_replay_metadata() {
             self.remote_provider_name
                 .clone()
                 .unwrap_or_else(|| self.provider.name().to_string())
         } else {
             self.provider.name().to_string()
-        }
+        };
+        self.cache_provider_identity(&provider)
     }
 
     fn kv_cache_provider_model(&self) -> String {

@@ -1334,6 +1334,21 @@ fn format_cache_stats(app: &App) -> String {
     lines.push(format!("- is_replay: {}", app.is_replay));
     lines.push(format!("- current_provider: {}", current_provider));
     lines.push(format!("- current_model: {}", current_model));
+    let route_provider = app.kv_cache_provider_name();
+    let route_ttl = crate::tui::cache_ttl_for_provider_model(&route_provider, Some(&current_model));
+    let retention = match route_ttl {
+        Some(seconds) if crate::provider::cache_ttl_is_estimate(&route_provider) => format!(
+            "{} minutes, provider estimate/minimum, not a guaranteed expiry",
+            seconds / 60
+        ),
+        Some(seconds) => format!("{} minutes", seconds / 60),
+        None => "unknown, provider-managed retention".to_string(),
+    };
+    lines.push(format!("- active_route_cache_retention: {}", retention));
+    lines.push(
+        "- anthropic_cache_ttl_setting_scope: Anthropic only, does not configure OpenAI retention"
+            .to_string(),
+    );
     lines.push(format!(
         "- upstream_provider: {}",
         opt_string(app.upstream_provider.as_deref())

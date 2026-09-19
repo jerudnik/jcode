@@ -57,6 +57,10 @@ fn cache_accounting_openai_writes_are_subsets_live_and_completed() {
         ),
         "{stats}"
     );
+    assert!(
+        stats.contains("active_route_cache_retention: 30 minutes, provider estimate/minimum"),
+        "{stats}"
+    );
     let info = app.info_widget_data().cache_hit_info.unwrap();
     assert_eq!(info.prompt_tokens, Some(10_000));
     assert!((info.hit_ratio().unwrap() - 0.6).abs() < 0.0001);
@@ -177,6 +181,12 @@ fn cache_accounting_legacy_history_does_not_guess_from_writes_or_current_provide
             .unwrap()
             .hit_ratio()
             .is_none()
+    );
+    app.remote_resolved_credential = Some(jcode_provider_core::ResolvedCredential::Oauth);
+    let stats = cache_accounting_stats(&mut app);
+    assert!(
+        stats.contains("active_route_cache_retention: unknown, provider-managed retention"),
+        "{stats}"
     );
 }
 
