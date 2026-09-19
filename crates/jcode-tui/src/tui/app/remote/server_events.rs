@@ -687,6 +687,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.last_api_completed_model = Some(<App as TuiState>::provider_model(app));
                 // Effective prompt includes cache read/creation because all are resent cold.
                 let effective = crate::tui::info_widget::effective_prompt_tokens(
+                    &app.kv_cache_provider_name(),
                     input,
                     app.streaming.streaming_cache_read_tokens.unwrap_or(0),
                     app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
@@ -720,6 +721,23 @@ pub(in crate::tui::app) fn handle_server_event(
                 let has_cache_telemetry = app.streaming.streaming_cache_read_tokens.is_some()
                     || app.streaming.streaming_cache_creation_tokens.is_some();
                 if has_cache_telemetry {
+                    let prompt = crate::tui::info_widget::effective_prompt_tokens(
+                        &app.kv_cache_provider_name(),
+                        input,
+                        app.streaming.streaming_cache_read_tokens.unwrap_or(0),
+                        app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
+                    );
+                    let previous_prompt = if had_cache_telemetry {
+                        app.token_accounting.last_cache_prompt_tokens.unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    app.token_accounting.total_cache_prompt_tokens = app
+                        .token_accounting
+                        .total_cache_prompt_tokens
+                        .saturating_sub(previous_prompt)
+                        .saturating_add(prompt);
+                    app.token_accounting.last_cache_prompt_tokens = Some(prompt);
                     let reported_delta = if had_cache_telemetry {
                         input.saturating_sub(previous_input)
                     } else {
@@ -747,12 +765,13 @@ pub(in crate::tui::app) fn handle_server_event(
                         );
                     app.token_accounting.last_cache_reported_input_tokens = Some(input);
                     app.token_accounting.last_cache_read_tokens =
-                        Some(app.streaming.streaming_cache_read_tokens.unwrap_or(0));
+                        app.streaming.streaming_cache_read_tokens;
                     app.token_accounting.last_cache_creation_tokens =
-                        Some(app.streaming.streaming_cache_creation_tokens.unwrap_or(0));
+                        app.streaming.streaming_cache_creation_tokens;
                 }
 
                 let effective_prompt_tokens = crate::tui::info_widget::effective_prompt_tokens(
+                    &app.kv_cache_provider_name(),
                     input,
                     app.streaming.streaming_cache_read_tokens.unwrap_or(0),
                     app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
@@ -1424,10 +1443,12 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.streaming.streaming_cache_creation_tokens = None;
                 app.kv_cache.current_api_usage_recorded = false;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
+                app.token_accounting.total_cache_prompt_tokens = 0;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
                 app.token_accounting.last_cache_reported_input_tokens = None;
+                app.token_accounting.last_cache_prompt_tokens = None;
                 app.token_accounting.last_cache_read_tokens = None;
                 app.token_accounting.last_cache_creation_tokens = None;
                 app.token_accounting.last_cache_optimal_input_tokens = None;
@@ -1531,6 +1552,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.token_accounting.total_input_tokens = 0;
                 app.token_accounting.total_output_tokens = 0;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
+                app.token_accounting.total_cache_prompt_tokens = 0;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
