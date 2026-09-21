@@ -1328,3 +1328,107 @@ fn populate_context_limits_from_config_seeds_qualified_runtime_model_shapes() {
         "profile-qualified slash-path spec must resolve the configured context_window"
     );
 }
+
+// Port of upstream c0071abd7 (issue #1056): read-modify-write settings updates
+// must refuse to run over a malformed existing config file instead of silently
+// saving defaults over it, while legitimate missing-file and valid-file writes
+// keep working.
+
+#[test]
+fn settings_update_refuses_to_overwrite_malformed_config() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let path = Config::path().expect("config path");
+        // `auth = "invalid-auth-mode"` is an unrecognized NamedProviderAuth
+        // value, so this is valid TOML that still fails Config deserialization.
+        let original = "[providers.broken]\nauth = \"invalid-auth-mode\"\n";
+        std::fs::write(&path, original).expect("write malformed config");
+
+        let error = Config::set_openai_reasoning_effort(Some("high"))
+            .expect_err("a malformed config must block the settings update");
+
+        assert!(
+            error.to_string().contains("Failed to parse config file"),
+            "error must name the config parse problem: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("reread malformed config"),
+            original,
+            "the malformed config file must be preserved byte-for-byte"
+        );
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn settings_update_creates_config_when_file_is_missing() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let path = Config::path().expect("config path");
+        assert!(!path.exists(), "precondition: no config file yet");
+
+        Config::set_openai_reasoning_effort(Some("medium")).expect("missing config still updates");
+
+        let content = std::fs::read_to_string(&path).expect("config file created");
+        let parsed: Config = toml::from_str(&content).expect("created config parses");
+        assert_eq!(parsed.provider.openai_reasoning_effort.as_deref(), Some("medium"));
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn settings_update_preserves_unrelated_config_content() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let path = Config::path().expect("config path");
+        std::fs::write(
+            &path,
+            r#"
+[provider]
+openai_reasoning_effort = "low"
+
+[providers.gateway]
+type = "openai-compatible"
+base_url = "https://gateway.example/v1"
+auth = "bearer"
+api_key_env = "GATEWAY_API_KEY"
+
+[[providers.gateway.models]]
+id = "gateway-model"
+"#,
+        )
+        .expect("write valid config");
+
+        Config::set_openai_reasoning_effort(Some("high")).expect("valid config still updates");
+
+        let saved = std::fs::read_to_string(&path).expect("reread updated config");
+        let parsed: Config = toml::from_str(&saved).expect("updated config parses");
+        assert_eq!(parsed.provider.openai_reasoning_effort.as_deref(), Some("high"));
+        let gateway = parsed.providers.get("gateway").expect("gateway profile kept");
+        assert_eq!(gateway.base_url, "https://gateway.example/v1");
+        assert_eq!(gateway.models.len(), 1, "gateway models kept");
+        assert_eq!(gateway.models[0].id, "gateway-model");
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
