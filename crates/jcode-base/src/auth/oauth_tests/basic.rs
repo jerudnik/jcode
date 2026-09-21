@@ -180,12 +180,24 @@ async fn fetch_claude_profile_email_reads_account_email() -> Result<()> {
         }
     })
     .to_string();
-    let (port, _handle) = mock_token_server(200, &body).await;
+    let (port, handle) = mock_token_server(200, &body).await;
 
     let url = format!("http://127.0.0.1:{}/api/oauth/profile", port);
     let email = fetch_claude_profile_email_at_url("token", &url).await?;
+    let (method, path, headers, _) = handle.await?;
 
     assert_eq!(email, Some("user@example.com".to_string()));
+    assert_eq!(method, "GET");
+    assert_eq!(path, "/api/oauth/profile");
+    assert_eq!(
+        headers.get("user-agent").map(String::as_str),
+        Some(crate::provider::anthropic::CLAUDE_CLI_USER_AGENT)
+    );
+    assert_eq!(
+        headers.get("authorization").map(String::as_str),
+        Some("Bearer token")
+    );
+    assert!(!headers.contains_key("x-api-key"));
     Ok(())
 }
 
