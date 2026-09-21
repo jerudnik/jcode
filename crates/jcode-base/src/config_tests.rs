@@ -1383,7 +1383,10 @@ fn settings_update_creates_config_when_file_is_missing() {
 
         let content = std::fs::read_to_string(&path).expect("config file created");
         let parsed: Config = toml::from_str(&content).expect("created config parses");
-        assert_eq!(parsed.provider.openai_reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            parsed.provider.openai_reasoning_effort.as_deref(),
+            Some("medium")
+        );
 
         restore_env_var("JCODE_HOME", prev_home);
         Config::invalidate_cache();
@@ -1422,8 +1425,14 @@ id = "gateway-model"
 
         let saved = std::fs::read_to_string(&path).expect("reread updated config");
         let parsed: Config = toml::from_str(&saved).expect("updated config parses");
-        assert_eq!(parsed.provider.openai_reasoning_effort.as_deref(), Some("high"));
-        let gateway = parsed.providers.get("gateway").expect("gateway profile kept");
+        assert_eq!(
+            parsed.provider.openai_reasoning_effort.as_deref(),
+            Some("high")
+        );
+        let gateway = parsed
+            .providers
+            .get("gateway")
+            .expect("gateway profile kept");
         assert_eq!(gateway.base_url, "https://gateway.example/v1");
         assert_eq!(gateway.models.len(), 1, "gateway models kept");
         assert_eq!(gateway.models[0].id, "gateway-model");
