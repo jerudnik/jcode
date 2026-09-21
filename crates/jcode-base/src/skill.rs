@@ -345,15 +345,37 @@ impl SkillRegistry {
     }
 
     fn load_project_local_dirs(&mut self, working_dir: Option<&Path>) -> Result<()> {
+        // A project-local dir that aliases its global counterpart (sessions
+        // with working_dir = $HOME, or chroot-style layouts) would register
+        // every skill twice as duplicate authorities. Skip those aliases.
+        let aliases_global = |local: &Path, global: &Path| -> bool {
+            let canonical = |p: &Path| {
+                std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+            };
+            canonical(local) == canonical(global)
+        };
+        let global_jcode = crate::storage::jcode_dir()
+            .map(|dir| dir.join("skills"))
+            .ok();
+        let global_agents = crate::storage::user_home_path(".agents/skills").ok();
+
         // Load from ./.jcode/skills/ (project-local jcode skills)
         let local_jcode = Self::project_local_dir(working_dir, ".jcode");
-        if local_jcode.exists() {
+        if local_jcode.exists()
+            && !global_jcode
+                .as_ref()
+                .is_some_and(|global| aliases_global(&local_jcode, global))
+        {
             self.load_from_dir(&local_jcode)?;
         }
 
         // Load from ./.agents/skills/ (shared cross-tool `.agents` convention)
         let local_agents = Self::project_local_dir(working_dir, ".agents");
-        let agents_count = if local_agents.exists() {
+        let agents_count = if local_agents.exists()
+            && !global_agents
+                .as_ref()
+                .is_some_and(|global| aliases_global(&local_agents, global))
+        {
             self.load_from_dir_count(&local_agents)?
         } else {
             0
