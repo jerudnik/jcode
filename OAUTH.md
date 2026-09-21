@@ -62,11 +62,14 @@ automatically for the default Claude runtime path.
 
 Required behaviors (applied by the Anthropic provider):
 - Use the Messages endpoint with `?beta=true`.
-- Send `User-Agent: claude-cli/1.0.0`.
+- Use the shared `CLAUDE_CLI_USER_AGENT` from
+  `crates/jcode-base/src/provider/anthropic.rs` for inference, profile, and
+  sidecar requests. Billing attribution and preflight metadata use the same
+  client version.
 - Send `anthropic-beta: oauth-2025-04-20,claude-code-20250219`.
 - Prepend the system blocks with the Claude Code identity line as the first
   block:
-  - `You are Claude Code, Anthropic's official CLI for Claude.`
+  - `You are a Claude agent, built on Anthropic's Claude Agent SDK.`
 
 Tool name allow-list:
 Claude OAuth requests reject certain tool names. jcode remaps a small set of
@@ -84,6 +87,10 @@ OAuth. The remapped names are:
 - `subagent` → `Agent`
 - `schedule` → `ScheduleWakeup`
 - `skill_manage` → `Skill`
+
+`Bash` uses the registered tool's description and schema, including timeout
+units, `intent`, and background delivery controls. Only its wire name changes.
+OAuth formatting does not grant tool permissions or override assignment grants.
 
 Notes:
 - If the OAuth token expires, refresh via the Claude OAuth refresh endpoint.
