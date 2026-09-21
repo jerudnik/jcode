@@ -2217,19 +2217,36 @@ fn wrap_lines(
         let wrap_width = if is_user_line { user_width } else { full_width };
         let new_lines = markdown::wrap_line(line, wrap_width);
         let count = new_lines.len();
-        let mut remaining_copy_offset = line_copy_offsets.get(orig_idx).copied().unwrap_or(0);
+        let first_copy_offset = line_copy_offsets.get(orig_idx).copied().unwrap_or(0);
+        // Wrapping preserves source columns and adds one display-only prefix
+        // per continuation row (a quote gutter or list hanging indent).
+        let repeated_prefix_width = if count > 1 {
+            new_lines
+                .iter()
+                .map(|line| line.width())
+                .sum::<usize>()
+                .saturating_sub(raw_width)
+                .saturating_sub(first_copy_offset)
+                / (count - 1)
+        } else {
+            0
+        };
         let mut start_col = 0usize;
 
-        for wrapped_line in &new_lines {
+        for (row_idx, wrapped_line) in new_lines.iter().enumerate() {
             let width = wrapped_line.width();
-            let end_col = (start_col + width).min(raw_width);
+            let copy_offset = if row_idx == 0 {
+                first_copy_offset
+            } else {
+                repeated_prefix_width
+            };
+            let end_col = (start_col + width.saturating_sub(copy_offset)).min(raw_width);
             wrapped_line_map.push(WrappedLineMap {
                 raw_line: orig_idx,
                 start_col,
                 end_col,
             });
-            wrapped_copy_offsets.push(remaining_copy_offset.min(width));
-            remaining_copy_offset = remaining_copy_offset.saturating_sub(width);
+            wrapped_copy_offsets.push(copy_offset.min(width));
             start_col = end_col;
         }
 
@@ -2318,19 +2335,36 @@ fn wrap_lines_with_map(
         let wrap_width = if is_user_line { user_width } else { full_width };
         let new_lines = markdown::wrap_line(line, wrap_width);
         let count = new_lines.len();
-        let mut remaining_copy_offset = line_copy_offsets.get(orig_idx).copied().unwrap_or(0);
+        let first_copy_offset = line_copy_offsets.get(orig_idx).copied().unwrap_or(0);
+        // As in wrap_lines, excess width comes from repeated display prefixes.
+        // Overrides can map this line to only a span of a seeded raw line.
+        let repeated_prefix_width = if count > 1 {
+            new_lines
+                .iter()
+                .map(|line| line.width())
+                .sum::<usize>()
+                .saturating_sub(end_col.saturating_sub(start_col))
+                .saturating_sub(first_copy_offset)
+                / (count - 1)
+        } else {
+            0
+        };
         let mut segment_start = start_col;
 
-        for wrapped_line in &new_lines {
+        for (row_idx, wrapped_line) in new_lines.iter().enumerate() {
             let width = wrapped_line.width();
-            let segment_end = (segment_start + width).min(end_col);
+            let copy_offset = if row_idx == 0 {
+                first_copy_offset
+            } else {
+                repeated_prefix_width
+            };
+            let segment_end = (segment_start + width.saturating_sub(copy_offset)).min(end_col);
             wrapped_line_map.push(WrappedLineMap {
                 raw_line,
                 start_col: segment_start,
                 end_col: segment_end,
             });
-            wrapped_copy_offsets.push(remaining_copy_offset.min(width));
-            remaining_copy_offset = remaining_copy_offset.saturating_sub(width);
+            wrapped_copy_offsets.push(copy_offset.min(width));
             segment_start = segment_end;
         }
 

@@ -53,6 +53,166 @@ fn prepare_body_preserves_multiline_user_prompt_lines() {
     assert_eq!(line_copy_offsets, vec![3, 3, 3, 3]);
 }
 
+fn assert_wrapped_copy_selection(
+    prepared: &PreparedMessages,
+    width: u16,
+    first: &str,
+    last: &str,
+    expected: &str,
+) {
+    ui::record_copy_viewport_snapshot(
+        prepared.wrapped_plain_lines.clone(),
+        prepared.wrapped_copy_offsets.clone(),
+        prepared.raw_plain_lines.clone(),
+        prepared.wrapped_line_map.clone(),
+        0,
+        prepared.wrapped_lines.len(),
+        ratatui::layout::Rect::new(0, 0, width, prepared.wrapped_lines.len() as u16),
+        &[],
+    );
+    let point = |needle: &str, after: bool| {
+        let (row, text, byte) = prepared
+            .wrapped_plain_lines
+            .iter()
+            .enumerate()
+            .find_map(|(row, text)| text.find(needle).map(|byte| (row, text, byte)))
+            .unwrap_or_else(|| panic!("missing {needle:?} at width {width}"));
+        let byte = byte + if after { needle.len() } else { 0 };
+        let column = unicode_width::UnicodeWidthStr::width(&text[..byte]);
+        ui::copy_viewport_point_from_screen(column as u16, row as u16)
+            .expect("selection endpoint inside viewport")
+    };
+    let start = point(first, false);
+    let end = point(last, true);
+    assert!(end.abs_line > start.abs_line, "selection must cross a wrap");
+    for (start, end) in [(start, end), (end, start)] {
+        assert_eq!(
+            ui::copy_selection_text(crate::tui::CopySelectionRange { start, end }).as_deref(),
+            Some(expected),
+            "logical source selection at width {width}, {start:?}..{end:?}"
+        );
+    }
+    assert_eq!(
+        ui::copy_selection_text(crate::tui::CopySelectionRange { start, end: start }),
+        Some(String::new()),
+        "an empty selection must not copy a repeated prefix"
+    );
+}
+
+fn assert_markdown_copy_selection(markdown: &str, first: &str, last: &str, expected: &str) {
+    for width in [16, 24, 40] {
+        let lines = markdown::render_markdown_with_width(markdown, Some(width as usize));
+        // Streaming/header and body preparation use different wrapping paths.
+        for prepared in [
+            wrap_lines(lines.clone(), &[], &[], &[], width),
+            wrap_lines_with_map(lines, &[], &[], &[], &[], &[], width, &[], &[], &[]),
+        ] {
+            assert_wrapped_copy_selection(&prepared, width, first, last, expected);
+        }
+    }
+}
+
+const WRAPPED_COPY_SOURCE: &str = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango";
+const WRAPPED_COPY_SELECTION: &str =
+    "juliet kilo lima mike november oscar papa quebec romeo sierra";
+
+#[test]
+fn wrapped_copy_narrow_lists_match_logical_source() {
+    for prefix in ["1. ", "- "] {
+        assert_markdown_copy_selection(
+            &format!("{prefix}{WRAPPED_COPY_SOURCE}"),
+            "juliet",
+            "sierra",
+            WRAPPED_COPY_SELECTION,
+        );
+    }
+}
+
+#[test]
+fn wrapped_copy_narrow_quotes_match_logical_source() {
+    assert_markdown_copy_selection(
+        &format!("> {WRAPPED_COPY_SOURCE}"),
+        "juliet",
+        "sierra",
+        WRAPPED_COPY_SELECTION,
+    );
+}
+
+#[test]
+fn wrapped_copy_nested_prefixes_match_logical_source() {
+    for prefix in ["> > 1. ", "- parent\n    - "] {
+        assert_markdown_copy_selection(
+            &format!("{prefix}{WRAPPED_COPY_SOURCE}"),
+            "juliet",
+            "sierra",
+            WRAPPED_COPY_SELECTION,
+        );
+    }
+}
+
+#[test]
+fn wrapped_copy_multiline_selection_matches_logical_source() {
+    let second = "uniform victor whiskey xray yankee zulu";
+    assert_markdown_copy_selection(
+        &format!("1. {WRAPPED_COPY_SOURCE}\n2. {second}"),
+        "juliet",
+        "xray",
+        &format!("{WRAPPED_COPY_SELECTION} tango\n2. uniform victor whiskey xray"),
+    );
+}
+
+#[test]
+fn wrapped_copy_unicode_matches_logical_source() {
+    let selected = "東京 🙂 delta 世界 echo 🚀 foxtrot 界🙂";
+    assert_markdown_copy_selection(
+        &format!("- alpha bravo charlie {selected} golf hotel"),
+        "東京",
+        "界🙂",
+        selected,
+    );
+}
+
+#[test]
+fn wrapped_copy_user_prompt_matches_logical_source() {
+    for width in [12, 24, 40] {
+        let mut lines = Vec::new();
+        let mut raws = Vec::new();
+        let mut maps = Vec::new();
+        let mut offsets = Vec::new();
+        let mut users = Vec::new();
+        push_user_prompt_lines(
+            &mut lines,
+            &mut raws,
+            &mut maps,
+            &mut offsets,
+            &mut users,
+            1,
+            user_color(),
+            &format!("{WRAPPED_COPY_SOURCE}\nuniform victor whiskey xray yankee zulu"),
+            ratatui::layout::Alignment::Left,
+        );
+        let prepared = wrap_lines_with_map(
+            lines,
+            &raws,
+            &maps,
+            &offsets,
+            &users,
+            &[],
+            width,
+            &[],
+            &[],
+            &[],
+        );
+        assert_wrapped_copy_selection(
+            &prepared,
+            width,
+            "juliet",
+            "xray",
+            &format!("{WRAPPED_COPY_SELECTION} tango\nuniform victor whiskey xray"),
+        );
+    }
+}
+
 /// Regression coverage for issue #344: loading older compacted history above
 /// an unchanged tail must be detected as a suffix match so scrolling to the
 /// start of a long session reuses the prepared tail instead of re-rendering
