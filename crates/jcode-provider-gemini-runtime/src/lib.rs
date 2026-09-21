@@ -365,37 +365,100 @@ impl GeminiProvider {
         method: &str,
         body: &impl Serialize,
     ) -> Result<T> {
+        self.post_json_with_policy(method, body, &TransientRetryPolicy::DEFAULT, &|| false)
+            .await
+    }
+
+    /// POST a JSON body to Code Assist, retrying burst 429s and transient 5xx
+    /// with bounded backoff.
+    ///
+    /// Code Assist enforces a short-window burst limiter that returns 429
+    /// RESOURCE_EXHAUSTED ("quota will reset after 0s") even when the daily
+    /// bucket has plenty left, and its backends intermittently answer 5xx
+    /// ("Authentication backend unavailable", "No capacity available"). Both
+    /// clear within seconds, so retry instead of failing the turn. Retries
+    /// only ever happen here, before the response body is parsed, so nothing
+    /// is replayed after output has been emitted. `cancelled` is polled
+    /// between attempts and while waiting so a dropped stream stops the loop.
+    async fn post_json_with_policy<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        body: &impl Serialize,
+        policy: &TransientRetryPolicy,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<T> {
         let tokens = gemini_auth::load_or_refresh_tokens().await?;
         let url = format!("{}:{method}", Self::base_url());
         let body_value =
             serde_json::to_value(body).context("Failed to serialize Gemini request body")?;
-        let resp = self
-            .send_with_retry(
-                |client| {
-                    client
-                        .post(&url)
-                        .bearer_auth(&tokens.access_token)
-                        .header(reqwest::header::CONTENT_TYPE, "application/json")
-                        .json(&body_value)
-                },
-                &url,
-            )
-            .await?;
+        let mut attempt: u32 = 0;
+        loop {
+            let resp = self
+                .send_with_retry(
+                    |client| {
+                        client
+                            .post(&url)
+                            .bearer_auth(&tokens.access_token)
+                            .header(reqwest::header::CONTENT_TYPE, "application/json")
+                            .json(&body_value)
+                    },
+                    &url,
+                )
+                .await?;
 
-        if !resp.status().is_success() {
             let status = resp.status();
-            let body = jcode_base::util::http_error_body(resp, "HTTP error").await;
-            anyhow::bail!(
-                "Gemini request {} failed (HTTP {}): {}",
-                method,
-                status,
-                body.trim()
-            );
-        }
+            if status.is_success() {
+                return resp
+                    .json()
+                    .await
+                    .with_context(|| format!("Failed to parse Gemini {} response", method));
+            }
 
-        resp.json()
-            .await
-            .with_context(|| format!("Failed to parse Gemini {} response", method))
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
+            let body = jcode_base::util::http_error_body(resp, "HTTP error").await;
+            let Some(delay) =
+                transient_retry_delay(status, retry_after.as_deref(), attempt, policy)
+            else {
+                let attempts = attempt + 1;
+                if attempts > 1 {
+                    anyhow::bail!(
+                        "Gemini request {} failed (HTTP {}) after {} attempts: {}",
+                        method,
+                        status,
+                        attempts,
+                        body.trim()
+                    );
+                }
+                anyhow::bail!(
+                    "Gemini request {} failed (HTTP {}): {}",
+                    method,
+                    status,
+                    body.trim()
+                );
+            };
+
+            attempt += 1;
+            jcode_base::logging::warn(&format!(
+                "Gemini {} hit transient HTTP {} (attempt {}/{}); retrying in {:?}",
+                method,
+                status.as_u16(),
+                attempt,
+                policy.max_retries + 1,
+                delay
+            ));
+            sleep_unless_cancelled(delay, cancelled)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Gemini request {} cancelled while waiting to retry HTTP {}",
+                        method, status
+                    )
+                })?;
+        }
     }
 
     /// POST a JSON body to the official Gemini Developer API, authenticating
@@ -499,6 +562,7 @@ impl GeminiProvider {
             .context("Failed to parse Gemini operation response")
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn generate_content(
         &self,
         state: &GeminiRuntimeState,
@@ -507,6 +571,7 @@ impl GeminiProvider {
         tools: &[ToolDefinition],
         system: &str,
         resume_session_id: Option<&str>,
+        cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Result<CodeAssistGenerateResponse> {
         let request = CodeAssistGenerateRequest {
             model: model.to_string(),
@@ -594,7 +659,12 @@ impl GeminiProvider {
                 })
             }
             GeminiAuthMode::Oauth => self
-                .post_json("generateContent", &request)
+                .post_json_with_policy(
+                    "generateContent",
+                    &request,
+                    &TransientRetryPolicy::DEFAULT,
+                    cancelled,
+                )
                 .await
                 .context("Gemini generateContent failed"),
         }
@@ -671,6 +741,10 @@ impl Provider for GeminiProvider {
                 }))
                 .await;
 
+            // A closed receiver means the caller walked away (turn cancelled
+            // or interrupted); the transient-retry loop polls this so it does
+            // not keep hammering Code Assist for an abandoned turn.
+            let cancelled = || tx.is_closed();
             let response = match provider
                 .generate_content(
                     &state,
@@ -679,6 +753,7 @@ impl Provider for GeminiProvider {
                     &tools,
                     &system,
                     resume_session_id.as_deref(),
+                    &cancelled,
                 )
                 .await
             {
@@ -699,6 +774,7 @@ impl Provider for GeminiProvider {
                                 &tools,
                                 &system,
                                 resume_session_id.as_deref(),
+                                &cancelled,
                             )
                             .await
                         {
@@ -1021,6 +1097,77 @@ impl Clone for GeminiProvider {
             state: self.state.clone(),
             fetched_models: self.fetched_models.clone(),
         }
+    }
+}
+
+/// Bounded retry policy for transient Code Assist responses (429 and 5xx).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TransientRetryPolicy {
+    /// Retries after the first attempt; total attempts are `max_retries + 1`.
+    max_retries: u32,
+    /// Delay before the first retry; doubles on each further retry.
+    base_delay: Duration,
+    /// Upper bound for any single wait, including a server `Retry-After`.
+    max_delay: Duration,
+}
+
+impl TransientRetryPolicy {
+    const DEFAULT: Self = Self {
+        max_retries: 5,
+        base_delay: Duration::from_millis(1500),
+        max_delay: Duration::from_secs(30),
+    };
+}
+
+/// How long to wait before retry number `attempt + 1` (0-based `attempt` is
+/// the number of retries already made), or `None` when the response is not
+/// transient or the attempt budget is spent. A parseable `Retry-After`
+/// (delay-seconds or HTTP-date) wins over exponential backoff.
+fn transient_retry_delay(
+    status: reqwest::StatusCode,
+    retry_after: Option<&str>,
+    attempt: u32,
+    policy: &TransientRetryPolicy,
+) -> Option<Duration> {
+    let transient = status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+    if !transient || attempt >= policy.max_retries {
+        return None;
+    }
+    let delay = retry_after.and_then(parse_retry_after).unwrap_or_else(|| {
+        policy
+            .base_delay
+            .saturating_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
+    });
+    Some(delay.min(policy.max_delay))
+}
+
+fn parse_retry_after(value: &str) -> Option<Duration> {
+    let value = value.trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let at = chrono::DateTime::parse_from_rfc2822(value).ok()?;
+    let remaining = at.signed_duration_since(Utc::now());
+    Some(remaining.to_std().unwrap_or(Duration::ZERO))
+}
+
+/// Sleep for `delay`, polling `cancelled` so a dropped stream stops the retry
+/// loop promptly instead of holding the task for the whole wait.
+async fn sleep_unless_cancelled(
+    delay: Duration,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<()> {
+    const SLICE: Duration = Duration::from_millis(50);
+    let deadline = tokio::time::Instant::now() + delay;
+    loop {
+        if cancelled() {
+            anyhow::bail!("request cancelled");
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Ok(());
+        }
+        tokio::time::sleep((deadline - now).min(SLICE)).await;
     }
 }
 
