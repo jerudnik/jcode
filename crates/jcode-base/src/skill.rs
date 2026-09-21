@@ -24,7 +24,14 @@ struct SkillFrontmatter {
     name: String,
     description: String,
     #[serde(rename = "allowed-tools")]
-    allowed_tools: Option<String>,
+    allowed_tools: Option<AllowedTools>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AllowedTools {
+    CommaDelimited(String),
+    Sequence(Vec<String>),
 }
 
 /// Registry of available skills
@@ -555,8 +562,13 @@ impl SkillRegistry {
             allowed_tools,
         } = frontmatter;
 
-        let allowed_tools =
-            allowed_tools.map(|s| s.split(',').map(|t| t.trim().to_string()).collect());
+        let allowed_tools = allowed_tools.map(|tools| match tools {
+            AllowedTools::CommaDelimited(tools) => tools
+                .split(',')
+                .map(|tool| tool.trim().to_string())
+                .collect(),
+            AllowedTools::Sequence(tools) => tools,
+        });
         let search_text = build_skill_search_text(&name, &description, &body);
 
         Ok(Skill {
@@ -1068,6 +1080,77 @@ mod tests {
             format!("---\nname: {name}\ndescription: Test skill {name}\n---\n\nUse {name}.\n"),
         )
         .expect("write skill");
+    }
+
+    fn write_skill_file(temp: &tempfile::TempDir, name: &str, allowed_tools: &str) -> Skill {
+        let path = temp.path().join(format!("{name}.md"));
+        std::fs::write(
+            &path,
+            format!("---\nname: {name}\ndescription: Test skill\n{allowed_tools}---\n\nBody\n"),
+        )
+        .expect("write skill");
+        SkillRegistry::parse_skill(&path).expect("parse skill")
+    }
+
+    fn tools(values: &[&str]) -> Option<Vec<String>> {
+        Some(values.iter().map(|value| value.to_string()).collect())
+    }
+
+    #[test]
+    fn allowed_tools_accepts_string_list_and_absence() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let from_string = write_skill_file(&temp, "string", "allowed-tools: bash, read, write\n");
+        assert_eq!(from_string.allowed_tools, tools(&["bash", "read", "write"]));
+
+        let from_block_list = write_skill_file(
+            &temp,
+            "block-list",
+            "allowed-tools:\n  - bash\n  - read\n  - write\n",
+        );
+        assert_eq!(
+            from_block_list.allowed_tools, from_string.allowed_tools,
+            "YAML list must parse to the same set as the string form"
+        );
+
+        let from_flow_list =
+            write_skill_file(&temp, "flow-list", "allowed-tools: [bash, read, write]\n");
+        assert_eq!(
+            from_flow_list.allowed_tools,
+            tools(&["bash", "read", "write"])
+        );
+
+        let without = write_skill_file(&temp, "absent", "");
+        assert_eq!(without.allowed_tools, None);
+    }
+
+    #[test]
+    fn allowed_tools_handles_empty_and_malformed_entries() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let empty_list = write_skill_file(&temp, "empty-list", "allowed-tools: []\n");
+        assert_eq!(empty_list.allowed_tools, Some(Vec::new()));
+
+        let null_value = write_skill_file(&temp, "null-value", "allowed-tools:\n");
+        assert_eq!(null_value.allowed_tools, None);
+
+        // Non-string entries must fail parsing (skill rejected) rather than
+        // panic or coerce into a widened allow-list.
+        let path = temp.path().join("non-string.md");
+        std::fs::write(
+            &path,
+            "---\nname: non-string\ndescription: Test skill\nallowed-tools: [bash, 1]\n---\n\nBody\n",
+        )
+        .expect("write skill");
+        SkillRegistry::parse_skill(&path).expect_err("non-string entries reject");
+
+        let number_value = temp.path().join("number-value.md");
+        std::fs::write(
+            &number_value,
+            "---\nname: number-value\ndescription: Test skill\nallowed-tools: 42\n---\n\nBody\n",
+        )
+        .expect("write skill");
+        SkillRegistry::parse_skill(&number_value).expect_err("numeric allowed-tools reject");
     }
 
     #[test]
