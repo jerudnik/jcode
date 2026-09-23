@@ -5,10 +5,10 @@
 //! binary's composition root registers [`AnthropicProvider`] with
 //! `jcode_base::provider::external` at startup.
 //!
-//! Pure header/attribution helpers that base's usage/sidecar code needs
-//! (`apply_oauth_attribution_headers`, `CLAUDE_CLI_USER_AGENT`, API-key
-//! loading, cache-TTL toggles) stay in `jcode_base::provider::anthropic`;
-//! this crate re-uses them from there.
+//! Shared header/auth helpers that base's usage/sidecar code needs
+//! (`apply_oauth_attribution_headers`, `claude_cli_identity`, API-key
+//! loading, cache-TTL toggles) are exposed by `jcode_base::provider::anthropic`.
+//! Version detection is owned by provider-core and re-exported there.
 
 //! Direct Anthropic API provider
 //!
@@ -26,8 +26,8 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use jcode_base::provider::anthropic::{
-    AVAILABLE_MODELS, AnthropicCredentialMode, CLAUDE_CLI_USER_AGENT,
-    apply_oauth_attribution_headers, is_cache_ttl_1h, load_anthropic_api_key,
+    AVAILABLE_MODELS, AnthropicCredentialMode, apply_oauth_attribution_headers,
+    claude_cli_identity, is_cache_ttl_1h, load_anthropic_api_key,
 };
 #[cfg(test)]
 use jcode_base::provider::anthropic::{OAUTH_BETA_HEADERS, effectively_1m};
@@ -261,7 +261,7 @@ async fn ensure_oauth_preflight(
     );
     headers.insert(
         reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static(CLAUDE_CLI_USER_AGENT),
+        reqwest::header::HeaderValue::from_str(&claude_cli_identity().await.user_agent)?,
     );
     headers.insert(
         reqwest::header::CONTENT_TYPE,
@@ -318,7 +318,7 @@ async fn ensure_oauth_preflight(
             rate_limit_tier: "default_claude_ai".to_string(),
             first_token_time: 1_740_976_801_491,
             email: email_address,
-            app_version: "2.1.257".to_string(),
+            app_version: claude_cli_identity().await.version.clone(),
         },
         forced_variations: Default::default(),
         forced_features: Vec::new(),
@@ -995,7 +995,7 @@ impl Provider for AnthropicProvider {
         let request = ApiRequest {
             model: api_model,
             max_tokens: self.max_tokens,
-            system: build_system_param(system, is_oauth),
+            system: build_system_param(system, is_oauth).await,
             messages: format_messages_with_identity(api_messages, is_oauth),
             tools: if api_tools.is_empty() {
                 None
@@ -1335,7 +1335,7 @@ impl Provider for AnthropicProvider {
         let request = ApiRequest {
             model: api_model,
             max_tokens: self.max_tokens,
-            system: build_system_param_split(system_static, system_dynamic, is_oauth),
+            system: build_system_param_split(system_static, system_dynamic, is_oauth).await,
             messages: format_messages_with_identity(api_messages, is_oauth),
             tools: if api_tools.is_empty() {
                 None
@@ -1736,7 +1736,7 @@ async fn stream_response(
         );
         req = apply_oauth_attribution_headers(
             req.header("Authorization", format!("Bearer {}", token))
-                .header("User-Agent", CLAUDE_CLI_USER_AGENT)
+                .header("User-Agent", &claude_cli_identity().await.user_agent)
                 .header("anthropic-beta", beta_header),
             oauth_session_id,
         );
@@ -2288,19 +2288,24 @@ fn process_sse_event(
 // API Types
 // ============================================================================
 
-fn build_system_param(system: &str, is_oauth: bool) -> Option<ApiSystem> {
-    jcode_provider_anthropic::build_system_param(system, is_oauth, is_cache_ttl_1h())
+async fn build_system_param(system: &str, is_oauth: bool) -> Option<ApiSystem> {
+    build_system_param_split(system, "", is_oauth).await
 }
 
-fn build_system_param_split(
+async fn build_system_param_split(
     static_part: &str,
     dynamic_part: &str,
     is_oauth: bool,
 ) -> Option<ApiSystem> {
+    let identity = if is_oauth {
+        Some(claude_cli_identity().await)
+    } else {
+        None
+    };
     jcode_provider_anthropic::build_system_param_split(
         static_part,
         dynamic_part,
-        is_oauth,
+        identity,
         is_cache_ttl_1h(),
     )
 }

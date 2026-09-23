@@ -191,7 +191,12 @@ async fn fetch_claude_profile_email_reads_account_email() -> Result<()> {
     assert_eq!(path, "/api/oauth/profile");
     assert_eq!(
         headers.get("user-agent").map(String::as_str),
-        Some(crate::provider::anthropic::CLAUDE_CLI_USER_AGENT)
+        Some(
+            crate::provider::anthropic::claude_cli_identity()
+                .await
+                .user_agent
+                .as_str()
+        )
     );
     assert_eq!(
         headers.get("authorization").map(String::as_str),
