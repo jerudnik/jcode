@@ -1,9 +1,9 @@
 # Preferred tools
 
-- Start with `agentgrep` for repository text, paths, outlines, and relationships. Use Serena for language-aware references or safe symbol edits. Narrow before reading whole files.
-- Batch independent reads and checks. Prefer `apply_patch`, `edit`, `multiedit`, or Serena edits to shell rewrites. Preserve unrelated work.
-- Run Rust through `scripts/dev_cargo.sh`; `scripts/test_fast.sh` for the fast suite; `scripts/preflight.sh` for fork guardrails.
-- In self-development, prefer `selfdev build`, `selfdev build-reload`, and `selfdev test`; use `debug_socket` for runtime and TUI verification.
-- Prefer Nix and `scripts/remote_build.sh` for reproducible or heavy work. Read script help and flake outputs instead of memorizing flags.
-- Use `swarm` for coordinated parallel work, `subagent` for one isolated result. `.jcode/swarm-prompt.md` owns routing.
-- Keep shell execution non-interactive. Never expose credentials, tokens, or secret-bearing environment output.
+- Use `agentgrep` for repository text, paths, outlines, and relationships; use Serena for language-aware references or safe symbol edits. Symbol lookup and references are trustworthy; diagnostics describe the checkout this Serena was started in, which is your worktree only when your session started there. Narrow before full-file reads.
+- Batch independent reads and checks. Use `apply_patch`, `edit`, `multiedit`, or Serena edits; preserve unrelated work.
+- Run Rust via `scripts/dev_cargo.sh`, the fast suite via `scripts/test_fast.sh`, and fork guardrails via `scripts/preflight.sh`.
+- In self-development, use `selfdev build`, `selfdev build-reload`, `selfdev test`, and `debug_socket` for runtime or TUI checks.
+- Use Nix and `scripts/remote_build.sh` for reproducible or heavy work. Read help and flake outputs instead of guessing flags.
+- Use `swarm` for coordinated parallel work and `subagent` for one isolated result; `.jcode/swarm-prompt.md` owns routing.
+- Keep shell execution non-interactive; never expose credentials, tokens, or secret-bearing environment output.
