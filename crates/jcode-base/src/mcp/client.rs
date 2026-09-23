@@ -44,13 +44,15 @@ pub(crate) const DEFAULT_MCP_REAP_GRACE: Duration = Duration::from_millis(225);
 /// Per-request health deadline: a child that accepts a request but never
 /// replies within this bound is declared dead (hung-child detection). This is
 /// separate from (and defaults below) the 30s total request timeout.
-pub(crate) const DEFAULT_MCP_HEALTH_DEADLINE: Duration = Duration::from_millis(15_000);
+pub(crate) const DEFAULT_MCP_HEALTH_DEADLINE: Duration = Duration::from_secs(15);
 
-/// Env override (milliseconds) for the per-request health deadline.
+/// Global env default (milliseconds) for the per-request health deadline. A
+/// server's own `health_deadline_ms` takes precedence.
 pub const MCP_HEALTH_DEADLINE_ENV: &str = "JCODE_MCP_HEALTH_DEADLINE_MS";
 
-/// Hard cap on any single request, regardless of health-deadline override.
-const MCP_REQUEST_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default total budget for any single request when the server config does
+/// not set `timeout_secs`.
+pub(crate) const DEFAULT_MCP_REQUEST_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Bound for the liveness ping probe sent when a request exceeds the health
 /// deadline. A server that answers the ping is alive-but-slow: the original
@@ -80,14 +82,69 @@ pub(crate) fn error_permits_auto_retry(err: &anyhow::Error) -> bool {
     err.downcast_ref::<RequestNotDelivered>().is_some()
 }
 
-fn health_deadline() -> Duration {
+/// Health deadline from the global env default, or the built-in default when
+/// the env var is unset, non-numeric, or zero. Not clamped: callers clamp to
+/// the server's total budget through [`McpTimeoutPolicy::health_deadline`].
+fn env_health_deadline() -> Duration {
     std::env::var(MCP_HEALTH_DEADLINE_ENV)
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|ms| *ms > 0)
         .map(Duration::from_millis)
         .unwrap_or(DEFAULT_MCP_HEALTH_DEADLINE)
-        .min(MCP_REQUEST_TOTAL_TIMEOUT)
+}
+
+/// Per-server request timing resolved from `McpServerConfig`.
+///
+/// `total` bounds every request to the server (initialize, tools/list,
+/// tools/call). `health` is the server's own silence-before-ping bound; when
+/// unset the global env default applies at request time so tests and
+/// operators can change it without reconnecting. The effective health
+/// deadline is always clamped to `total`: a short `timeout_secs` therefore
+/// tightens hung detection rather than masking it behind a plain timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct McpTimeoutPolicy {
+    total: Duration,
+    health: Option<Duration>,
+}
+
+impl Default for McpTimeoutPolicy {
+    fn default() -> Self {
+        Self {
+            total: DEFAULT_MCP_REQUEST_TOTAL_TIMEOUT,
+            health: None,
+        }
+    }
+}
+
+impl McpTimeoutPolicy {
+    /// Absent or zero values keep the defaults, so an unconfigured server
+    /// behaves exactly as before the knobs existed.
+    pub(crate) fn from_config(config: &McpServerConfig) -> Self {
+        Self {
+            total: config
+                .timeout_secs
+                .filter(|secs| *secs > 0)
+                .map(Duration::from_secs)
+                .unwrap_or(DEFAULT_MCP_REQUEST_TOTAL_TIMEOUT),
+            health: config
+                .health_deadline_ms
+                .filter(|ms| *ms > 0)
+                .map(Duration::from_millis),
+        }
+    }
+
+    pub(crate) fn total(&self) -> Duration {
+        self.total
+    }
+
+    /// Effective health deadline: server value, else the global env default,
+    /// never longer than the total budget.
+    pub(crate) fn health_deadline(&self) -> Duration {
+        self.health
+            .unwrap_or_else(env_health_deadline)
+            .min(self.total)
+    }
 }
 
 /// Shared dead-flag for one MCP child. All handle clones (pool caches,
@@ -483,6 +540,7 @@ pub struct McpHandle {
     capabilities: Arc<std::sync::RwLock<ServerCapabilities>>,
     tools: Arc<std::sync::RwLock<Vec<McpToolDef>>>,
     death: Arc<DeathState>,
+    timeout: McpTimeoutPolicy,
 }
 
 impl McpHandle {
@@ -550,7 +608,8 @@ impl McpHandle {
         // with a protocol ping before declaring the child hung. An
         // alive-and-responsive server merely running a slow tool keeps its
         // request waiting until the total timeout (F07 review BLOCKING-2).
-        let deadline = health_deadline();
+        let deadline = self.timeout.health_deadline();
+        let total = self.timeout.total();
         let mut rx = rx;
         let response = match tokio::time::timeout(deadline, &mut rx).await {
             Ok(Ok(response)) => response,
@@ -561,7 +620,7 @@ impl McpHandle {
             Err(_elapsed) => {
                 if self.probe_liveness().await {
                     // Alive but slow: wait out the remaining total budget.
-                    let remaining = MCP_REQUEST_TOTAL_TIMEOUT.saturating_sub(deadline);
+                    let remaining = total.saturating_sub(deadline);
                     match tokio::time::timeout(remaining, &mut rx).await {
                         Ok(Ok(response)) => response,
                         Ok(Err(_recv_closed)) => return Err(self.death_error()),
@@ -569,10 +628,12 @@ impl McpHandle {
                             self.pending.lock().await.remove(&id);
                             anyhow::bail!(
                                 "MCP request '{}' to '{}' timed out after {}s (server alive; \
-                                 not retried to avoid double execution)",
+                                 not retried to avoid double execution). Raise \
+                                 `timeout_secs` for '{}' if its tools legitimately run longer.",
                                 method,
                                 self.name,
-                                MCP_REQUEST_TOTAL_TIMEOUT.as_secs()
+                                total.as_secs(),
+                                self.name
                             );
                         }
                     }
@@ -584,7 +645,8 @@ impl McpHandle {
                         &self.name,
                         format!(
                             "health deadline exceeded ({}ms waiting for '{}' response; \
-                             liveness probe failed)",
+                             liveness probe failed). A server that cannot answer a ping \
+                             during long calls needs a larger `health_deadline_ms`.",
                             deadline.as_millis(),
                             method
                         ),
@@ -871,6 +933,7 @@ impl McpClient {
             capabilities: Arc::new(std::sync::RwLock::new(ServerCapabilities::default())),
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
             death,
+            timeout: McpTimeoutPolicy::from_config(config),
         };
 
         let mut client = Self {
@@ -1030,12 +1093,88 @@ impl Drop for McpClient {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_OWNED_MCP_CHILDREN, McpChildTracker, OwnedChildPermit, ReapAction, ReapSignal,
-        escalation_actions, try_reserve,
+        MAX_OWNED_MCP_CHILDREN, McpChildTracker, McpServerConfig, McpTimeoutPolicy,
+        OwnedChildPermit, ReapAction, ReapSignal, escalation_actions, try_reserve,
     };
     use std::process::Stdio;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
+
+    fn timeout_config(
+        timeout_secs: Option<u64>,
+        health_deadline_ms: Option<u64>,
+    ) -> McpServerConfig {
+        McpServerConfig {
+            command: "true".to_string(),
+            args: vec![],
+            env: Default::default(),
+            shared: false,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+            timeout_secs,
+            health_deadline_ms,
+        }
+    }
+
+    #[test]
+    fn timeout_policy_default_health_and_global_override() {
+        let _guard = crate::storage::lock_test_env();
+        let previous = std::env::var_os(super::MCP_HEALTH_DEADLINE_ENV);
+        crate::env::remove_var(super::MCP_HEALTH_DEADLINE_ENV);
+        let policy = McpTimeoutPolicy::default();
+        let default = policy.health_deadline();
+        crate::env::set_var(super::MCP_HEALTH_DEADLINE_ENV, "42000");
+        let clamped = policy.health_deadline();
+        crate::env::set_var(super::MCP_HEALTH_DEADLINE_ENV, "0");
+        let zero = policy.health_deadline();
+        crate::env::set_var(super::MCP_HEALTH_DEADLINE_ENV, "500");
+        let global = policy.health_deadline();
+        let server_wins =
+            McpTimeoutPolicy::from_config(&timeout_config(None, Some(5_000))).health_deadline();
+        match previous {
+            Some(value) => crate::env::set_var(super::MCP_HEALTH_DEADLINE_ENV, value),
+            None => crate::env::remove_var(super::MCP_HEALTH_DEADLINE_ENV),
+        }
+        assert_eq!(default, Duration::from_secs(15));
+        assert_eq!(
+            clamped,
+            Duration::from_secs(30),
+            "env value clamps to the 30s total"
+        );
+        assert_eq!(
+            zero,
+            Duration::from_secs(15),
+            "zero env value falls back to default"
+        );
+        assert_eq!(global, Duration::from_millis(500));
+        assert_eq!(
+            server_wins,
+            Duration::from_secs(5),
+            "server value beats the env default"
+        );
+    }
+
+    #[test]
+    fn timeout_policy_absent_and_zero_keep_defaults() {
+        for config in [timeout_config(None, None), timeout_config(Some(0), Some(0))] {
+            let policy = McpTimeoutPolicy::from_config(&config);
+            assert_eq!(policy, McpTimeoutPolicy::default());
+            assert_eq!(policy.total(), Duration::from_secs(30));
+        }
+    }
+
+    #[test]
+    fn timeout_policy_clamps_health_to_server_total() {
+        let policy = McpTimeoutPolicy::from_config(&timeout_config(Some(5), Some(60_000)));
+        assert_eq!(policy.total(), Duration::from_secs(5));
+        assert_eq!(policy.health_deadline(), Duration::from_secs(5));
+
+        let policy = McpTimeoutPolicy::from_config(&timeout_config(Some(120), Some(90_000)));
+        assert_eq!(policy.total(), Duration::from_secs(120));
+        assert_eq!(policy.health_deadline(), Duration::from_secs(90));
+    }
 
     #[test]
     fn try_reserve_enforces_cap_on_isolated_counter() {

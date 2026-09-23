@@ -65,6 +65,36 @@ Exact environment placeholders in MCP `env` values are expanded at load time:
 
 Partial interpolation is intentionally not supported. Use a shell wrapper when a value needs composition.
 
+### MCP request and health deadlines
+
+Each server can set two optional timing fields:
+
+| Field | Meaning | When absent or zero |
+| --- | --- | --- |
+| `timeout_secs` | Reply budget in seconds for each request, including initialization, tool discovery, and tool calls. | 30 seconds. |
+| `health_deadline_ms` | Milliseconds without a reply before Jcode sends a liveness ping. | Positive `JCODE_MCP_HEALTH_DEADLINE_MS` from Jcode's environment, otherwise 15,000 milliseconds. |
+
+For example, a server entry can include `"timeout_secs": 120` and
+`"health_deadline_ms": 90000`. Jcode silently clamps the effective health
+deadline to the request budget. A smaller `timeout_secs` therefore cannot
+disable hung-server detection. These fields do not invalidate cached tool schemas.
+A connect triggered by a tool call waits at least 30 seconds, or `timeout_secs`
+if that is larger, for the handshake. For a `shared` server the pool's own
+config applies; a project-local entry with the same name does not change the
+shared connection's timing.
+
+If the server answers the ping, Jcode waits for the rest of the reply budget.
+If the ping fails, Jcode declares the server hung and disconnects it. The ping
+probe can add up to two seconds to the wait. A delivered call is not retried,
+because it may already have produced side effects.
+
+A single-threaded server that cannot answer a ping during a long tool call
+will still be declared hung at its health deadline, after the failed probe.
+Raising only `timeout_secs` does not help it. Also raise that server's
+`health_deadline_ms`, or use `JCODE_MCP_HEALTH_DEADLINE_MS` as the global default,
+to cover the expected call duration. The request budget must be at least as
+large as the intended health deadline.
+
 ## Phase runtime secrets
 
 Jcode does not store Phase credentials. Phase integration should stay at runtime boundaries:

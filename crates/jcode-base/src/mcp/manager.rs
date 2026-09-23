@@ -5,7 +5,8 @@
 //! (e.g., Playwright with browser state) are spawned per-session.
 
 use super::client::{
-    DEFAULT_MCP_REAP_GRACE, McpChildTracker, McpClient, McpHandle, OwnedChildPermit,
+    DEFAULT_MCP_REAP_GRACE, McpChildTracker, McpClient, McpHandle, McpTimeoutPolicy,
+    OwnedChildPermit,
 };
 use super::pool::SharedMcpPool;
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef, ToolCallResult};
@@ -15,10 +16,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Bound on how long a tool call will wait for a not-yet-connected MCP server
+/// Floor on how long a tool call will wait for a not-yet-connected MCP server
 /// to come up before failing with a clean tool error. Keeps a slow/hanging
 /// server from blocking a single tool call forever (and never blocks spawn).
+/// See [`connect_on_call_bound`] for the per-server value.
 const CONNECT_ON_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Outer bound for a lazy connect or reconnect triggered by a tool call. A
+/// server with a larger `timeout_secs` gets at least that much for its
+/// handshake, so a slow initialize that the explicit connect path accepts is
+/// not cut short here. Unconfigured servers keep the 30s floor.
+fn connect_on_call_bound(config: &McpServerConfig) -> std::time::Duration {
+    CONNECT_ON_CALL_TIMEOUT.max(McpTimeoutPolicy::from_config(config).total())
+}
 
 /// Died-after-connect cooldown: when a server dies and its single bounded
 /// reconnect (or the retried call on the fresh child) fails too, further
@@ -534,7 +544,7 @@ impl McpManager {
                 "MCP: connecting to '{server}' on first tool call (connect-on-first-call)"
             ));
             let connect = self.connect(server, &config);
-            match tokio::time::timeout(CONNECT_ON_CALL_TIMEOUT, connect).await {
+            match tokio::time::timeout(connect_on_call_bound(&config), connect).await {
                 Ok(Ok(())) => {
                     // Retry once now that we should be connected.
                     let result = self.call_fresh_handle_once(server, tool, arguments).await;
@@ -632,7 +642,7 @@ impl McpManager {
             "MCP: reconnecting to dead server '{server}' once ({death_reason})"
         ));
         let connect = self.connect(server, &config);
-        match tokio::time::timeout(CONNECT_ON_CALL_TIMEOUT, connect).await {
+        match tokio::time::timeout(connect_on_call_bound(&config), connect).await {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 let message = format!("reconnect failed: {err:#}");
@@ -855,6 +865,35 @@ mod tests {
         McpConfig::default()
     }
 
+    #[test]
+    fn connect_on_call_bound_tracks_server_total_with_floor() {
+        let mut config = McpServerConfig {
+            command: "true".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+            shared: false,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
+        };
+        assert_eq!(connect_on_call_bound(&config), Duration::from_secs(30));
+        config.timeout_secs = Some(5);
+        assert_eq!(
+            connect_on_call_bound(&config),
+            Duration::from_secs(30),
+            "a short budget keeps the floor"
+        );
+        config.timeout_secs = Some(120);
+        assert_eq!(
+            connect_on_call_bound(&config),
+            Duration::from_secs(120),
+            "a long budget covers a slow handshake on first call"
+        );
+    }
+
     #[tokio::test]
     async fn call_tool_unconfigured_server_bails_cleanly() {
         let manager = McpManager::with_config(empty_config());
@@ -895,6 +934,8 @@ mod tests {
                 url: None,
                 enabled: Some(false),
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = McpManager::with_config(config);
@@ -928,6 +969,8 @@ mod tests {
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = McpManager::with_config(config);
@@ -1032,6 +1075,8 @@ done
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = McpManager::with_config(config.clone());
@@ -1090,6 +1135,8 @@ done
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = McpManager::with_config(config.clone());
@@ -1227,6 +1274,8 @@ done
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = McpManager::with_config(config.clone());
@@ -1292,6 +1341,14 @@ done
     fn write_hung_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
         let path = dir.join("hung-mcp-server.sh");
         let script = r##"#!/bin/bash
+mode=${1:-hung}
+delay=${2:-0}
+events=${3:-/dev/null}
+trap 'jobs -pr | xargs kill 2>/dev/null || true' EXIT
+reply() {
+  sleep "$delay"
+  echo '{"jsonrpc":"2.0","id":'"$1"',"result":{"content":[{"type":"text","text":"completed"}],"isError":false}}'
+}
 while IFS= read -r line; do
   id=$(echo "$line" | grep -o '"id":[0-9]*' | grep -o '[0-9]*' | head -1)
   case "$line" in
@@ -1302,7 +1359,17 @@ while IFS= read -r line; do
       echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[{"name":"never_returns","description":"hangs","inputSchema":{"type":"object"}}]}}'
       ;;
     *'"tools/call"'*)
-      : # reads the request but never replies
+      echo call >> "$events"
+      case "$mode" in
+        slow) reply "$id" & ;;
+        single) reply "$id" ;;
+      esac
+      ;;
+    *'"ping"'*)
+      echo ping >> "$events"
+      if [ "$mode" != hung ]; then
+        echo '{"jsonrpc":"2.0","id":'"$id"',"result":{}}'
+      fi
       ;;
     *'"shutdown"'*)
       exit 0
@@ -1318,6 +1385,189 @@ done
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).unwrap();
         path
+    }
+
+    async fn timeout_fixture_call(
+        name: &str,
+        mut settings: serde_json::Value,
+        mode: &str,
+        delay_secs: u64,
+        global_health_ms: &str,
+        bound_secs: u64,
+    ) -> (Result<ToolCallResult>, Duration, bool, Vec<String>) {
+        let env_guard = crate::storage::lock_test_env();
+        let previous = std::env::var_os(super::super::client::MCP_HEALTH_DEADLINE_ENV);
+        crate::env::remove_var(super::super::client::MCP_HEALTH_DEADLINE_ENV);
+        let temp = tempfile::tempdir().unwrap();
+        let server_path = write_hung_mcp_server(temp.path());
+        let events_path = temp.path().join("events");
+        settings["command"] = serde_json::json!(server_path);
+        settings["args"] = serde_json::json!([mode, delay_secs.to_string(), events_path]);
+        settings["shared"] = serde_json::json!(false);
+        let server_config = serde_json::from_value(settings).unwrap();
+        let mut config = McpConfig::default();
+        config.servers.insert(name.to_string(), server_config);
+        let manager = McpManager::with_config(config.clone());
+        manager.connect(name, &config.servers[name]).await.unwrap();
+        crate::env::set_var(
+            super::super::client::MCP_HEALTH_DEADLINE_ENV,
+            global_health_ms,
+        );
+
+        let started = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(bound_secs),
+            manager.call_tool(name, "never_returns", serde_json::json!({})),
+        )
+        .await;
+        let elapsed = started.elapsed();
+        let connected = manager
+            .connected_servers()
+            .await
+            .contains(&name.to_string());
+        manager.disconnect_all().await;
+        match previous {
+            Some(value) => {
+                crate::env::set_var(super::super::client::MCP_HEALTH_DEADLINE_ENV, value)
+            }
+            None => crate::env::remove_var(super::super::client::MCP_HEALTH_DEADLINE_ENV),
+        }
+        drop(env_guard);
+        let events = std::fs::read_to_string(events_path).unwrap();
+        assert!(
+            crate::mcp::client::McpChildTracker::process()
+                .tracked_children()
+                .iter()
+                .all(|child| child.server_name != name),
+            "fixture cleanup must reap its child"
+        );
+        (
+            result.expect("request exceeded the acceptance-test bound"),
+            elapsed,
+            connected,
+            events.lines().map(str::to_owned).collect(),
+        )
+    }
+
+    /// Wall clock ~60s: a call must legitimately outlive the 30s default
+    /// total. Run with `--ignored` when changing the request path.
+    #[tokio::test]
+    #[ignore = "slow acceptance test (~60s); run explicitly with --ignored"]
+    async fn timeout_policy_long_call_succeeds() {
+        let (result, elapsed, connected, events) = timeout_fixture_call(
+            "timeout-long-call",
+            serde_json::json!({"timeout_secs": 120, "health_deadline_ms": 1000}),
+            "slow",
+            60,
+            "1000",
+            70,
+        )
+        .await;
+        let result = result.expect("a ping-responsive 60s call must use its 120s total");
+        assert_eq!(result.content.len(), 1);
+        assert!(
+            matches!(&result.content[..], [super::super::protocol::ContentBlock::Text { text }] if text == "completed")
+        );
+        assert!(elapsed >= Duration::from_secs(60));
+        assert!(connected, "a healthy slow server must not be evicted");
+        assert_eq!(events, ["call", "ping"], "never retry a delivered call");
+    }
+
+    #[tokio::test]
+    async fn timeout_policy_hung_child_uses_server_health_deadline() {
+        let (result, elapsed, connected, events) = timeout_fixture_call(
+            "timeout-hung-child",
+            serde_json::json!({"timeout_secs": 120, "health_deadline_ms": 1000}),
+            "hung",
+            0,
+            "15000",
+            6,
+        )
+        .await;
+        let error = result.expect_err("hung child must fail despite a 120s total");
+        assert!(!super::super::client::error_permits_auto_retry(&error));
+        assert!(elapsed >= Duration::from_secs(1) && elapsed < Duration::from_secs(5));
+        assert!(!connected, "hung child must be evicted");
+        assert_eq!(events, ["call", "ping"]);
+    }
+
+    #[tokio::test]
+    async fn timeout_policy_short_total_keeps_hung_detection() {
+        let (result, elapsed, connected, events) = timeout_fixture_call(
+            "timeout-clamped-health",
+            serde_json::json!({"timeout_secs": 5, "health_deadline_ms": 60000}),
+            "hung",
+            0,
+            "60000",
+            10,
+        )
+        .await;
+        let error = result.expect_err("short total must still detect hung children");
+        assert!(!super::super::client::error_permits_auto_retry(&error));
+        // Five seconds to the clamped deadline, plus the existing 2s ping probe.
+        assert!(elapsed >= Duration::from_secs(5) && elapsed < Duration::from_secs(9));
+        assert!(!connected, "clamped health deadline must still evict");
+        assert_eq!(events, ["call", "ping"]);
+    }
+
+    #[tokio::test]
+    async fn timeout_policy_short_total_bounds_live_call() {
+        let (result, elapsed, connected, events) = timeout_fixture_call(
+            "timeout-live-child",
+            serde_json::json!({"timeout_secs": 5, "health_deadline_ms": 1000}),
+            "responsive",
+            0,
+            "1000",
+            9,
+        )
+        .await;
+        let error = result.expect_err("live server must still respect the 5s total");
+        assert!(!super::super::client::error_permits_auto_retry(&error));
+        assert!(elapsed >= Duration::from_secs(5) && elapsed < Duration::from_secs(8));
+        assert!(connected, "a request timeout is not process death");
+        assert_eq!(events, ["call", "ping"]);
+    }
+
+    #[tokio::test]
+    async fn timeout_policy_single_threaded_health_override() {
+        let (result, _, connected, events) = timeout_fixture_call(
+            "timeout-single-threaded",
+            serde_json::json!({"timeout_secs": 120, "health_deadline_ms": 5000}),
+            "single",
+            3,
+            "500",
+            7,
+        )
+        .await;
+        let result = result.expect("server health override must win over global 500ms");
+        assert!(
+            matches!(&result.content[..], [super::super::protocol::ContentBlock::Text { text }] if text == "completed")
+        );
+        assert!(connected);
+        assert_eq!(
+            events,
+            ["call"],
+            "reply arrives before the per-server health deadline"
+        );
+    }
+
+    /// Wall clock ~60s (two 30s default totals). The fast, always-on
+    /// equivalent is `client::tests::timeout_policy_absent_and_zero_keep_defaults`.
+    #[tokio::test]
+    #[ignore = "slow acceptance test (~60s); run explicitly with --ignored"]
+    async fn timeout_policy_absent_and_zero_keep_default_total() {
+        for settings in [
+            serde_json::json!({}),
+            serde_json::json!({"timeout_secs": 0, "health_deadline_ms": 0}),
+        ] {
+            let (result, elapsed, connected, events) =
+                timeout_fixture_call("timeout-defaults", settings, "responsive", 0, "", 35).await;
+            let error = result.expect_err("default total must still bound a live call");
+            assert!(!super::super::client::error_permits_auto_retry(&error));
+            assert!(elapsed >= Duration::from_secs(30) && elapsed < Duration::from_secs(34));
+            assert!(connected);
+            assert_eq!(events, ["call", "ping"]);
+        }
     }
 
     /// F07 phase 1: a hung child (alive, reads requests, never replies) is
@@ -1342,6 +1592,8 @@ done
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = McpManager::with_config(config.clone());

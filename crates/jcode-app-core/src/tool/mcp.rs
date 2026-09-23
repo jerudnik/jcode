@@ -238,6 +238,8 @@ impl McpManagementTool {
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             }
         } else {
             let manager = self.manager.read().await;
@@ -586,6 +588,8 @@ mod tests {
                 url: None,
                 enabled: Some(false),
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = Arc::new(RwLock::new(McpManager::with_config(config)));
