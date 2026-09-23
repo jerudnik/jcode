@@ -19,6 +19,9 @@ use std::time::Instant;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::{Duration, timeout};
 
+#[path = "client_actions_tests/provider_session_identity.rs"]
+mod provider_session_identity;
+
 #[allow(clippy::type_complexity)]
 fn empty_swarm_status_state() -> (
     Arc<RwLock<HashMap<String, std::collections::HashSet<String>>>>,
