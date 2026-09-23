@@ -224,54 +224,59 @@ fn test_scroll_render_with_mermaid() {
 
 #[test]
 fn test_full_redraw_clears_out_of_band_backend_artifacts_after_native_scroll_like_mutation() {
-    let _lock = scroll_render_test_lock();
+    // Render tests must not see the developer's ambient provider keys: an
+    // extra provider badge row shifts the status/dock layout between frames
+    // and breaks the clean-vs-repaired comparison below.
+    with_temp_jcode_home(|| {
+        let _lock = scroll_render_test_lock();
 
-    let (mut app, mut terminal) = create_scroll_test_app(60, 12, 0, 24);
-    app.auto_scroll_paused = true;
-    app.scroll_offset = 6;
-    let clean = render_and_snap(&app, &mut terminal);
+        let (mut app, mut terminal) = create_scroll_test_app(60, 12, 0, 24);
+        app.auto_scroll_paused = true;
+        app.scroll_offset = 6;
+        let clean = render_and_snap(&app, &mut terminal);
 
-    let width = terminal.backend().buffer().area.width;
-    let ghost = ratatui::buffer::Buffer::with_lines([
-        "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
-    ]);
-    let updates = ghost
-        .content()
-        .iter()
-        .enumerate()
-        .map(|(idx, cell)| ((idx as u16) % width, (idx as u16) / width, cell));
-    terminal
-        .backend_mut()
-        .draw(updates)
-        .expect("inject backend artifact");
+        let width = terminal.backend().buffer().area.width;
+        let ghost = ratatui::buffer::Buffer::with_lines([
+            "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        ]);
+        let updates = ghost
+            .content()
+            .iter()
+            .enumerate()
+            .map(|(idx, cell)| ((idx as u16) % width, (idx as u16) / width, cell));
+        terminal
+            .backend_mut()
+            .draw(updates)
+            .expect("inject backend artifact");
 
-    let stale = buffer_to_text(&terminal);
-    assert!(
-        stale.contains("ZZZZ"),
-        "expected injected backend artifact before redraw, got:\n{stale}"
-    );
+        let stale = buffer_to_text(&terminal);
+        assert!(
+            stale.contains("ZZZZ"),
+            "expected injected backend artifact before redraw, got:\n{stale}"
+        );
 
-    terminal
-        .draw(|f| crate::tui::ui::draw(f, &app))
-        .expect("normal redraw after backend mutation");
-    let still_stale = buffer_to_text(&terminal);
-    assert!(
-        still_stale.contains("ZZZZ"),
-        "without a forced full redraw, ratatui diffing should leave the injected artifact in place"
-    );
+        terminal
+            .draw(|f| crate::tui::ui::draw(f, &app))
+            .expect("normal redraw after backend mutation");
+        let still_stale = buffer_to_text(&terminal);
+        assert!(
+            still_stale.contains("ZZZZ"),
+            "without a forced full redraw, ratatui diffing should leave the injected artifact in place"
+        );
 
-    app.request_full_redraw();
-    assert!(app.force_full_redraw, "full redraw flag should be armed");
-    terminal.clear().expect("test backend clear should succeed");
-    app.force_full_redraw = false;
-    terminal
-        .draw(|f| crate::tui::ui::draw(f, &app))
-        .expect("forced full redraw should succeed");
-    let repaired = buffer_to_text(&terminal);
-    assert_eq!(
-        repaired, clean,
-        "forced full redraw should restore the expected frame and remove stale backend artifacts"
-    );
+        app.request_full_redraw();
+        assert!(app.force_full_redraw, "full redraw flag should be armed");
+        terminal.clear().expect("test backend clear should succeed");
+        app.force_full_redraw = false;
+        terminal
+            .draw(|f| crate::tui::ui::draw(f, &app))
+            .expect("forced full redraw should succeed");
+        let repaired = buffer_to_text(&terminal);
+        assert_eq!(
+            repaired, clean,
+            "forced full redraw should restore the expected frame and remove stale backend artifacts"
+        );
+    });
 }
 
 /// Regression for the wide-emoji "ghost" artifact (ratatui issue #2357): when
