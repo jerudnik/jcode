@@ -19,6 +19,9 @@ use std::time::Instant;
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tokio::time::{Duration, timeout};
 
+#[path = "client_actions_tests/provider_session_identity.rs"]
+mod provider_session_identity;
+
 #[allow(clippy::type_complexity)]
 fn empty_swarm_status_state() -> (
     Arc<RwLock<HashMap<String, std::collections::HashSet<String>>>>,
@@ -171,6 +174,7 @@ fn clone_split_session_uses_persisted_session_state() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn enabling_swarm_does_not_auto_elect_coordinator() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider.clone()).await;
@@ -277,6 +281,7 @@ async fn enabling_swarm_does_not_auto_elect_coordinator() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
+#[allow(deprecated)]
 async fn rename_session_event_uses_agent_session_id_even_when_client_id_is_stale() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -364,6 +369,7 @@ async fn rename_session_event_uses_agent_session_id_even_when_client_id_is_stale
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn notify_session_runs_scheduled_task_immediately_for_idle_live_session() {
     let provider = Arc::new(StreamingMockProvider::default());
     provider.queue_response(vec![
@@ -484,6 +490,7 @@ async fn notify_session_runs_scheduled_task_immediately_for_idle_live_session() 
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn notify_session_queues_soft_interrupt_when_live_session_is_busy() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider.clone()).await;
@@ -604,6 +611,7 @@ async fn notify_session_queues_soft_interrupt_when_live_session_is_busy() {
 /// Build a live SwarmMember with a real client attachment so the resume-all
 /// sweep treats it as live. Returns the member and the receiver for events
 /// fanned out to that attachment.
+#[allow(deprecated)]
 fn live_member(session_id: &str) -> (SwarmMember, mpsc::UnboundedReceiver<ServerEvent>) {
     let (attach_tx, attach_rx) = mpsc::unbounded_channel();
     let member = SwarmMember {
