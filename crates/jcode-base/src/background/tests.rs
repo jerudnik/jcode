@@ -549,6 +549,14 @@ async fn live_map_prunes_only_after_terminal_persistence() {
     // lifetime and assert the invariant "status file Running => task is in
     // the live map" never breaks (the converse - terminal file while briefly
     // still mapped - is allowed and unobservable as a phantom).
+    //
+    // The two reads are not atomic, so their order matters: sample the live
+    // map first, then the status file. Pruning happens only after the
+    // terminal write lands, so a later Running file proves the earlier map
+    // sample predates the prune and must have found the task. Reading the
+    // file first would let a completion between the two reads look like a
+    // premature prune. The map read is awaited rather than `try_read` so a
+    // concurrent writer holding the lock cannot yield a false "not live".
     let tmp = tempdir().unwrap();
     let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
     let info = manager
@@ -566,8 +574,8 @@ async fn live_map_prunes_only_after_terminal_persistence() {
         .await;
 
     for _ in 0..400 {
+        let live = manager.tasks.read().await.contains_key(&info.task_id);
         let status = manager.status(&info.task_id).await;
-        let live = manager.is_live_task(&info.task_id);
         if let Some(status) = status {
             if status.status == BackgroundTaskStatus::Running {
                 assert!(
