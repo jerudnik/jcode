@@ -159,6 +159,8 @@ impl OpenAITransportMode {
 #[derive(Debug)]
 enum OpenAIStreamFailure {
     FallbackToHttps(anyhow::Error),
+    /// The API error was forwarded to the consumer and must not be retried.
+    TerminalError,
     Other(anyhow::Error),
 }
 
@@ -265,12 +267,16 @@ fn openai_request_model(request: &Value) -> String {
 struct PersistentWsState {
     ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     last_response_id: String,
+    model: String,
     connected_at: Instant,
     last_activity_at: Instant,
     /// Number of messages sent in this conversation chain
     message_count: usize,
     /// Number of items we sent in the last full request (for detecting conversation changes)
     last_input_item_count: usize,
+    /// Exact canonical input behind the cursor. Growing histories can still
+    /// rewrite earlier items, especially when late tool results are normalized.
+    last_input: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]

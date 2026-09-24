@@ -386,6 +386,8 @@ pub(super) fn is_ws_upgrade_required(err: &WsError) -> bool {
 /// Result of trying to continue on a persistent WebSocket connection
 pub(super) enum PersistentWsResult {
     Success,
+    /// A terminal API error was forwarded once. Do not replay the request.
+    TerminalError,
     NotAvailable,
     Failed(String),
 }
@@ -399,8 +401,36 @@ pub(super) async fn try_persistent_ws_continuation(
     input_item_count: usize,
     tx: &mpsc::Sender<Result<StreamEvent>>,
 ) -> PersistentWsResult {
-    let request_model = openai_request_model(request);
     let mut guard = persistent_ws.lock().await;
+    let result =
+        continue_persistent_ws_locked(&mut guard, request, input, input_item_count, tx).await;
+    // Invalidate before releasing the attempt's lock. A queued turn must not
+    // reuse a failed response ID, nor can late cleanup erase its new socket.
+    if matches!(
+        result,
+        PersistentWsResult::Failed(_) | PersistentWsResult::TerminalError
+    ) {
+        *guard = None;
+        log_openai_stream_lifecycle(
+            jcode_base::logging::LogLevel::Warn,
+            "persistent_state_reset",
+            vec![
+                ("model", openai_request_model(request)),
+                ("reason", "persistent_reuse_failed".to_string()),
+            ],
+        );
+    }
+    result
+}
+
+async fn continue_persistent_ws_locked(
+    guard: &mut Option<PersistentWsState>,
+    request: &Value,
+    input: &[Value],
+    input_item_count: usize,
+    tx: &mpsc::Sender<Result<StreamEvent>>,
+) -> PersistentWsResult {
+    let request_model = openai_request_model(request);
     let state = match guard.as_mut() {
         Some(s) => s,
         None => {
@@ -415,6 +445,13 @@ pub(super) async fn try_persistent_ws_continuation(
             return PersistentWsResult::NotAvailable;
         }
     };
+
+    // A response already in flight can save its socket after set_model cleared
+    // the slot. Check the owning request as well as the setter's eager reset.
+    if state.model != request_model {
+        *guard = None;
+        return PersistentWsResult::NotAvailable;
+    }
 
     // Check connection age - reconnect before the 60-min server limit
     if state.connected_at.elapsed() >= Duration::from_secs(WEBSOCKET_PERSISTENT_MAX_AGE_SECS) {
@@ -490,6 +527,21 @@ pub(super) async fn try_persistent_ws_continuation(
                 ("reason", "input_not_growing".to_string()),
                 ("input_item_count", input_item_count.to_string()),
                 ("last_input_item_count", last_input_item_count.to_string()),
+            ],
+        );
+        *guard = None;
+        return PersistentWsResult::NotAvailable;
+    }
+
+    if state.last_input.len() != state.last_input_item_count
+        || !input.starts_with(&state.last_input)
+    {
+        log_openai_stream_lifecycle(
+            jcode_base::logging::LogLevel::Info,
+            "persistent_state_reset",
+            vec![
+                ("model", request_model.clone()),
+                ("reason", "input_prefix_changed".to_string()),
             ],
         );
         *guard = None;
@@ -861,35 +913,33 @@ pub(super) async fn try_persistent_ws_continuation(
                     }
                 }
 
-                if let Some(event) = parse_openai_response_event(
+                let event = parse_openai_response_event(
                     &text,
                     &mut saw_text_delta,
                     &mut streaming_tool_calls,
                     &mut completed_tool_items,
                     &mut pending,
-                ) {
+                );
+                for event in event.into_iter().chain(pending.drain(..)) {
                     if is_stream_activity_event(&event) {
                         made_api_activity = true;
                     }
                     if matches!(event, StreamEvent::MessageEnd { .. }) {
                         saw_response_completed = true;
                     }
-                    if let StreamEvent::Error { ref message, .. } = event
-                        && is_retryable_error(&message.to_lowercase())
-                    {
-                        return PersistentWsResult::Failed(format!("stream error: {}", message));
-                    }
-                    if tx.send(Ok(event)).await.is_err() {
-                        consumer_dropped = true;
-                        break;
-                    }
-                }
-                while let Some(event) = pending.pop_front() {
-                    if is_stream_activity_event(&event) {
-                        made_api_activity = true;
-                    }
-                    if matches!(event, StreamEvent::MessageEnd { .. }) {
-                        saw_response_completed = true;
+                    if let StreamEvent::Error { ref message, .. } = event {
+                        let lower = message.to_lowercase();
+                        if is_retryable_error(&lower)
+                            || lower.contains("previous_response_not_found")
+                            || lower.contains("no tool output found for function call")
+                        {
+                            return PersistentWsResult::Failed(format!(
+                                "stream error: {}",
+                                message
+                            ));
+                        }
+                        let _ = tx.send(Ok(event)).await;
+                        return PersistentWsResult::TerminalError;
                     }
                     if tx.send(Ok(event)).await.is_err() {
                         consumer_dropped = true;
@@ -955,6 +1005,7 @@ pub(super) async fn try_persistent_ws_continuation(
     if let Some(resp_id) = new_response_id {
         state.last_response_id = resp_id;
         state.last_input_item_count = input_item_count;
+        state.last_input = input.to_vec();
         state.message_count += 1;
         state.last_activity_at = Instant::now();
         jcode_base::logging::info(&format!(
@@ -1308,6 +1359,8 @@ pub(super) async fn stream_response_websocket_persistent(
                                     message
                                 )));
                             }
+                            let _ = tx.send(Ok(event)).await;
+                            return Err(OpenAIStreamFailure::TerminalError);
                         }
                         if tx.send(Ok(event)).await.is_err() {
                             log_openai_stream_lifecycle(
@@ -1341,6 +1394,8 @@ pub(super) async fn stream_response_websocket_persistent(
                                     message
                                 )));
                             }
+                            let _ = tx.send(Ok(event)).await;
+                            return Err(OpenAIStreamFailure::TerminalError);
                         }
                         if matches!(event, StreamEvent::MessageEnd { .. }) {
                             saw_response_completed = true;
@@ -1422,10 +1477,16 @@ pub(super) async fn stream_response_websocket_persistent(
         *guard = Some(PersistentWsState {
             ws_stream,
             last_response_id: resp_id,
+            model: request_model_label,
             connected_at,
             last_activity_at: Instant::now(),
             message_count: 1,
             last_input_item_count: input_item_count,
+            last_input: request_event
+                .get("input")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
         });
     } else {
         jcode_base::logging::info(

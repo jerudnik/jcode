@@ -77,10 +77,12 @@ async fn test_persistent_ws_state() -> (PersistentWsState, tokio::task::JoinHand
         PersistentWsState {
             ws_stream: client_ws,
             last_response_id: "resp_test".to_string(),
+            model: DEFAULT_MODEL.to_string(),
             connected_at: Instant::now(),
             last_activity_at: Instant::now(),
             message_count: 1,
             last_input_item_count: 1,
+            last_input: vec![serde_json::json!({"type":"message","role":"user","content":"first"})],
         },
         server,
     )
@@ -166,6 +168,8 @@ async fn live_openai_smoke(model: &str, sentinel: &str) -> Result<Option<String>
 }
 
 include!("openai_tests/models_state.rs");
+#[path = "openai_tests/persistent_continuation.rs"]
+mod persistent_continuation;
 include!("openai_tests/responses_input.rs");
 include!("openai_tests/transport_runtime.rs");
 include!("openai_tests/payloads.rs");

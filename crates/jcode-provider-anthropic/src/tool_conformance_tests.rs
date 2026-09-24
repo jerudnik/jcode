@@ -739,6 +739,37 @@ fn semantic(tool: &'static str, note: &str) -> Drift {
 }
 
 #[tokio::test]
+async fn oauth_bash_forwards_execution_contract() {
+    let registry = Registry::new(Arc::new(MockProvider)).await;
+    let definition = registry
+        .definitions(None)
+        .await
+        .into_iter()
+        .find(|tool| tool.name == "bash")
+        .expect("Bash must be registered");
+
+    for (is_oauth, expected_name) in [(true, "Bash"), (false, "bash")] {
+        let formatted = format_tools(std::slice::from_ref(&definition), is_oauth, false);
+        assert_eq!(formatted.len(), 1);
+        let tool = &formatted[0];
+        assert_eq!(tool.name, expected_name);
+        assert_eq!(
+            property_names(&tool.input_schema),
+            property_names(&definition.input_schema)
+        );
+        assert_eq!(tool.input_schema["required"], json!(["command"]));
+        for field in ["intent", "timeout", "run_in_background", "notify", "wake"] {
+            assert_eq!(
+                tool.input_schema["properties"][field],
+                definition.input_schema["properties"][field],
+                "execution field {field} drifted in OAuth={is_oauth}"
+            );
+        }
+        assert_eq!(tool.description, definition.description);
+    }
+}
+
+#[tokio::test]
 async fn oauth_curated_tool_drift_matches_known_inventory() {
     assert_eq!(
         observed_drift().await,

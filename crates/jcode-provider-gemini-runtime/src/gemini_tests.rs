@@ -824,3 +824,435 @@ fn unsigned_tool_history() -> Vec<Message> {
         },
     ]
 }
+
+// ---------------------------------------------------------------------------
+// Code Assist transient-response retries (429 / 5xx before any output).
+// ---------------------------------------------------------------------------
+
+mod transient_retry {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, mpsc};
+    use tokio_stream::StreamExt;
+
+    /// `(status, headers, body)` for one scripted response.
+    type ScriptedResponse = (u16, Vec<(&'static str, String)>, String);
+
+    /// A scripted fake Code Assist server. Each accepted connection is
+    /// answered with the next `(status, headers, body)` entry; the request
+    /// text is forwarded on the returned channel so tests can count attempts.
+    fn spawn_scripted_server(
+        responses: Vec<ScriptedResponse>,
+    ) -> (String, mpsc::Receiver<String>, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake code assist server");
+        let addr = listener.local_addr().expect("fake server addr");
+        let (request_tx, request_rx) = mpsc::channel();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hits_thread = hits.clone();
+        std::thread::spawn(move || {
+            for (status, headers, body) in responses {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .expect("set read timeout");
+                let mut request = vec![0u8; 65536];
+                let n = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..n]).into_owned();
+                hits_thread.fetch_add(1, Ordering::SeqCst);
+                let _ = request_tx.send(request);
+                let reason = match status {
+                    200 => "OK",
+                    400 => "Bad Request",
+                    429 => "Too Many Requests",
+                    500 => "Internal Server Error",
+                    503 => "Service Unavailable",
+                    _ => "Status",
+                };
+                let mut response = format!("HTTP/1.1 {status} {reason}\r\n");
+                for (name, value) in headers {
+                    response.push_str(&format!("{name}: {value}\r\n"));
+                }
+                response.push_str(&format!(
+                    "Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                ));
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://{addr}"), request_rx, hits)
+    }
+
+    /// Fields drop in declaration order: env guards restore their values
+    /// before the test-env lease is released, so a following test cannot
+    /// observe (or be clobbered by) this sandbox's environment.
+    struct Sandbox {
+        _home: EnvVarGuard,
+        _endpoint: EnvVarGuard,
+        _force_oauth: EnvVarGuard,
+        _gemini_key: EnvVarGuard,
+        _google_key: EnvVarGuard,
+        _temp: tempfile::TempDir,
+        _guard: jcode_base::storage::TestEnvWriteLease,
+    }
+
+    /// Point the provider at `endpoint` with a valid (non-expired) OAuth
+    /// token on disk so `post_json` reaches the fake server.
+    fn sandbox(endpoint: &str) -> Sandbox {
+        let guard = jcode_base::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+        let endpoint = EnvVarGuard::set_value("CODE_ASSIST_ENDPOINT", endpoint);
+        let force_oauth = EnvVarGuard::set_value("JCODE_GEMINI_FORCE_OAUTH", "1");
+        let gemini_key = EnvVarGuard::unset("GEMINI_API_KEY");
+        let google_key = EnvVarGuard::unset("GOOGLE_API_KEY");
+        gemini_auth::save_tokens(&gemini_auth::GeminiTokens {
+            access_token: "test-access".into(),
+            refresh_token: "test-refresh".into(),
+            expires_at: Utc::now().timestamp_millis() + 3_600_000,
+            email: None,
+        })
+        .expect("save test tokens");
+        Sandbox {
+            _home: home,
+            _endpoint: endpoint,
+            _force_oauth: force_oauth,
+            _gemini_key: gemini_key,
+            _google_key: google_key,
+            _temp: temp,
+            _guard: guard,
+        }
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime")
+    }
+
+    fn fast_policy(max_retries: u32) -> TransientRetryPolicy {
+        TransientRetryPolicy {
+            max_retries,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_secs(5),
+        }
+    }
+
+    fn quota_body() -> String {
+        json!({"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "quota will reset after 0s"}}).to_string()
+    }
+
+    fn ok_body() -> String {
+        json!({"ok": true}).to_string()
+    }
+
+    #[test]
+    fn retry_delay_grows_exponentially_and_stops_at_limit() {
+        let policy = TransientRetryPolicy {
+            max_retries: 3,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(60),
+        };
+        let status = reqwest::StatusCode::TOO_MANY_REQUESTS;
+        assert_eq!(
+            transient_retry_delay(status, None, 0, &policy),
+            Some(Duration::from_millis(100))
+        );
+        assert_eq!(
+            transient_retry_delay(status, None, 1, &policy),
+            Some(Duration::from_millis(200))
+        );
+        assert_eq!(
+            transient_retry_delay(status, None, 2, &policy),
+            Some(Duration::from_millis(400))
+        );
+        assert_eq!(transient_retry_delay(status, None, 3, &policy), None);
+        assert_eq!(transient_retry_delay(status, None, 40, &policy), None);
+    }
+
+    #[test]
+    fn retry_delay_honors_retry_after_and_caps_at_max() {
+        let policy = TransientRetryPolicy {
+            max_retries: 5,
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(10),
+        };
+        let status = reqwest::StatusCode::SERVICE_UNAVAILABLE;
+        assert_eq!(
+            transient_retry_delay(status, Some("3"), 0, &policy),
+            Some(Duration::from_secs(3))
+        );
+        assert_eq!(
+            transient_retry_delay(status, Some("120"), 0, &policy),
+            Some(Duration::from_secs(10))
+        );
+        let http_date = (Utc::now() + chrono::Duration::seconds(4)).to_rfc2822();
+        let delay = transient_retry_delay(status, Some(&http_date), 0, &policy).expect("delay");
+        assert!(
+            delay >= Duration::from_secs(2) && delay <= Duration::from_secs(5),
+            "{delay:?}"
+        );
+        assert_eq!(
+            transient_retry_delay(status, Some("garbage"), 1, &policy),
+            Some(Duration::from_millis(200))
+        );
+        assert_eq!(transient_retry_delay(status, Some("3"), 5, &policy), None);
+    }
+
+    #[test]
+    fn retry_delay_only_applies_to_429_and_5xx() {
+        let policy = fast_policy(5);
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::UNAUTHORIZED,
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::NOT_FOUND,
+        ] {
+            assert_eq!(transient_retry_delay(status, Some("1"), 0, &policy), None);
+        }
+        for status in [
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            reqwest::StatusCode::BAD_GATEWAY,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(
+                transient_retry_delay(status, None, 0, &policy).is_some(),
+                "{status}"
+            );
+        }
+    }
+
+    #[test]
+    fn burst_429_then_5xx_are_retried_until_success() {
+        let (endpoint, _rx, hits) = spawn_scripted_server(vec![
+            (429, vec![], quota_body()),
+            (
+                503,
+                vec![],
+                json!({"error": {"message": "No capacity available"}}).to_string(),
+            ),
+            (200, vec![], ok_body()),
+        ]);
+        let _sandbox = sandbox(&endpoint);
+        let provider = GeminiProvider::new();
+        let result: Result<Value> = runtime().block_on(provider.post_json_with_policy(
+            "generateContent",
+            &json!({}),
+            &fast_policy(5),
+            &|| false,
+        ));
+        let value = result.expect("request should succeed after transient retries");
+        assert_eq!(value, json!({"ok": true}));
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn attempts_are_bounded_and_final_error_reports_exhaustion() {
+        let (endpoint, _rx, hits) = spawn_scripted_server(vec![
+            (429, vec![], quota_body()),
+            (429, vec![], quota_body()),
+            (429, vec![], quota_body()),
+            (200, vec![], ok_body()),
+        ]);
+        let _sandbox = sandbox(&endpoint);
+        let provider = GeminiProvider::new();
+        let result: Result<Value> = runtime().block_on(provider.post_json_with_policy(
+            "generateContent",
+            &json!({}),
+            &fast_policy(2),
+            &|| false,
+        ));
+        let err = result.expect_err("retries must stop after max_retries");
+        let text = format!("{err:#}");
+        assert!(text.contains("HTTP 429"), "{text}");
+        assert!(text.contains("quota will reset"), "{text}");
+        assert!(text.contains("3 attempts"), "{text}");
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn retry_after_header_is_honored_over_backoff() {
+        let (endpoint, _rx, hits) = spawn_scripted_server(vec![
+            (429, vec![("Retry-After", "1".to_string())], quota_body()),
+            (200, vec![], ok_body()),
+        ]);
+        let _sandbox = sandbox(&endpoint);
+        let provider = GeminiProvider::new();
+        let started = std::time::Instant::now();
+        let result: Result<Value> = runtime().block_on(provider.post_json_with_policy(
+            "generateContent",
+            &json!({}),
+            &fast_policy(5),
+            &|| false,
+        ));
+        result.expect("request should succeed after Retry-After wait");
+        assert!(
+            started.elapsed() >= Duration::from_millis(900),
+            "Retry-After: 1 was not honored ({:?})",
+            started.elapsed()
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn cancellation_stops_retrying() {
+        let (endpoint, _rx, hits) = spawn_scripted_server(vec![
+            (429, vec![("Retry-After", "5".to_string())], quota_body()),
+            (200, vec![], ok_body()),
+        ]);
+        let _sandbox = sandbox(&endpoint);
+        let provider = GeminiProvider::new();
+        let cancelled = AtomicBool::new(true);
+        let started = std::time::Instant::now();
+        let result: Result<Value> = runtime().block_on(provider.post_json_with_policy(
+            "generateContent",
+            &json!({}),
+            &fast_policy(5),
+            &|| cancelled.load(Ordering::SeqCst),
+        ));
+        let err = result.expect_err("cancelled request must not keep retrying");
+        let text = format!("{err:#}").to_ascii_lowercase();
+        assert!(text.contains("cancel"), "{text}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn non_transient_errors_are_not_retried() {
+        let (endpoint, _rx, hits) = spawn_scripted_server(vec![
+            (
+                400,
+                vec![],
+                json!({"error": {"message": "bad"}}).to_string(),
+            ),
+            (200, vec![], ok_body()),
+        ]);
+        let _sandbox = sandbox(&endpoint);
+        let provider = GeminiProvider::new();
+        let result: Result<Value> = runtime().block_on(provider.post_json_with_policy(
+            "generateContent",
+            &json!({}),
+            &fast_policy(5),
+            &|| false,
+        ));
+        let err = result.expect_err("400 must fail immediately");
+        assert!(format!("{err:#}").contains("HTTP 400"));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    fn collect_events(endpoint: &str) -> (Vec<StreamEvent>, Vec<String>) {
+        let _sandbox = sandbox(endpoint);
+        // Skip the loadCodeAssist handshake: seed runtime state directly.
+        let provider = GeminiProvider::new();
+        let rt = runtime();
+        rt.block_on(async {
+            *provider.state.lock().await = Some(GeminiRuntimeState {
+                project_id: "test-project".into(),
+                session_id: "test-session".into(),
+            });
+        });
+        let mut events = Vec::new();
+        let mut errors = Vec::new();
+        rt.block_on(async {
+            let mut stream = provider
+                .complete(&[], &[], "sys", None)
+                .await
+                .expect("complete returns stream");
+            while let Some(event) = stream.next().await {
+                match event {
+                    Ok(event) => events.push(event),
+                    Err(err) => errors.push(format!("{err:#}")),
+                }
+            }
+        });
+        (events, errors)
+    }
+
+    #[test]
+    fn no_retry_after_streamed_text_and_tool_call() {
+        // A 200 response whose body already carries text and a tool call
+        // must be delivered once; the follow-up 429 must never be requested.
+        let body = json!({"response": {"candidates": [{"finishReason": "STOP", "content": {"role": "model", "parts": [
+            {"text": "hello"},
+            {"functionCall": {"name": "read", "args": {"path": "x"}}}
+        ]}}]}})
+        .to_string();
+        let (endpoint, _rx, hits) =
+            spawn_scripted_server(vec![(200, vec![], body), (429, vec![], quota_body())]);
+        let (events, errors) = collect_events(&endpoint);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, StreamEvent::TextDelta(t) if t == "hello"))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, StreamEvent::ToolUseStart { name, .. } if name == "read"))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, StreamEvent::MessageEnd { .. }))
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn no_retry_after_a_successful_status_with_unusable_body() {
+        // Once a 2xx body has been received the turn is committed: a
+        // malformed-function-call dead turn is reported, not replayed.
+        let body =
+            json!({"response": {"candidates": [{"finishReason": "MALFORMED_FUNCTION_CALL"}]}})
+                .to_string();
+        let (endpoint, _rx, hits) =
+            spawn_scripted_server(vec![(200, vec![], body), (200, vec![], ok_body())]);
+        let (_events, errors) = collect_events(&endpoint);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("no usable output"), "{errors:?}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn complete_stops_retrying_when_stream_is_dropped() {
+        let (endpoint, _rx, hits) = spawn_scripted_server(vec![
+            (429, vec![("Retry-After", "1".to_string())], quota_body()),
+            (200, vec![], ok_body()),
+        ]);
+        let _sandbox = sandbox(&endpoint);
+        let provider = GeminiProvider::new();
+        let rt = runtime();
+        rt.block_on(async {
+            *provider.state.lock().await = Some(GeminiRuntimeState {
+                project_id: "test-project".into(),
+                session_id: "test-session".into(),
+            });
+            let stream = provider
+                .complete(&[], &[], "sys", None)
+                .await
+                .expect("complete returns stream");
+            // Wait for the first attempt to land, then walk away.
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while hits.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            drop(stream);
+            // Without cancellation the second attempt lands at ~1s
+            // (Retry-After: 1); waiting past that proves the loop exited.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        });
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+}

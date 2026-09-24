@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 /// Claude Code billing attribution text observed in the official CLI's system
 /// prompt blocks.
-pub const OAUTH_BILLING_HEADER: &str = "cc_version=2.1.123; cc_entrypoint=sdk-cli; cch=33f85;";
+pub const OAUTH_BILLING_HEADER: &str = "cc_version=2.1.257; cc_entrypoint=sdk-cli; cch=33f85;";
 
 const CLAUDE_CODE_IDENTITY: &str = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 
@@ -363,16 +363,6 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
                 },
             ),
             (
-                &["bash"],
-                ApiTool {
-                    name: "Bash".to_string(),
-                    description: "Executes a given bash command and returns its output."
-                        .to_string(),
-                    input_schema: json!({"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"},"run_in_background":{"type":"boolean"},"notify":{"type":"boolean","description":"Notify on completion (default true)."},"wake":{"type":"boolean","description":"Wake this session when a background command completes, so you can yield the turn instead of blocking in a wait."}},"required":["command"],"additionalProperties":false}),
-                    cache_control: None,
-                },
-            ),
-            (
                 &["edit"],
                 ApiTool {
                     name: "Edit".to_string(),
@@ -447,8 +437,10 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
             .collect();
 
         // Forward every other registered tool, remapping its name to the
-        // OAuth-accepted form. This restores websearch/webfetch/browser/
-        // codesearch/memory/swarm/multiedit/open/etc. for subscription users,
+        // OAuth-accepted form. Bash also uses its registered schema so timeout
+        // units and execution options cannot drift. This restores
+        // websearch/webfetch/browser/codesearch/memory/swarm/multiedit/open/etc.
+        // for subscription users,
         // matching the documented "remap names, keep the full toolset" behavior
         // and the (deprecated) Claude CLI transport.
         for tool in tools {
