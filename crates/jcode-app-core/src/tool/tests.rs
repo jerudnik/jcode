@@ -1440,3 +1440,40 @@ fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
         );
     }
 }
+
+#[tokio::test]
+async fn unregister_mcp_tools_matches_server_identity_not_key_prefix() {
+    use crate::mcp::{McpManager, McpToolDef, create_mcp_tools_from_cached};
+
+    let registry = Registry::empty();
+    let manager = Arc::new(tokio::sync::RwLock::new(McpManager::new()));
+    let def = |name: &str| McpToolDef {
+        name: name.to_string(),
+        description: None,
+        input_schema: serde_json::json!({"type": "object"}),
+    };
+    // Server `a` is a key prefix of server `a__b`: `mcp__a__b__read` starts
+    // with `mcp__a__`, so prefix removal would take both servers down.
+    for (server, tool) in [("a", "read"), ("a__b", "read")] {
+        for (name, proxy) in create_mcp_tools_from_cached(server, &[def(tool)], manager.clone()) {
+            registry.register(name, proxy).await;
+        }
+    }
+    registry
+        .register("bash".to_string(), Arc::new(OperationalFailureTool))
+        .await;
+
+    let removed = registry.unregister_mcp_tools(Some("a")).await;
+    assert_eq!(removed, vec!["mcp__a__read".to_string()]);
+    let mut names = registry.tool_names().await;
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["bash".to_string(), "mcp__a__b__read".to_string()]
+    );
+
+    let mut removed = registry.unregister_mcp_tools(None).await;
+    removed.sort();
+    assert_eq!(removed, vec!["mcp__a__b__read".to_string()]);
+    assert_eq!(registry.tool_names().await, vec!["bash".to_string()]);
+}
