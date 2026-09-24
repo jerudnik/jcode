@@ -198,6 +198,13 @@ pub struct McpServerConfig {
     /// both are present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
+    /// Per-request reply budget in seconds. Absent or zero keeps the 30s default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    /// Silence before a liveness ping, clamped to the reply budget. Absent or
+    /// zero uses JCODE_MCP_HEALTH_DEADLINE_MS, or 15s when that is unset/invalid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_deadline_ms: Option<u64>,
 }
 
 impl McpServerConfig {
@@ -411,6 +418,8 @@ impl McpConfig {
                             url: None,
                             enabled: None,
                             disabled: None,
+                            timeout_secs: None,
+                            health_deadline_ms: None,
                         },
                     );
                 }
