@@ -682,7 +682,11 @@ impl Registry {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         let grant_lookup = match swarm_state {
-            Some(swarm_state) => swarm_state.assignment_grant_for_session(&ctx.session_id).await,
+            Some(swarm_state) => {
+                swarm_state
+                    .assignment_grant_for_session(&ctx.session_id)
+                    .await
+            }
             None => grant::GrantLookup::Unrestricted,
         };
         if let Err(error) =
