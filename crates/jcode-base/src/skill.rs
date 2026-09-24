@@ -356,9 +356,7 @@ impl SkillRegistry {
         // with working_dir = $HOME, or chroot-style layouts) would register
         // every skill twice as duplicate authorities. Skip those aliases.
         let aliases_global = |local: &Path, global: &Path| -> bool {
-            let canonical = |p: &Path| {
-                std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
-            };
+            let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             canonical(local) == canonical(global)
         };
         let global_jcode = crate::storage::jcode_dir()
