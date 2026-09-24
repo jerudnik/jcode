@@ -127,8 +127,42 @@ impl Clone for Registry {
     }
 }
 
+/// Non-owning handle used by tools stored inside a registry.
+///
+/// A tool cannot strongly own the registry containing it without creating an
+/// Arc cycle (`Registry.tools` -> tool -> `Registry.tools`). Upgrade this
+/// handle only for the duration of a tool call.
+pub(super) struct WeakRegistry {
+    tools: std::sync::Weak<RwLock<HashMap<String, Arc<dyn Tool>>>>,
+    skills: Arc<RwLock<SkillRegistry>>,
+    swarm_state: Arc<StdRwLock<Option<crate::server::SwarmState>>>,
+}
+
+impl WeakRegistry {
+    /// Rebuild a full registry handle if the owning tool map is still alive.
+    ///
+    /// Mirrors `Registry::clone`: the upgraded handle gets its own
+    /// `CompactionManager`, exactly as the old `registry.clone()` argument did.
+    pub(super) fn upgrade(&self) -> Option<Registry> {
+        Some(Registry {
+            tools: self.tools.upgrade()?,
+            skills: Arc::clone(&self.skills),
+            compaction: Arc::new(RwLock::new(CompactionManager::new())),
+            swarm_state: Arc::clone(&self.swarm_state),
+        })
+    }
+}
+
 impl Registry {
     const INPUT_SCHEMA_SUMMARY_MAX_CHARS: usize = 2_048;
+
+    fn downgrade(&self) -> WeakRegistry {
+        WeakRegistry {
+            tools: Arc::downgrade(&self.tools),
+            skills: Arc::clone(&self.skills),
+            swarm_state: Arc::clone(&self.swarm_state),
+        }
+    }
 
     fn shared_skills_registry() -> Arc<RwLock<SkillRegistry>> {
         SkillRegistry::shared_registry()
@@ -300,7 +334,7 @@ impl Registry {
         Self::insert_tool(
             &mut tools_map,
             "batch",
-            batch::BatchTool::new(registry.clone()),
+            batch::BatchTool::new(registry.downgrade()),
         );
         Self::insert_tool(
             &mut tools_map,
@@ -648,7 +682,11 @@ impl Registry {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
         let grant_lookup = match swarm_state {
-            Some(swarm_state) => swarm_state.assignment_grant_for_session(&ctx.session_id).await,
+            Some(swarm_state) => {
+                swarm_state
+                    .assignment_grant_for_session(&ctx.session_id)
+                    .await
+            }
             None => grant::GrantLookup::Unrestricted,
         };
         if let Err(error) =
@@ -915,8 +953,7 @@ impl Registry {
         };
 
         // Register MCP management tool immediately (with registry for dynamic tool registration)
-        let mcp_tool =
-            mcp::McpManagementTool::new(Arc::clone(&mcp_manager)).with_registry(self.clone());
+        let mcp_tool = mcp::McpManagementTool::new(Arc::clone(&mcp_manager)).with_registry(self);
         self.register("mcp".to_string(), Arc::new(mcp_tool) as Arc<dyn Tool>)
             .await;
 

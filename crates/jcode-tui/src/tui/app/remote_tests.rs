@@ -84,7 +84,11 @@ fn assistant_chrome_appears_in_rendered_status_line() {
         persona: None,
     });
 
-    let text = render_frame_text(&app, 120, 24);
+    // The chrome line also shows the real repository branch (the git-info
+    // cache is process-global and reads the checkout the tests run in), so
+    // render wide enough that a long branch name cannot truncate the
+    // validation summary off the right edge.
+    let text = render_frame_text(&app, 240, 24);
     assert!(
         text.contains("Infra"),
         "assistant profile label should render in chrome:\n{text}"
