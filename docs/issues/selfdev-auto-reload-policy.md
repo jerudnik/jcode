@@ -37,6 +37,11 @@ harness:
   session/inbox work is the substrate), so the coordinator and workers re-enter without
   losing graph state.
 
+MCP child reap is a prerequisite: before replacing the daemon process image, reload must
+disconnect session-owned MCP clients, disconnect the shared pool, and reap every child in
+the process-wide MCP tracker. This PR performs that cleanup within the reload drain budget
+so no pre-reload MCP child can outlive a successful exec.
+
 ## Open questions (this issue needs its own planning session)
 
 1. **Configurability / encoding.** Should the reload trigger be:

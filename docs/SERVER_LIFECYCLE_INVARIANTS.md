@@ -36,10 +36,19 @@ async runtime is saturated.
 There must be no unbounded await between receiving a shutdown signal and
 process exit.
 
+An exec-based reload must also disconnect session-owned MCP clients and the
+shared MCP pool, then reap every process-tracked MCP child before replacing the
+process image. This reload-time cleanup is bounded by the reload drain budget;
+the successor must never inherit children whose in-memory tracker disappeared
+with the previous image.
+
 The relevant implementation is:
 
 - `crates/jcode-base/src/registry.rs`
 - `crates/jcode-app-core/src/server.rs`
+- `crates/jcode-app-core/src/server/reload.rs`
+- `crates/jcode-app-core/src/server/shutdown.rs`
+- `crates/jcode-base/src/mcp/client.rs`
 - `unregister_server_bounded`
 
 ## Note on orphan detection

@@ -13,11 +13,12 @@ use super::client::{
     DEFAULT_MCP_REAP_GRACE, McpChildReapReport, McpChildTracker, McpClient, McpHandle,
     TrackedMcpChild,
 };
+use super::manager::McpManager;
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify, RwLock};
 
@@ -93,6 +94,9 @@ pub struct SharedMcpPool {
     clients: Mutex<HashMap<String, McpClient>>,
     /// Explicit owner/PID registry for every MCP child spawned by this daemon.
     child_tracker: Arc<McpChildTracker>,
+    /// Weak references to daemon session managers. Reload uses these to close
+    /// owned-client stdio before the process image is replaced.
+    session_managers: StdMutex<Vec<Weak<RwLock<McpManager>>>>,
     handles: RwLock<HashMap<String, McpHandle>>,
     config: RwLock<McpConfig>,
     ref_counts: Mutex<HashMap<String, usize>>,
@@ -121,6 +125,7 @@ impl SharedMcpPool {
         Self {
             clients: Mutex::new(HashMap::new()),
             child_tracker: McpChildTracker::process(),
+            session_managers: StdMutex::new(Vec::new()),
             handles: RwLock::new(HashMap::new()),
             config: RwLock::new(config),
             ref_counts: Mutex::new(HashMap::new()),
@@ -129,6 +134,43 @@ impl SharedMcpPool {
             activity,
             pooled_cap_override: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Register one pool-backed session manager without extending its lifetime.
+    pub fn track_session_manager(&self, manager: &Arc<RwLock<McpManager>>) {
+        let mut managers = self
+            .session_managers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        managers.retain(|tracked| tracked.strong_count() > 0);
+        if managers.iter().any(|tracked| {
+            tracked
+                .upgrade()
+                .is_some_and(|current| Arc::ptr_eq(&current, manager))
+        }) {
+            return;
+        }
+        managers.push(Arc::downgrade(manager));
+    }
+
+    /// Disconnect every live session manager concurrently so owned MCP
+    /// clients receive shutdown before a daemon reload replaces the image.
+    pub async fn disconnect_session_managers(&self) -> usize {
+        let managers: Vec<_> = {
+            let mut tracked = self
+                .session_managers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let live: Vec<_> = tracked.iter().filter_map(Weak::upgrade).collect();
+            *tracked = live.iter().map(Arc::downgrade).collect();
+            live
+        };
+        let count = managers.len();
+        futures::future::join_all(managers.into_iter().map(|manager| async move {
+            manager.read().await.disconnect_all().await;
+        }))
+        .await;
+        count
     }
 
     /// Effective pooled-children cap for this pool.

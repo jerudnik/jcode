@@ -176,6 +176,7 @@ pub(super) async fn await_reload_signal(
 
         if let Some((binary, label)) = super::reload_exec_target(prefers_selfdev, signal.force()) {
             if binary.exists() {
+                super::shutdown::cleanup_mcp_for_reload().await;
                 let socket = super::socket_path();
                 crate::logging::info(&format!(
                     "Server: exec'ing into {} binary {:?} (socket: {:?}, prep={}ms, state={})",
@@ -578,6 +579,7 @@ mod r01_tests {
         }
     }
 
+    #[allow(deprecated)]
     fn member(
         session_id: &str,
         status: &str,
