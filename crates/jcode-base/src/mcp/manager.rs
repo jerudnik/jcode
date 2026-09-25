@@ -227,18 +227,23 @@ impl McpManager {
                 };
                 let name = name.clone();
                 let config = config.clone();
+                let project_dir = self.project_dir.clone();
                 let child_tracker = Arc::clone(&child_tracker);
                 let handle = tokio::spawn(async move {
-                    let result =
-                        match McpClient::connect_with_tracker(name.clone(), &config, child_tracker)
-                            .await
-                        {
-                            Ok(mut client) => {
-                                client.attach_child_permit(permit);
-                                Ok(client)
-                            }
-                            Err(e) => Err(e),
-                        };
+                    let result = match McpClient::connect_in_dir_with_tracker(
+                        name.clone(),
+                        &config,
+                        project_dir.as_deref(),
+                        child_tracker,
+                    )
+                    .await
+                    {
+                        Ok(mut client) => {
+                            client.attach_child_permit(permit);
+                            Ok(client)
+                        }
+                        Err(e) => Err(e),
+                    };
                     (name, result)
                 });
                 spawn_handles.push(handle);
@@ -308,9 +313,14 @@ impl McpManager {
             .as_ref()
             .map(|pool| pool.child_tracker())
             .unwrap_or_else(McpChildTracker::process);
-        let mut client = McpClient::connect_with_tracker(name.to_string(), config, child_tracker)
-            .await
-            .with_context(|| format!("Failed to connect to MCP server '{}'", name))?;
+        let mut client = McpClient::connect_in_dir_with_tracker(
+            name.to_string(),
+            config,
+            self.project_dir.as_deref(),
+            child_tracker,
+        )
+        .await
+        .with_context(|| format!("Failed to connect to MCP server '{}'", name))?;
         client.attach_child_permit(permit);
 
         self.owned_clients
@@ -837,6 +847,114 @@ impl McpManager {
     /// Check if any servers are connected
     pub async fn has_connections(&self) -> bool {
         !self.pool_handles.read().await.is_empty() || !self.owned_clients.read().await.is_empty()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod working_dir_integration_tests {
+    use super::*;
+
+    fn fake_server_config(shared: bool) -> McpServerConfig {
+        let script = r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"%s","version":"0"}}}\n' "$PWD"
+      ;;
+    *'"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n'
+      ;;
+  esac
+done
+"#;
+        McpServerConfig {
+            command: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            env: Default::default(),
+            shared,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+        }
+    }
+
+    fn canonicalize_reported(path: &str) -> std::path::PathBuf {
+        std::path::Path::new(path)
+            .canonicalize()
+            .expect("canonicalize reported cwd")
+    }
+
+    #[tokio::test]
+    async fn manager_routes_owned_cwd_but_shared_pool_inherits_process_cwd() {
+        let _env_guard = crate::storage::lock_test_env_read();
+        let project = tempfile::tempdir().expect("tempdir");
+        let project_dir = project.path().canonicalize().expect("canonicalize project");
+        let process_dir = std::env::current_dir()
+            .expect("current dir")
+            .canonicalize()
+            .expect("canonicalize current dir");
+        assert_ne!(project_dir, process_dir, "fixture dirs must differ");
+
+        let owned_config = fake_server_config(false);
+        let shared_config = fake_server_config(true);
+        let mut manager_config = McpConfig::default();
+        manager_config
+            .servers
+            .insert("owned-cwd".to_string(), owned_config);
+        manager_config
+            .servers
+            .insert("shared-cwd".to_string(), shared_config.clone());
+
+        let mut pool_config = McpConfig::default();
+        pool_config
+            .servers
+            .insert("shared-cwd".to_string(), shared_config);
+        let pool = Arc::new(SharedMcpPool::new(pool_config));
+        let manager = McpManager {
+            pool: Some(Arc::clone(&pool)),
+            pool_handles: RwLock::new(HashMap::new()),
+            owned_clients: RwLock::new(HashMap::new()),
+            died_cooldown: RwLock::new(HashMap::new()),
+            config: manager_config,
+            session_id: "cwd-test-session".to_string(),
+            project_dir: Some(project.path().to_path_buf()),
+            activity: jcode_core::activity::noop_activity_authority(),
+        };
+
+        let (successes, failures) = manager.connect_all().await.expect("connect all");
+        assert_eq!(successes, 2, "both routes must connect: {failures:?}");
+        assert!(failures.is_empty(), "all configured servers must connect");
+
+        let owned_reported = manager
+            .owned_clients
+            .read()
+            .await
+            .get("owned-cwd")
+            .and_then(McpClient::server_info)
+            .expect("owned server info")
+            .name;
+        let shared_reported = manager
+            .pool_handles
+            .read()
+            .await
+            .get("shared-cwd")
+            .and_then(McpHandle::server_info)
+            .expect("shared server info")
+            .name;
+
+        assert_eq!(canonicalize_reported(&owned_reported), project_dir);
+        assert_eq!(canonicalize_reported(&shared_reported), process_dir);
+
+        manager
+            .disconnect("owned-cwd")
+            .await
+            .expect("disconnect owned");
+        manager
+            .disconnect("shared-cwd")
+            .await
+            .expect("disconnect shared");
+        pool.disconnect_all().await;
     }
 }
 
