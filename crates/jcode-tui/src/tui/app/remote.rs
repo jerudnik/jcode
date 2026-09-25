@@ -338,6 +338,7 @@ pub(super) async fn handle_terminal_event(
             input_attribution.event = Some("focus_gained".to_string());
             needs_redraw |= app.set_client_focused(true);
             app.note_client_focus(true);
+            app.reapply_terminal_modes();
         }
         Some(Ok(Event::FocusLost)) => {
             input_attribution.event = Some("focus_lost".to_string());
@@ -694,6 +695,7 @@ fn handle_terminal_event_while_disconnected(
         Some(Ok(Event::FocusGained)) => {
             needs_redraw |= app.set_client_focused(true);
             app.note_client_focus(true);
+            app.reapply_terminal_modes();
         }
         Some(Ok(Event::FocusLost)) => {
             app.set_client_focused(false);

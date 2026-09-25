@@ -90,6 +90,51 @@ pub fn enable_keyboard_enhancement() -> bool {
     result
 }
 
+/// Terminal modes the running TUI relies on beyond bracketed paste, so a
+/// focus event can re-arm exactly what startup enabled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerminalModeState {
+    pub mouse_capture: bool,
+    pub keyboard_enhanced: bool,
+}
+
+/// Re-arm the idempotent terminal modes after the terminal regained focus.
+///
+/// Emulators and multiplexers can drop private modes while the TUI keeps
+/// running (VS Code window reloads, tmux pane churn, a child that reset the
+/// terminal). This re-emits, in order, bracketed paste, mouse capture (if
+/// enabled at startup) and the kitty keyboard flags (if enabled at startup)
+/// using the same flag bits as [`enable_keyboard_enhancement`].
+///
+/// It deliberately never writes `?1004h` (focus reporting). Ghostty 1.3.1
+/// answers every `?1004h` write with a focus report (`ESC[I`/`ESC[O`, tested
+/// 2026-09-25), so re-arming focus reporting from a FocusGained handler
+/// produces another FocusGained and loops. If focus reporting itself was
+/// lost, no FocusGained arrives and this function is not called; that class
+/// of loss (a full reset) is out of scope here by design.
+///
+/// The kitty flags use the set form (`CSI = flags ; 1 u`) rather than a push,
+/// so repeated focus events do not grow the terminal's flag stack; the pop at
+/// exit still matches the single push made at startup.
+pub fn reapply_terminal_modes_to(
+    writer: &mut impl std::io::Write,
+    modes: TerminalModeState,
+) -> std::io::Result<()> {
+    use crossterm::QueueableCommand;
+    writer.queue(crossterm::event::EnableBracketedPaste)?;
+    if modes.mouse_capture {
+        writer.queue(crossterm::event::EnableMouseCapture)?;
+    }
+    if modes.keyboard_enhanced {
+        write!(
+            writer,
+            "\x1b[={};1u",
+            keyboard_enhancement_flags().bits()
+        )?;
+    }
+    writer.flush()
+}
+
 /// Disable Kitty keyboard protocol, restoring default key reporting.
 pub fn disable_keyboard_enhancement() {
     let _ = crossterm::execute!(
@@ -1873,8 +1918,9 @@ pub fn prewarm_focused_side_panel(
 #[cfg(test)]
 mod tests {
     use super::{
-        CacheTtlInfo, KvCacheProblemKind, connection_type_icon, detect_kv_cache_problem,
-        keyboard_enhancement_flags, resolve_subscribe_metadata, scheduled_notification_text,
+        CacheTtlInfo, KvCacheProblemKind, TerminalModeState, connection_type_icon,
+        detect_kv_cache_problem, keyboard_enhancement_flags, reapply_terminal_modes_to,
+        resolve_subscribe_metadata, scheduled_notification_text,
     };
     use crate::ambient::AmbientStatus;
     use crate::tui::info_widget::AmbientWidgetData;
@@ -2077,6 +2123,54 @@ mod tests {
         assert_eq!(connection_type_icon(Some("http")), Some("🌐"));
         assert_eq!(connection_type_icon(Some("unknown")), None);
         assert_eq!(connection_type_icon(None), None);
+    }
+
+    #[test]
+    fn reapply_terminal_modes_reemits_only_startup_modes_and_never_focus_reporting() {
+        let render = |modes: TerminalModeState| {
+            let mut buf: Vec<u8> = Vec::new();
+            reapply_terminal_modes_to(&mut buf, modes).expect("write");
+            String::from_utf8(buf).expect("ascii")
+        };
+
+        let none = render(TerminalModeState::default());
+        assert_eq!(none, "\x1b[?2004h", "bracketed paste is always re-armed");
+
+        let mouse = render(TerminalModeState {
+            mouse_capture: true,
+            keyboard_enhanced: false,
+        });
+        assert!(mouse.starts_with("\x1b[?2004h"));
+        assert!(mouse.contains("\x1b[?1000h"), "mouse capture re-armed: {mouse:?}");
+        assert!(!mouse.contains("u"), "no kitty sequence without keyboard enhancement");
+
+        let kitty = render(TerminalModeState {
+            mouse_capture: false,
+            keyboard_enhanced: true,
+        });
+        let expected_flags = keyboard_enhancement_flags().bits();
+        assert!(
+            kitty.ends_with(&format!("\x1b[={expected_flags};1u")),
+            "kitty set-form with the startup flag bits: {kitty:?}"
+        );
+        assert!(!kitty.contains("\x1b[>"), "set form, not a second push");
+        assert!(!kitty.contains("?1000h"));
+
+        let both = render(TerminalModeState {
+            mouse_capture: true,
+            keyboard_enhanced: true,
+        });
+        let paste = both.find("?2004h").expect("paste");
+        let mouse_at = both.find("?1000h").expect("mouse");
+        let kitty_at = both.find("[=").expect("kitty");
+        assert!(paste < mouse_at && mouse_at < kitty_at, "order: paste, mouse, kitty");
+
+        for rendered in [&none, &mouse, &kitty, &both] {
+            assert!(
+                !rendered.contains("?1004"),
+                "focus reporting must never be re-armed from a focus handler: {rendered:?}"
+            );
+        }
     }
 
     #[test]
