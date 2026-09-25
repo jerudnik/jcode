@@ -126,11 +126,7 @@ pub fn reapply_terminal_modes_to(
         writer.queue(crossterm::event::EnableMouseCapture)?;
     }
     if modes.keyboard_enhanced {
-        write!(
-            writer,
-            "\x1b[={};1u",
-            keyboard_enhancement_flags().bits()
-        )?;
+        write!(writer, "\x1b[={};1u", keyboard_enhancement_flags().bits())?;
     }
     writer.flush()
 }
@@ -2141,8 +2137,14 @@ mod tests {
             keyboard_enhanced: false,
         });
         assert!(mouse.starts_with("\x1b[?2004h"));
-        assert!(mouse.contains("\x1b[?1000h"), "mouse capture re-armed: {mouse:?}");
-        assert!(!mouse.contains("u"), "no kitty sequence without keyboard enhancement");
+        assert!(
+            mouse.contains("\x1b[?1000h"),
+            "mouse capture re-armed: {mouse:?}"
+        );
+        assert!(
+            !mouse.contains("u"),
+            "no kitty sequence without keyboard enhancement"
+        );
 
         let kitty = render(TerminalModeState {
             mouse_capture: false,
@@ -2163,7 +2165,10 @@ mod tests {
         let paste = both.find("?2004h").expect("paste");
         let mouse_at = both.find("?1000h").expect("mouse");
         let kitty_at = both.find("[=").expect("kitty");
-        assert!(paste < mouse_at && mouse_at < kitty_at, "order: paste, mouse, kitty");
+        assert!(
+            paste < mouse_at && mouse_at < kitty_at,
+            "order: paste, mouse, kitty"
+        );
 
         for rendered in [&none, &mouse, &kitty, &both] {
             assert!(

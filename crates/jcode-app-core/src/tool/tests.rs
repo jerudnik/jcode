@@ -1565,7 +1565,11 @@ async fn register_refuses_ambiguous_composed_mcp_name_for_every_claimant() {
         identities,
         vec![
             (name, "a".to_string(), "b__c".to_string()),
-            ("mcp__plain__read".to_string(), "plain".to_string(), "read".to_string()),
+            (
+                "mcp__plain__read".to_string(),
+                "plain".to_string(),
+                "read".to_string()
+            ),
         ]
     );
 }

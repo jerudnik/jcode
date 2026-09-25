@@ -144,10 +144,8 @@ pub struct Registry {
 }
 
 /// Composed key -> set of `(server, tool)` identities that claimed it.
-pub type McpAmbiguousKeys = std::collections::BTreeMap<
-    String,
-    std::collections::BTreeSet<(String, String)>,
->;
+pub type McpAmbiguousKeys =
+    std::collections::BTreeMap<String, std::collections::BTreeSet<(String, String)>>;
 
 impl Clone for Registry {
     fn clone(&self) -> Self {
@@ -970,10 +968,8 @@ impl Registry {
                 }
                 claimants.insert(incoming.clone());
                 tools.remove(&name);
-                let listed: Vec<String> = claimants
-                    .iter()
-                    .map(|(s, t)| format!("{s}/{t}"))
-                    .collect();
+                let listed: Vec<String> =
+                    claimants.iter().map(|(s, t)| format!("{s}/{t}")).collect();
                 crate::logging::warn(&format!(
                     "MCP: refusing ambiguous tool name '{}' claimed by {} (rename one server                      so `mcp__{{server}}__{{tool}}` stays unique)",
                     name,

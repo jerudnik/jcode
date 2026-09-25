@@ -179,9 +179,12 @@ impl App {
                             Some(Ok(Event::FocusGained)) => {
                                 // Same handling as the idle loop so focus state and
                                 // terminal modes do not go stale during a turn.
-                                self.set_client_focused(true);
+                                let redraw = self.set_client_focused(true);
                                 self.note_client_focus(true);
                                 self.reapply_terminal_modes();
+                                if redraw {
+                                    status_spinner_renderer.draw_full(self, terminal)?;
+                                }
                             }
                             Some(Ok(Event::FocusLost)) => {
                                 self.set_client_focused(false);
@@ -497,9 +500,12 @@ impl App {
                             Some(Ok(Event::FocusGained)) => {
                                 // Same handling as the idle loop so focus state and
                                 // terminal modes do not go stale during a turn.
-                                self.set_client_focused(true);
+                                let redraw = self.set_client_focused(true);
                                 self.note_client_focus(true);
                                 self.reapply_terminal_modes();
+                                if redraw {
+                                    status_spinner_renderer.draw_full(self, terminal)?;
+                                }
                             }
                             Some(Ok(Event::FocusLost)) => {
                                 self.set_client_focused(false);
@@ -1394,9 +1400,12 @@ impl App {
                                 Some(Ok(Event::FocusGained)) => {
                                     // Same handling as the idle loop so focus state and
                                     // terminal modes do not go stale during a turn.
-                                    self.set_client_focused(true);
+                                    let redraw = self.set_client_focused(true);
                                     self.note_client_focus(true);
                                     self.reapply_terminal_modes();
+                                    if redraw {
+                                        status_spinner_renderer.draw_full(self, terminal)?;
+                                    }
                                 }
                                 Some(Ok(Event::FocusLost)) => {
                                     self.set_client_focused(false);
