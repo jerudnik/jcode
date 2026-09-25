@@ -1344,7 +1344,13 @@ done
 mode=${1:-hung}
 delay=${2:-0}
 events=${3:-/dev/null}
+probe_startup=${4:-false}
+initialize_id=
+call_started=false
 trap 'jobs -pr | xargs kill 2>/dev/null || true' EXIT
+initialize_reply() {
+  echo '{"jsonrpc":"2.0","id":'"$1"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"hung","version":"0.0.1"}}}'
+}
 reply() {
   sleep "$delay"
   echo '{"jsonrpc":"2.0","id":'"$1"',"result":{"content":[{"type":"text","text":"completed"}],"isError":false}}'
@@ -1353,12 +1359,18 @@ while IFS= read -r line; do
   id=$(echo "$line" | grep -o '"id":[0-9]*' | grep -o '[0-9]*' | head -1)
   case "$line" in
     *'"initialize"'*)
-      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"hung","version":"0.0.1"}}}'
+      if [ "$probe_startup" = true ]; then
+        # Wait for the real health probe instead of guessing a startup delay.
+        initialize_id=$id
+      else
+        initialize_reply "$id"
+      fi
       ;;
     *'"tools/list"'*)
       echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[{"name":"never_returns","description":"hangs","inputSchema":{"type":"object"}}]}}'
       ;;
     *'"tools/call"'*)
+      call_started=true
       echo call >> "$events"
       case "$mode" in
         slow) reply "$id" & ;;
@@ -1366,8 +1378,15 @@ while IFS= read -r line; do
       esac
       ;;
     *'"ping"'*)
-      echo ping >> "$events"
-      if [ "$mode" != hung ]; then
+      if [ -n "$initialize_id" ]; then
+        echo ping >> "$events.startup"
+        initialize_reply "$initialize_id"
+        initialize_id=
+      fi
+      if [ "$call_started" = true ]; then
+        echo ping >> "$events"
+      fi
+      if [ "$mode" != hung ] || [ "$call_started" = false ]; then
         echo '{"jsonrpc":"2.0","id":'"$id"',"result":{}}'
       fi
       ;;
@@ -1394,6 +1413,7 @@ done
         delay_secs: u64,
         global_health_ms: &str,
         bound_secs: u64,
+        probe_startup: bool,
     ) -> (Result<ToolCallResult>, Duration, bool, Vec<String>) {
         let env_guard = crate::storage::lock_test_env();
         let previous = std::env::var_os(super::super::client::MCP_HEALTH_DEADLINE_ENV);
@@ -1402,13 +1422,25 @@ done
         let server_path = write_hung_mcp_server(temp.path());
         let events_path = temp.path().join("events");
         settings["command"] = serde_json::json!(server_path);
-        settings["args"] = serde_json::json!([mode, delay_secs.to_string(), events_path]);
+        settings["args"] = serde_json::json!([
+            mode,
+            delay_secs.to_string(),
+            events_path,
+            probe_startup.to_string()
+        ]);
         settings["shared"] = serde_json::json!(false);
         let server_config = serde_json::from_value(settings).unwrap();
         let mut config = McpConfig::default();
         config.servers.insert(name.to_string(), server_config);
         let manager = McpManager::with_config(config.clone());
         manager.connect(name, &config.servers[name]).await.unwrap();
+        if probe_startup {
+            assert_eq!(
+                std::fs::read_to_string(events_path.with_extension("startup"))
+                    .expect("startup probe must release delayed initialization"),
+                "ping\n"
+            );
+        }
         crate::env::set_var(
             super::super::client::MCP_HEALTH_DEADLINE_ENV,
             global_health_ms,
@@ -1461,6 +1493,7 @@ done
             60,
             "1000",
             70,
+            false,
         )
         .await;
         let result = result.expect("a ping-responsive 60s call must use its 120s total");
@@ -1482,6 +1515,7 @@ done
             0,
             "15000",
             6,
+            true,
         )
         .await;
         let error = result.expect_err("hung child must fail despite a 120s total");
@@ -1500,6 +1534,7 @@ done
             0,
             "60000",
             10,
+            false,
         )
         .await;
         let error = result.expect_err("short total must still detect hung children");
@@ -1519,6 +1554,7 @@ done
             0,
             "1000",
             9,
+            true,
         )
         .await;
         let error = result.expect_err("live server must still respect the 5s total");
@@ -1537,6 +1573,7 @@ done
             3,
             "500",
             7,
+            false,
         )
         .await;
         let result = result.expect("server health override must win over global 500ms");
@@ -1561,7 +1598,8 @@ done
             serde_json::json!({"timeout_secs": 0, "health_deadline_ms": 0}),
         ] {
             let (result, elapsed, connected, events) =
-                timeout_fixture_call("timeout-defaults", settings, "responsive", 0, "", 35).await;
+                timeout_fixture_call("timeout-defaults", settings, "responsive", 0, "", 35, false)
+                    .await;
             let error = result.expect_err("default total must still bound a live call");
             assert!(!super::super::client::error_permits_auto_retry(&error));
             assert!(elapsed >= Duration::from_secs(30) && elapsed < Duration::from_secs(34));
