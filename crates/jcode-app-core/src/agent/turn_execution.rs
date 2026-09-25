@@ -491,14 +491,88 @@ impl Agent {
     }
 
     /// Build the agent's tool definitions from the registry, applying the
-    /// session's `allowed_tools`, `disabled_tools`, and self-dev filters.
-    async fn build_filtered_tool_definitions(&self) -> Vec<ToolDefinition> {
+    /// session's `allowed_tools`, `disabled_tools`, self-dev filters, and the
+    /// active transport's tool-name limit.
+    async fn build_filtered_tool_definitions(&mut self) -> Vec<ToolDefinition> {
         let mut tools = self.registry.definitions(self.allowed_tools.as_ref()).await;
         if !self.disabled_tools.is_empty() {
             tools.retain(|tool| !self.disabled_tools.contains(&tool.name));
         }
+        self.apply_tool_name_limit(&mut tools);
         Self::apply_selfdev_tool_surface(&mut tools, self.session.is_canary);
         tools
+    }
+
+    /// Withhold tools whose advertised name the active transport would reject
+    /// or silently pass through. Anthropic and the Codex Responses backend
+    /// fail the whole request over one over-long name, while Z.AI and xAI
+    /// accept anything, so the check has to live here. Excluded names are
+    /// remembered for [`Self::validate_tool_allowed`] and logged once each.
+    fn apply_tool_name_limit(&mut self, tools: &mut Vec<ToolDefinition>) {
+        let limit = self.provider.capabilities().tool_name_limit;
+        let transport = self.provider.provider_identity();
+        let mut excluded = std::collections::HashSet::new();
+        tools.retain(|tool| {
+            if limit.accepts(&tool.name) {
+                return true;
+            }
+            excluded.insert(tool.name.clone());
+            false
+        });
+        for name in &excluded {
+            if self.name_excluded_tools.contains(name) {
+                continue;
+            }
+            logging::event_warn(
+                "MCP_NAME_UNSUPPORTED",
+                vec![
+                    ("name", name.clone()),
+                    ("length", name.chars().count().to_string()),
+                    ("transport", transport.clone()),
+                    ("max_len", limit.max_len.to_string()),
+                ],
+            );
+        }
+        crate::tool::set_session_name_exclusions(&self.session.id, excluded.clone());
+        self.name_excluded_tools = excluded;
+        self.locked_tool_name_limit = Some(limit);
+    }
+
+    /// After a route or model switch, drop the locked snapshot when the new
+    /// transport's tool-name limit would change which tools are advertised.
+    /// A switch between transports that both accept every registered name
+    /// keeps the snapshot and its prompt cache.
+    pub(crate) fn invalidate_tool_snapshot_if_name_limit_changed(&mut self) {
+        let Some(previous) = self.locked_tool_name_limit else {
+            return;
+        };
+        let current = self.provider.capabilities().tool_name_limit;
+        if current == previous {
+            return;
+        }
+        let excluded_would_change = !self.name_excluded_tools.is_empty()
+            || self
+                .locked_tools
+                .as_ref()
+                .is_some_and(|tools| tools.iter().any(|tool| !current.accepts(&tool.name)));
+        if !excluded_would_change {
+            self.locked_tool_name_limit = Some(current);
+            return;
+        }
+        logging::info(&format!(
+            "Tool-name limit changed ({} -> {} chars) with affected tools; rebuilding the tool snapshot",
+            previous.max_len, current.max_len
+        ));
+        self.locked_tools = None;
+        self.cache_tracker.reset();
+    }
+
+    /// Tool names withheld from the active transport by
+    /// [`Self::apply_tool_name_limit`], sorted for stable display.
+    pub fn name_excluded_tool_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.name_excluded_tools.iter().cloned().collect();
+        names.sort();
+        names
     }
 
     /// Tailor the `selfdev` tool definition to the session mode.
@@ -528,8 +602,29 @@ impl Agent {
             name.starts_with("mcp__")
                 && allowed.map(|set| set.contains(name)).unwrap_or(true)
                 && !self.disabled_tools.contains(name)
+                // A name withheld by the transport limit is absent from the
+                // snapshot on purpose; it must not consume the one-shot latch.
+                && !self.name_excluded_tools.contains(name)
                 && !locked.iter().any(|t| &t.name == name)
         })
+    }
+
+    /// Registered MCP tools visible to this session as
+    /// `(registry key, server, tool)`, attributed by identity.
+    pub async fn mcp_tool_identities(&self) -> Vec<(String, String, String)> {
+        let visible: std::collections::HashSet<String> =
+            self.tool_names().await.into_iter().collect();
+        self.registry
+            .mcp_tool_identities()
+            .await
+            .into_iter()
+            .filter(|(key, _, _)| visible.contains(key))
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mcp_late_register_latched(&self) -> bool {
+        self.mcp_late_register_resolved
     }
 
     pub async fn tool_names(&self) -> Vec<String> {
@@ -643,6 +738,13 @@ impl Agent {
         }
         if self.disabled_tools.contains(resolved) {
             return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved));
+        }
+        if self.name_excluded_tools.contains(resolved) {
+            return Err(anyhow::anyhow!(
+                "Tool '{}' is not advertised on this transport: its name exceeds the \
+                 provider's tool-name limit",
+                resolved
+            ));
         }
         Ok(())
     }

@@ -1262,6 +1262,9 @@ impl Provider for AnthropicProvider {
     fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
         jcode_provider_core::ProviderCapabilities {
             reasoning_context_replay: true,
+            // Probed 2026-09-25 on the Messages API: 128 accepted, 129 rejected
+            // with "tools.0.custom.name: String should have at most 128 characters".
+            tool_name_limit: jcode_provider_core::ToolNameLimit::PROBED_128,
         }
     }
 

@@ -1146,6 +1146,7 @@ async fn test_context_guard_small_output_passes_through() {
     let compaction = Arc::new(RwLock::new(CompactionManager::new().with_budget(200_000)));
     let registry = Registry {
         swarm_state: Arc::new(StdRwLock::new(None)),
+        mcp_ambiguous: Arc::new(RwLock::new(McpAmbiguousKeys::new())),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1161,6 +1162,7 @@ async fn test_context_guard_truncates_huge_single_output() {
     let compaction = Arc::new(RwLock::new(CompactionManager::new().with_budget(1000)));
     let registry = Registry {
         swarm_state: Arc::new(StdRwLock::new(None)),
+        mcp_ambiguous: Arc::new(RwLock::new(McpAmbiguousKeys::new())),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1190,6 +1192,7 @@ async fn test_context_guard_truncates_when_context_nearly_full() {
     }
     let registry = Registry {
         swarm_state: Arc::new(StdRwLock::new(None)),
+        mcp_ambiguous: Arc::new(RwLock::new(McpAmbiguousKeys::new())),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1209,6 +1212,7 @@ async fn test_context_guard_zero_budget_passes_through() {
     let compaction = Arc::new(RwLock::new(CompactionManager::new().with_budget(0)));
     let registry = Registry {
         swarm_state: Arc::new(StdRwLock::new(None)),
+        mcp_ambiguous: Arc::new(RwLock::new(McpAmbiguousKeys::new())),
         tools: Arc::new(RwLock::new(HashMap::new())),
         skills: Arc::new(RwLock::new(crate::skill::SkillRegistry::default())),
         compaction,
@@ -1492,6 +1496,105 @@ async fn unregister_mcp_tools_matches_server_identity_not_key_prefix() {
     removed.sort();
     assert_eq!(removed, vec!["mcp__a__b__read".to_string()]);
     assert_eq!(registry.tool_names().await, vec!["bash".to_string()]);
+}
+
+#[tokio::test]
+async fn register_refuses_ambiguous_composed_mcp_name_for_every_claimant() {
+    use crate::mcp::{McpManager, McpToolDef, create_mcp_tools_from_cached};
+
+    let registry = Registry::empty();
+    let manager = Arc::new(tokio::sync::RwLock::new(McpManager::new()));
+    let def = |name: &str| McpToolDef {
+        name: name.to_string(),
+        description: None,
+        input_schema: serde_json::json!({"type": "object"}),
+    };
+    let proxy = |server: &str, tool: &str| {
+        create_mcp_tools_from_cached(server, &[def(tool)], manager.clone())
+            .pop()
+            .expect("one proxy")
+    };
+
+    // `a`/`b__c` and `a__b`/`c` both compose to `mcp__a__b__c`. The first
+    // claimant registers normally; the second makes the key ambiguous and
+    // evicts the first, so neither can be dispatched to by mistake.
+    let (name, first) = proxy("a", "b__c");
+    assert_eq!(name, "mcp__a__b__c");
+    registry.register(name.clone(), first).await;
+    assert_eq!(registry.tool_names().await, vec![name.clone()]);
+
+    let (_, second) = proxy("a__b", "c");
+    registry.register(name.clone(), second).await;
+    assert!(registry.tool_names().await.is_empty());
+    let ambiguous = registry.mcp_ambiguous_keys().await;
+    let claimants: Vec<(String, String)> = ambiguous[&name].iter().cloned().collect();
+    assert_eq!(
+        claimants,
+        vec![
+            ("a".to_string(), "b__c".to_string()),
+            ("a__b".to_string(), "c".to_string()),
+        ]
+    );
+
+    // The refusal is persistent: a reconnect of the first claimant (same
+    // identity re-registering) still finds the key refused, so connect order
+    // and retries cannot pick a winner.
+    let (_, first_again) = proxy("a", "b__c");
+    registry.register(name.clone(), first_again).await;
+    assert!(registry.tool_names().await.is_empty());
+    assert_eq!(registry.mcp_ambiguous_keys().await[&name].len(), 2);
+
+    // Same-identity refresh on an unambiguous key is unaffected.
+    let (other, tool) = proxy("plain", "read");
+    registry.register(other.clone(), tool).await;
+    let (_, tool) = proxy("plain", "read");
+    registry.register(other.clone(), tool).await;
+    assert_eq!(registry.tool_names().await, vec![other.clone()]);
+
+    // Identity-based unregister of one claimant releases the key for the
+    // remaining one on its next registration.
+    registry.unregister_mcp_tools(Some("a__b")).await;
+    assert!(registry.mcp_ambiguous_keys().await.is_empty());
+    let (_, first_again) = proxy("a", "b__c");
+    registry.register(name.clone(), first_again).await;
+    let mut names = registry.tool_names().await;
+    names.sort();
+    assert_eq!(names, vec![name.clone(), other]);
+    let identities = registry.mcp_tool_identities().await;
+    assert_eq!(
+        identities,
+        vec![
+            (name, "a".to_string(), "b__c".to_string()),
+            (
+                "mcp__plain__read".to_string(),
+                "plain".to_string(),
+                "read".to_string()
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn register_refuses_trailing_underscore_server_collision() {
+    use crate::mcp::{McpManager, McpToolDef, create_mcp_tools_from_cached};
+
+    // The second collision form: `a_`/`_c` and `a`/`__c` both compose to
+    // `mcp__a____c` although neither server name contains `__`.
+    let registry = Registry::empty();
+    let manager = Arc::new(tokio::sync::RwLock::new(McpManager::new()));
+    let def = |name: &str| McpToolDef {
+        name: name.to_string(),
+        description: None,
+        input_schema: serde_json::json!({"type": "object"}),
+    };
+    for (server, tool) in [("a_", "_c"), ("a", "__c")] {
+        for (name, proxy) in create_mcp_tools_from_cached(server, &[def(tool)], manager.clone()) {
+            assert_eq!(name, "mcp__a____c");
+            registry.register(name, proxy).await;
+        }
+    }
+    assert!(registry.tool_names().await.is_empty());
+    assert_eq!(registry.mcp_ambiguous_keys().await["mcp__a____c"].len(), 2);
 }
 
 #[cfg(unix)]

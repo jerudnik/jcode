@@ -198,6 +198,7 @@ async fn run_ambient_visible() -> Result<()> {
     let (terminal, tui_runtime) = init_tui_runtime()?;
 
     let mut app = tui::App::new(provider, registry);
+    app.set_terminal_modes(tui_runtime.terminal_modes());
     app.set_ambient_mode(context.system_prompt, context.initial_message);
 
     let _ = crossterm::execute!(

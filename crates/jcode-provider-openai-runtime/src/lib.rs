@@ -521,6 +521,11 @@ async fn ensure_persistent_ws_is_healthy(state: &mut PersistentWsState) -> Resul
 pub struct OpenAIProvider {
     client: Client,
     credentials: Arc<RwLock<CodexCredentials>>,
+    /// Last tool-name limit derived from the credential mode (`max_len`), or 0
+    /// before the first read. Lets `capabilities()` stay stable while a
+    /// credential refresh briefly holds the write lock, so the advertised tool
+    /// set does not flip between turns.
+    last_tool_name_max_len: Arc<std::sync::atomic::AtomicUsize>,
     credential_mode: Arc<RwLock<OpenAICredentialMode>>,
     model: Arc<RwLock<String>>,
     prompt_cache_key: Option<String>,
@@ -624,6 +629,7 @@ impl OpenAIProvider {
         Self {
             client: jcode_provider_core::shared_http_client(),
             credentials: Arc::new(RwLock::new(credentials)),
+            last_tool_name_max_len: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             credential_mode: Arc::new(RwLock::new(credential_mode)),
             model: Arc::new(RwLock::new(model)),
             prompt_cache_key,

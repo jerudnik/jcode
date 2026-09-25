@@ -176,6 +176,19 @@ impl App {
                                     super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
                                 }
                             }
+                            Some(Ok(Event::FocusGained)) => {
+                                // Same handling as the idle loop so focus state and
+                                // terminal modes do not go stale during a turn.
+                                let redraw = self.set_client_focused(true);
+                                self.note_client_focus(true);
+                                self.reapply_terminal_modes();
+                                if redraw {
+                                    status_spinner_renderer.draw_full(self, terminal)?;
+                                }
+                            }
+                            Some(Ok(Event::FocusLost)) => {
+                                self.set_client_focused(false);
+                            }
                             _ => {}
                         }
                     }
@@ -483,6 +496,19 @@ impl App {
                                 if self.should_redraw_after_resize() {
                                     status_spinner_renderer.draw_full(self, terminal)?;
                                 }
+                            }
+                            Some(Ok(Event::FocusGained)) => {
+                                // Same handling as the idle loop so focus state and
+                                // terminal modes do not go stale during a turn.
+                                let redraw = self.set_client_focused(true);
+                                self.note_client_focus(true);
+                                self.reapply_terminal_modes();
+                                if redraw {
+                                    status_spinner_renderer.draw_full(self, terminal)?;
+                                }
+                            }
+                            Some(Ok(Event::FocusLost)) => {
+                                self.set_client_focused(false);
                             }
                             _ => {}
                         }
@@ -1370,6 +1396,19 @@ impl App {
                                     if self.should_redraw_after_resize() {
                                         status_spinner_renderer.draw_full(self, terminal)?;
                                     }
+                                }
+                                Some(Ok(Event::FocusGained)) => {
+                                    // Same handling as the idle loop so focus state and
+                                    // terminal modes do not go stale during a turn.
+                                    let redraw = self.set_client_focused(true);
+                                    self.note_client_focus(true);
+                                    self.reapply_terminal_modes();
+                                    if redraw {
+                                        status_spinner_renderer.draw_full(self, terminal)?;
+                                    }
+                                }
+                                Some(Ok(Event::FocusLost)) => {
+                                    self.set_client_focused(false);
                                 }
                                 _ => {}
                             }

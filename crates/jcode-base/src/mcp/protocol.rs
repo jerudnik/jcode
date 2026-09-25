@@ -493,6 +493,31 @@ impl McpConfig {
         Self::load_for_dir(None)
     }
 
+    /// Warn about server names that can make the composed `mcp__{server}__{tool}`
+    /// key ambiguous. Two distinct `(server, tool)` pairs compose to the same
+    /// key only when the longer server name is the shorter one plus a prefix of
+    /// `__{tool}`, so a name containing `__` or ending in `_` is the only way a
+    /// collision can start. The registry refuses the colliding key at
+    /// registration; this warning explains the risk before that happens. Names
+    /// are never rejected or rewritten here. Returns the offending names.
+    pub fn warn_ambiguous_server_names(&self) -> Vec<String> {
+        let mut offending: Vec<String> = self
+            .servers
+            .keys()
+            .filter(|name| name.contains("__") || name.ends_with('_'))
+            .cloned()
+            .collect();
+        offending.sort();
+        for name in &offending {
+            crate::logging::warn(&format!(
+                "MCP: server name '{name}' contains `__` or ends with `_`; its tools compose to \
+                 `mcp__{name}__{{tool}}`, which another server's tool could also compose to. \
+                 Colliding names are refused at registration. Rename the server to avoid this."
+            ));
+        }
+        offending
+    }
+
     /// Drop any self-referential `jcode mcp-serve` server entries, logging each.
     /// Called by `load_for_dir` so the daemon never spawns its own shim. Returns
     /// the number of entries dropped. See
@@ -589,6 +614,7 @@ impl McpConfig {
             keep
         });
         merged.drop_self_referential_servers();
+        merged.warn_ambiguous_server_names();
 
         // Fork seam (env placeholder expansion): resolve exact `${VAR}` env
         // values against the process environment so secrets injected by tools

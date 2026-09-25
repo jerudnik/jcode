@@ -24,6 +24,8 @@ mod active_pid;
 mod hidden_reminder;
 #[path = "agent_tests/interrupt.rs"]
 mod interrupt;
+#[path = "agent_tests/tool_name_limit.rs"]
+mod tool_name_limit;
 #[path = "agent_tests/turn_dedupe.rs"]
 mod turn_dedupe;
 

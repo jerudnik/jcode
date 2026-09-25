@@ -66,6 +66,11 @@ pub(crate) use session_search::spawn_recent_index_warmup;
 struct SessionToolPolicy {
     allowed_tools: Option<HashSet<String>>,
     disabled_tools: HashSet<String>,
+    /// Names withheld from the session's active transport by the agent's
+    /// tool-name limit. Enforced here as well as in the agent so a nested
+    /// `batch` call, which executes through the registry directly, cannot
+    /// reach a tool the provider never saw.
+    name_excluded_tools: HashSet<String>,
 }
 
 static SESSION_TOOL_POLICIES: LazyLock<StdRwLock<HashMap<String, SessionToolPolicy>>> =
@@ -79,13 +84,31 @@ pub(crate) fn set_session_tool_policy(
     let mut policies = SESSION_TOOL_POLICIES
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let name_excluded_tools = policies
+        .get(session_id)
+        .map(|policy| policy.name_excluded_tools.clone())
+        .unwrap_or_default();
     policies.insert(
         session_id.to_string(),
         SessionToolPolicy {
             allowed_tools,
             disabled_tools,
+            name_excluded_tools,
         },
     );
+}
+
+/// Record the tool names the session's active transport cannot advertise.
+/// Replaces the previous set; the agent calls this whenever it rebuilds its
+/// tool snapshot.
+pub(crate) fn set_session_name_exclusions(session_id: &str, excluded: HashSet<String>) {
+    let mut policies = SESSION_TOOL_POLICIES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    policies
+        .entry(session_id.to_string())
+        .or_default()
+        .name_excluded_tools = excluded;
 }
 
 pub(crate) fn clear_session_tool_policy(session_id: &str) {
@@ -112,7 +135,17 @@ pub struct Registry {
     skills: Arc<RwLock<SkillRegistry>>,
     compaction: Arc<RwLock<CompactionManager>>,
     swarm_state: Arc<StdRwLock<Option<crate::server::SwarmState>>>,
+    /// Composed `mcp__{server}__{tool}` keys claimed by more than one
+    /// `(server, tool)` identity, with every claimant. Kept alongside the
+    /// tool map so a refused key stays refused for each claimant until the
+    /// claimant set shrinks to one through identity-based unregister. See
+    /// `docs/architecture/MCP_TOOL_NAMING_POLICY.md`.
+    mcp_ambiguous: Arc<RwLock<McpAmbiguousKeys>>,
 }
+
+/// Composed key -> set of `(server, tool)` identities that claimed it.
+pub type McpAmbiguousKeys =
+    std::collections::BTreeMap<String, std::collections::BTreeSet<(String, String)>>;
 
 impl Clone for Registry {
     fn clone(&self) -> Self {
@@ -123,6 +156,7 @@ impl Clone for Registry {
             // subagents from corrupting each other's message history
             compaction: Arc::new(RwLock::new(CompactionManager::new())),
             swarm_state: Arc::clone(&self.swarm_state),
+            mcp_ambiguous: Arc::clone(&self.mcp_ambiguous),
         }
     }
 }
@@ -136,6 +170,7 @@ pub(super) struct WeakRegistry {
     tools: std::sync::Weak<RwLock<HashMap<String, Arc<dyn Tool>>>>,
     skills: Arc<RwLock<SkillRegistry>>,
     swarm_state: Arc<StdRwLock<Option<crate::server::SwarmState>>>,
+    mcp_ambiguous: Arc<RwLock<McpAmbiguousKeys>>,
 }
 
 impl WeakRegistry {
@@ -149,6 +184,7 @@ impl WeakRegistry {
             skills: Arc::clone(&self.skills),
             compaction: Arc::new(RwLock::new(CompactionManager::new())),
             swarm_state: Arc::clone(&self.swarm_state),
+            mcp_ambiguous: Arc::clone(&self.mcp_ambiguous),
         })
     }
 }
@@ -161,6 +197,7 @@ impl Registry {
             tools: Arc::downgrade(&self.tools),
             skills: Arc::clone(&self.skills),
             swarm_state: Arc::clone(&self.swarm_state),
+            mcp_ambiguous: Arc::clone(&self.mcp_ambiguous),
         }
     }
 
@@ -196,6 +233,7 @@ impl Registry {
             skills: Arc::new(RwLock::new(SkillRegistry::default())),
             compaction: Arc::new(RwLock::new(CompactionManager::new())),
             swarm_state: Arc::new(StdRwLock::new(None)),
+            mcp_ambiguous: Arc::new(RwLock::new(McpAmbiguousKeys::new())),
         }
     }
 
@@ -322,6 +360,7 @@ impl Registry {
             skills: skills.clone(),
             compaction: compaction.clone(),
             swarm_state: Arc::new(StdRwLock::new(None)),
+            mcp_ambiguous: Arc::new(RwLock::new(McpAmbiguousKeys::new())),
         };
         let registry_struct_ms = registry_struct_start.elapsed().as_millis();
 
@@ -667,6 +706,13 @@ impl Registry {
             if policy.disabled_tools.contains(resolved_name) {
                 return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved_name));
             }
+            if policy.name_excluded_tools.contains(resolved_name) {
+                return Err(anyhow::anyhow!(
+                    "Tool '{}' is not advertised on this transport: its name exceeds the \
+                     provider's tool-name limit",
+                    resolved_name
+                ));
+            }
         }
         // Ambient action tier gate: rank unattended action risk, unlike the
         // assignment grant below, which defines worker authority. Interactive
@@ -900,8 +946,73 @@ impl Registry {
 
     /// Register a tool dynamically (for MCP tools, etc.)
     pub async fn register(&self, name: String, tool: Arc<dyn Tool>) {
+        if let Some((server, tool_name)) = tool.mcp_identity() {
+            let incoming = (server.to_string(), tool_name.to_string());
+            let mut ambiguous = self.mcp_ambiguous.write().await;
+            let mut tools = self.tools.write().await;
+            // Only registration outcomes that keep the composed key a
+            // bijection onto (server, tool) are allowed. A different identity
+            // already holding or having claimed this key makes the key
+            // ambiguous for every claimant; nobody owns it until identity-based
+            // unregister leaves a single claimant.
+            let existing_other = tools
+                .get(&name)
+                .and_then(|existing| existing.mcp_identity())
+                .map(|(s, t)| (s.to_string(), t.to_string()))
+                .filter(|existing| *existing != incoming);
+            let already_ambiguous = ambiguous.contains_key(&name);
+            if existing_other.is_some() || already_ambiguous {
+                let claimants = ambiguous.entry(name.clone()).or_default();
+                if let Some(existing) = existing_other {
+                    claimants.insert(existing);
+                }
+                claimants.insert(incoming.clone());
+                tools.remove(&name);
+                let listed: Vec<String> =
+                    claimants.iter().map(|(s, t)| format!("{s}/{t}")).collect();
+                crate::logging::warn(&format!(
+                    "MCP: refusing ambiguous tool name '{}' claimed by {} (rename one server                      so `mcp__{{server}}__{{tool}}` stays unique)",
+                    name,
+                    listed.join(", ")
+                ));
+                crate::logging::event_warn(
+                    "MCP_NAME_COLLISION",
+                    vec![
+                        ("name", name),
+                        ("claimants", listed.join(",")),
+                        ("incoming", format!("{}/{}", incoming.0, incoming.1)),
+                    ],
+                );
+                return;
+            }
+            tools.insert(name, tool);
+            return;
+        }
         let mut tools = self.tools.write().await;
         tools.insert(name, tool);
+    }
+
+    /// Every registered MCP proxy tool as `(registry key, server, tool)`,
+    /// read from `Tool::mcp_identity` rather than parsed out of the key, so a
+    /// server named `a__b` is attributed to `a__b` and not to `a`.
+    pub async fn mcp_tool_identities(&self) -> Vec<(String, String, String)> {
+        let tools = self.tools.read().await;
+        let mut out: Vec<(String, String, String)> = tools
+            .iter()
+            .filter_map(|(key, tool)| {
+                tool.mcp_identity()
+                    .map(|(server, tool)| (key.clone(), server.to_string(), tool.to_string()))
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// Composed MCP names refused because more than one `(server, tool)`
+    /// identity composes to them, with every claimant. Empty when no
+    /// collision is live.
+    pub async fn mcp_ambiguous_keys(&self) -> McpAmbiguousKeys {
+        self.mcp_ambiguous.read().await.clone()
     }
 
     /// Register MCP tools (MCP management and server tools)
@@ -1089,9 +1200,7 @@ impl Registry {
                 let mut server_counts: std::collections::BTreeMap<String, usize> =
                     std::collections::BTreeMap::new();
                 for (name, tool) in &tools {
-                    if let Some(rest) = name.strip_prefix("mcp__")
-                        && let Some((server, _)) = rest.split_once("__")
-                    {
+                    if let Some((server, _)) = tool.mcp_identity() {
                         *server_counts.entry(server.to_string()).or_default() += 1;
                     }
                     // Idempotent: advertise-early may have already registered an
@@ -1221,6 +1330,7 @@ impl Registry {
     /// `mcp__{server}__` key prefix: a server named `a` must not take the
     /// tools of a server named `a__b` with it.
     pub async fn unregister_mcp_tools(&self, server: Option<&str>) -> Vec<String> {
+        let mut ambiguous = self.mcp_ambiguous.write().await;
         let mut tools = self.tools.write().await;
         let to_remove: Vec<String> = tools
             .iter()
@@ -1233,6 +1343,18 @@ impl Registry {
             .collect();
         for name in &to_remove {
             tools.remove(name);
+        }
+        // A departing server also gives up its claims on ambiguous keys. A key
+        // left with one claimant stops being ambiguous; that claimant may
+        // register normally on its next connect.
+        match server {
+            Some(server) => {
+                ambiguous.retain(|_, claimants| {
+                    claimants.retain(|(owner, _)| owner != server);
+                    claimants.len() > 1
+                });
+            }
+            None => ambiguous.clear(),
         }
         to_remove
     }
