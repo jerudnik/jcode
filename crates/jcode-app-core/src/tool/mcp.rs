@@ -202,6 +202,21 @@ impl McpManagementTool {
             output.push('\n');
         }
 
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            let ambiguous = registry.mcp_ambiguous_keys().await;
+            if !ambiguous.is_empty() {
+                output.push_str("Refused ambiguous tool names (rename one server so `mcp__{server}__{tool}` stays unique):\n");
+                for (name, claimants) in &ambiguous {
+                    let listed: Vec<String> = claimants
+                        .iter()
+                        .map(|(server, tool)| format!("{server}/{tool}"))
+                        .collect();
+                    output.push_str(&format!("  - {}: claimed by {}\n", name, listed.join(", ")));
+                }
+                output.push('\n');
+            }
+        }
+
         if !configured.is_empty() {
             output.push_str("Configured but not connected:\n");
             for (name, enabled) in &configured {

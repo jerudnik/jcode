@@ -648,8 +648,20 @@ impl Provider for OpenAIProvider {
     }
 
     fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        // The ChatGPT-backed Codex Responses endpoint was probed at 128
+        // accepted / 129 rejected (Codex PR #39594 raised its own limit to
+        // match). The platform key route keeps the documented 64 until it is
+        // probed. When the credential lock is busy, fall back to the
+        // conservative limit rather than guessing the transport.
+        let tool_name_limit = match self.credentials.try_read() {
+            Ok(credentials) if Self::is_chatgpt_mode(&credentials) => {
+                jcode_provider_core::ToolNameLimit::PROBED_128
+            }
+            _ => jcode_provider_core::ToolNameLimit::CONSERVATIVE,
+        };
         jcode_provider_core::ProviderCapabilities {
             reasoning_context_replay: true,
+            tool_name_limit,
         }
     }
 

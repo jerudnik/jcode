@@ -224,6 +224,9 @@ fn test_normalize_arguments_aliases_to_parameters() {
 fn test_schema_only_requires_tool() {
     let registry = Registry {
         swarm_state: Arc::new(StdRwLock::new(None)),
+        mcp_ambiguous: std::sync::Arc::new(tokio::sync::RwLock::new(
+            crate::tool::McpAmbiguousKeys::new(),
+        )),
         tools: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         skills: std::sync::Arc::new(tokio::sync::RwLock::new(
             crate::skill::SkillRegistry::default(),

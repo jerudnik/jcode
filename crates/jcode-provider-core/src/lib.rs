@@ -64,6 +64,65 @@ use std::time::Duration;
 /// Stream of events from a provider.
 pub type EventStream = Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>;
 
+/// Longest tool name the active transport accepts, and whether it tolerates
+/// `.` and `:` in addition to `[A-Za-z0-9_-]`.
+///
+/// Jcode enforces this before a request instead of trusting the provider:
+/// some transports accept any name (Z.AI and xAI returned 200 for names with
+/// spaces), while Anthropic and the OpenAI Responses backend reject the whole
+/// request when one tool name is over their limit. The values per transport
+/// are recorded in `docs/architecture/MCP_TOOL_NAMING_POLICY.md`; a runtime
+/// without probe or documentation evidence keeps [`ToolNameLimit::CONSERVATIVE`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolNameLimit {
+    /// Maximum name length in characters (all probed names were ASCII, so
+    /// bytes and characters agreed).
+    pub max_len: usize,
+    /// Gemini function names may also contain `.` and `:`.
+    pub allow_dot_colon: bool,
+}
+
+impl ToolNameLimit {
+    /// The documented OpenAI platform limit, shared by every transport that
+    /// has not shown evidence of accepting more.
+    pub const CONSERVATIVE: Self = Self {
+        max_len: 64,
+        allow_dot_colon: false,
+    };
+
+    /// Probed on Anthropic Messages, the ChatGPT-backed Codex Responses
+    /// endpoint and Kimi: 128 accepted, 129 rejected.
+    pub const PROBED_128: Self = Self {
+        max_len: 128,
+        allow_dot_colon: false,
+    };
+
+    pub const fn with_max_len(max_len: usize) -> Self {
+        Self {
+            max_len,
+            allow_dot_colon: false,
+        }
+    }
+
+    /// Whether `name` can be advertised on this transport unchanged.
+    pub fn accepts(&self, name: &str) -> bool {
+        !name.is_empty()
+            && name.chars().count() <= self.max_len
+            && name.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || c == '_'
+                    || c == '-'
+                    || (self.allow_dot_colon && (c == '.' || c == ':'))
+            })
+    }
+}
+
+impl Default for ToolNameLimit {
+    fn default() -> Self {
+        Self::CONSERVATIVE
+    }
+}
+
 /// Provider behavior that downstream consumers must query explicitly instead
 /// of inferring from a runtime implementation name.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -71,6 +130,8 @@ pub struct ProviderCapabilities {
     /// Stored reasoning blocks can be sent back through this provider in the
     /// shape required to continue a tool-call conversation.
     pub reasoning_context_replay: bool,
+    /// Tool-name length and character constraints of the active transport.
+    pub tool_name_limit: ToolNameLimit,
 }
 
 /// Provider trait for LLM backends.

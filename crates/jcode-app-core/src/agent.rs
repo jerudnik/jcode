@@ -284,6 +284,12 @@ pub struct Agent {
     /// MCP tools to wait for), this is set so the per-turn registry scan stops.
     /// Reset whenever the tool list is intentionally unlocked.
     mcp_late_register_resolved: bool,
+    /// Tool names withheld from the active transport because they break its
+    /// `ToolNameLimit` (see `docs/architecture/MCP_TOOL_NAMING_POLICY.md`).
+    /// The tools stay registered for other transports; this set makes the
+    /// exclusion hold at execution too, so a replayed or nested call cannot
+    /// reach a server through a name the provider never saw.
+    name_excluded_tools: std::collections::HashSet<String>,
     /// Override system prompt (used by ambient mode to inject a custom prompt)
     system_prompt_override: Option<String>,
     /// Whether memory features are enabled for this session
@@ -388,6 +394,7 @@ impl Agent {
             last_usage: TokenUsage::default(),
             locked_tools: None,
             mcp_late_register_resolved: false,
+            name_excluded_tools: std::collections::HashSet::new(),
             system_prompt_override: None,
             memory_enabled: crate::config::config().features.memory,
             rewind_undo_snapshot: None,

@@ -385,6 +385,7 @@ impl Provider for OpenRouterProvider {
         jcode_provider_core::ProviderCapabilities {
             reasoning_context_replay: self
                 .allows_reasoning_context_replay(&model, thinking_enabled),
+            tool_name_limit: Self::tool_name_limit_for_profile(self.profile_id.as_deref()),
         }
     }
 
