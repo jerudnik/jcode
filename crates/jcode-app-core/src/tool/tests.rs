@@ -104,6 +104,8 @@ async fn real_mcp_registration_does_not_retain_registry_tool_map() {
 
 #[tokio::test]
 async fn mcp_management_upgrades_registry_through_surviving_clone() {
+    use crate::mcp::{McpConfig, McpManager, McpToolDef, create_mcp_tools_from_cached};
+
     let _env_lock = crate::storage::lock_test_env();
     let home = tempfile::tempdir().expect("create isolated JCODE_HOME");
     let _home_guard = TestHomeGuard::new(home.path());
@@ -115,42 +117,56 @@ async fn mcp_management_upgrades_registry_through_surviving_clone() {
     let surviving_clone = registry.clone();
     drop(registry);
 
-    let stale_tool = surviving_clone
-        .tools
-        .read()
-        .await
-        .get("mcp")
-        .cloned()
-        .expect("MCP management tool should be registered");
     surviving_clone
-        .register("mcp__lifetime__sentinel".to_string(), stale_tool)
-        .await;
-
-    let output = surviving_clone
-        .execute(
-            "mcp",
-            serde_json::json!({"action": "reload"}),
-            mcp_test_context(working_dir.path()),
+        .register(
+            "mcp__ordinary__sentinel".to_string(),
+            Arc::new(OperationalFailureTool),
         )
-        .await
-        .expect("MCP management should upgrade through the surviving registry clone");
-    assert!(output.output.contains("No servers found in config"));
-    assert!(
-        !surviving_clone
-            .tool_names()
-            .await
-            .iter()
-            .any(|name| name == "mcp__lifetime__sentinel"),
-        "reload should mutate the surviving registry through the weak handle"
-    );
-    assert!(
+        .await;
+    let proxy_manager = Arc::new(tokio::sync::RwLock::new(McpManager::with_config(
+        McpConfig::default(),
+    )));
+    let config_dir = working_dir.path().join(".jcode");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    for (case, servers) in [
+        ("empty", serde_json::json!({})),
+        (
+            "disabled-only",
+            serde_json::json!({"disabled": {"command": "unused", "enabled": false}}),
+        ),
+    ] {
+        std::fs::write(
+            config_dir.join("mcp.json"),
+            serde_json::to_vec(&serde_json::json!({"servers": servers})).unwrap(),
+        )
+        .unwrap();
+        let definition = McpToolDef {
+            name: "sentinel".to_string(),
+            description: None,
+            input_schema: serde_json::json!({"type": "object"}),
+        };
+        for (name, proxy) in
+            create_mcp_tools_from_cached("lifetime", &[definition], proxy_manager.clone())
+        {
+            surviving_clone.register(name, proxy).await;
+        }
+
         surviving_clone
-            .tool_names()
+            .execute(
+                "mcp",
+                serde_json::json!({"action": "reload"}),
+                mcp_test_context(working_dir.path()),
+            )
             .await
-            .iter()
-            .any(|name| name == "mcp"),
-        "reload should preserve the MCP management tool"
-    );
+            .expect("MCP management should upgrade through the surviving registry clone");
+        let mut names = surviving_clone.tool_names().await;
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["mcp".to_string(), "mcp__ordinary__sentinel".to_string()],
+            "reload must remove only MCP proxies for {case} config"
+        );
+    }
     assert!(tools.upgrade().is_some());
 
     drop(surviving_clone);
@@ -1439,4 +1455,112 @@ fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
             "'{tool}' must bypass the tier gate or ambient cycles deadlock"
         );
     }
+}
+
+#[tokio::test]
+async fn unregister_mcp_tools_matches_server_identity_not_key_prefix() {
+    use crate::mcp::{McpManager, McpToolDef, create_mcp_tools_from_cached};
+
+    let registry = Registry::empty();
+    let manager = Arc::new(tokio::sync::RwLock::new(McpManager::new()));
+    let def = |name: &str| McpToolDef {
+        name: name.to_string(),
+        description: None,
+        input_schema: serde_json::json!({"type": "object"}),
+    };
+    // Server `a` is a key prefix of server `a__b`: `mcp__a__b__read` starts
+    // with `mcp__a__`, so prefix removal would take both servers down.
+    for (server, tool) in [("a", "read"), ("a__b", "read")] {
+        for (name, proxy) in create_mcp_tools_from_cached(server, &[def(tool)], manager.clone()) {
+            registry.register(name, proxy).await;
+        }
+    }
+    registry
+        .register("bash".to_string(), Arc::new(OperationalFailureTool))
+        .await;
+
+    let removed = registry.unregister_mcp_tools(Some("a")).await;
+    assert_eq!(removed, vec!["mcp__a__read".to_string()]);
+    let mut names = registry.tool_names().await;
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["bash".to_string(), "mcp__a__b__read".to_string()]
+    );
+
+    let mut removed = registry.unregister_mcp_tools(None).await;
+    removed.sort();
+    assert_eq!(removed, vec!["mcp__a__b__read".to_string()]);
+    assert_eq!(registry.tool_names().await, vec!["bash".to_string()]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mcp_disconnect_preserves_other_server_and_non_proxy_tools() {
+    use crate::mcp::{McpConfig, McpManager, McpServerConfig, create_mcp_tools};
+
+    let _env_lock = crate::storage::lock_test_env();
+    let home = tempfile::tempdir().unwrap();
+    let _home_guard = TestHomeGuard::new(home.path());
+    let manager = Arc::new(tokio::sync::RwLock::new(McpManager::with_config(
+        McpConfig::default(),
+    )));
+    let registry = Registry::empty();
+    registry
+        .register(
+            "mcp__ordinary__sentinel".to_string(),
+            Arc::new(OperationalFailureTool),
+        )
+        .await;
+    let config: McpServerConfig = serde_json::from_value(serde_json::json!({
+        "command": "sh",
+        "args": ["-c", r#"
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*)
+      result='{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"registry-test","version":"1"}}' ;;
+    *'"tools/list"'*)
+      result='{"tools":[{"name":"read","inputSchema":{"type":"object"}}]}' ;;
+    *'"ping"'*) result='{}' ;;
+    *) continue ;;
+  esac
+  printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" "$result"
+done
+"#],
+        "shared": false
+    }))
+    .unwrap();
+
+    let result = async {
+        for server in ["a", "a__b"] {
+            manager.read().await.connect(server, &config).await?;
+        }
+        for (name, proxy) in create_mcp_tools(manager.clone()).await {
+            registry.register(name, proxy).await;
+        }
+        mcp::McpManagementTool::new(manager.clone())
+            .with_registry(&registry)
+            .execute(
+                serde_json::json!({"action": "disconnect", "server": "a"}),
+                mcp_test_context(home.path()),
+            )
+            .await?;
+        let connected = manager.read().await.connected_servers().await;
+        Ok::<_, anyhow::Error>((connected, registry.tool_names().await))
+    }
+    .await;
+    manager.read().await.disconnect_all().await;
+
+    let (connected, mut names) = result.expect("connect and disconnect local MCP fixtures");
+    names.sort();
+    assert_eq!(connected, vec!["a__b".to_string()]);
+    assert_eq!(
+        names,
+        vec![
+            "mcp__a__b__read".to_string(),
+            "mcp__ordinary__sentinel".to_string(),
+        ],
+        "disconnect must remove only the selected server's proxy"
+    );
 }

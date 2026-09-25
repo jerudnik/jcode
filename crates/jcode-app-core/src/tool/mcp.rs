@@ -296,7 +296,7 @@ impl McpManagementTool {
                 if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
                     let mcp_tools = crate::mcp::create_mcp_tools(Arc::clone(&self.manager)).await;
                     for (name, tool) in mcp_tools {
-                        if name.starts_with(&format!("mcp__{}__", server_name)) {
+                        if tool.mcp_identity().map(|(s, _)| s) == Some(server_name.as_str()) {
                             registry.register(name, tool).await;
                         }
                     }
@@ -350,9 +350,7 @@ impl McpManagementTool {
 
         // Unregister tools for this server
         if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
-            let removed = registry
-                .unregister_prefix(&format!("mcp__{}__", server_name))
-                .await;
+            let removed = registry.unregister_mcp_tools(Some(&server_name)).await;
             crate::logging::event_info(
                 "MCP_LIFECYCLE",
                 vec![
@@ -377,7 +375,7 @@ impl McpManagementTool {
         if config.servers.is_empty() {
             // Unregister all existing MCP tools before reporting empty
             if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
-                registry.unregister_prefix("mcp__").await;
+                registry.unregister_mcp_tools(None).await;
             }
             return Ok(ToolOutput::new(
                 "No servers found in config.\n\n\
@@ -389,7 +387,7 @@ impl McpManagementTool {
 
         // Unregister all existing MCP server tools before reload
         if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
-            registry.unregister_prefix("mcp__").await;
+            registry.unregister_mcp_tools(None).await;
         }
 
         let mut manager = self.manager.write().await;
