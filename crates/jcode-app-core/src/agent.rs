@@ -290,6 +290,9 @@ pub struct Agent {
     /// exclusion hold at execution too, so a replayed or nested call cannot
     /// reach a server through a name the provider never saw.
     name_excluded_tools: std::collections::HashSet<String>,
+    /// The transport limit the locked snapshot was filtered with, so a route or
+    /// model switch can tell whether the snapshot is still valid.
+    locked_tool_name_limit: Option<jcode_provider_core::ToolNameLimit>,
     /// Override system prompt (used by ambient mode to inject a custom prompt)
     system_prompt_override: Option<String>,
     /// Whether memory features are enabled for this session
@@ -395,6 +398,7 @@ impl Agent {
             locked_tools: None,
             mcp_late_register_resolved: false,
             name_excluded_tools: std::collections::HashSet::new(),
+            locked_tool_name_limit: None,
             system_prompt_override: None,
             memory_enabled: crate::config::config().features.memory,
             rewind_undo_snapshot: None,

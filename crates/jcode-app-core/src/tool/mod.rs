@@ -66,6 +66,11 @@ pub(crate) use session_search::spawn_recent_index_warmup;
 struct SessionToolPolicy {
     allowed_tools: Option<HashSet<String>>,
     disabled_tools: HashSet<String>,
+    /// Names withheld from the session's active transport by the agent's
+    /// tool-name limit. Enforced here as well as in the agent so a nested
+    /// `batch` call, which executes through the registry directly, cannot
+    /// reach a tool the provider never saw.
+    name_excluded_tools: HashSet<String>,
 }
 
 static SESSION_TOOL_POLICIES: LazyLock<StdRwLock<HashMap<String, SessionToolPolicy>>> =
@@ -79,13 +84,31 @@ pub(crate) fn set_session_tool_policy(
     let mut policies = SESSION_TOOL_POLICIES
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let name_excluded_tools = policies
+        .get(session_id)
+        .map(|policy| policy.name_excluded_tools.clone())
+        .unwrap_or_default();
     policies.insert(
         session_id.to_string(),
         SessionToolPolicy {
             allowed_tools,
             disabled_tools,
+            name_excluded_tools,
         },
     );
+}
+
+/// Record the tool names the session's active transport cannot advertise.
+/// Replaces the previous set; the agent calls this whenever it rebuilds its
+/// tool snapshot.
+pub(crate) fn set_session_name_exclusions(session_id: &str, excluded: HashSet<String>) {
+    let mut policies = SESSION_TOOL_POLICIES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    policies
+        .entry(session_id.to_string())
+        .or_default()
+        .name_excluded_tools = excluded;
 }
 
 pub(crate) fn clear_session_tool_policy(session_id: &str) {
@@ -684,6 +707,13 @@ impl Registry {
             }
             if policy.disabled_tools.contains(resolved_name) {
                 return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved_name));
+            }
+            if policy.name_excluded_tools.contains(resolved_name) {
+                return Err(anyhow::anyhow!(
+                    "Tool '{}' is not advertised on this transport: its name exceeds the \
+                     provider's tool-name limit",
+                    resolved_name
+                ));
             }
         }
         // Ambient action tier gate: rank unattended action risk, unlike the

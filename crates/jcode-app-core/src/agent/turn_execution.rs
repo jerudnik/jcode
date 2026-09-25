@@ -533,7 +533,38 @@ impl Agent {
                 ],
             );
         }
+        crate::tool::set_session_name_exclusions(&self.session.id, excluded.clone());
         self.name_excluded_tools = excluded;
+        self.locked_tool_name_limit = Some(limit);
+    }
+
+    /// After a route or model switch, drop the locked snapshot when the new
+    /// transport's tool-name limit would change which tools are advertised.
+    /// A switch between transports that both accept every registered name
+    /// keeps the snapshot and its prompt cache.
+    pub(crate) fn invalidate_tool_snapshot_if_name_limit_changed(&mut self) {
+        let Some(previous) = self.locked_tool_name_limit else {
+            return;
+        };
+        let current = self.provider.capabilities().tool_name_limit;
+        if current == previous {
+            return;
+        }
+        let excluded_would_change = !self.name_excluded_tools.is_empty()
+            || self
+                .locked_tools
+                .as_ref()
+                .is_some_and(|tools| tools.iter().any(|tool| !current.accepts(&tool.name)));
+        if !excluded_would_change {
+            self.locked_tool_name_limit = Some(current);
+            return;
+        }
+        logging::info(&format!(
+            "Tool-name limit changed ({} -> {} chars) with affected tools; rebuilding the tool snapshot",
+            previous.max_len, current.max_len
+        ));
+        self.locked_tools = None;
+        self.cache_tracker.reset();
     }
 
     /// Tool names withheld from the active transport by
@@ -571,6 +602,9 @@ impl Agent {
             name.starts_with("mcp__")
                 && allowed.map(|set| set.contains(name)).unwrap_or(true)
                 && !self.disabled_tools.contains(name)
+                // A name withheld by the transport limit is absent from the
+                // snapshot on purpose; it must not consume the one-shot latch.
+                && !self.name_excluded_tools.contains(name)
                 && !locked.iter().any(|t| &t.name == name)
         })
     }
@@ -586,6 +620,11 @@ impl Agent {
             .into_iter()
             .filter(|(key, _, _)| visible.contains(key))
             .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mcp_late_register_latched(&self) -> bool {
+        self.mcp_late_register_resolved
     }
 
     pub async fn tool_names(&self) -> Vec<String> {
