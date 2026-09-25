@@ -209,7 +209,10 @@ async fn model_switch_rebuilds_snapshot_only_when_the_limit_changes_the_tool_set
         .into_iter()
         .map(|def| def.name)
         .collect();
-    assert!(names.contains(&long_key), "wide transport advertises the 100-char name");
+    assert!(
+        names.contains(&long_key),
+        "wide transport advertises the 100-char name"
+    );
 
     // Switching to a 64-limit transport must drop the stale snapshot so the
     // next request does not carry a name the new provider rejects.
@@ -222,7 +225,10 @@ async fn model_switch_rebuilds_snapshot_only_when_the_limit_changes_the_tool_set
         .into_iter()
         .map(|def| def.name)
         .collect();
-    assert!(!names.contains(&long_key), "narrow transport withholds the 100-char name");
+    assert!(
+        !names.contains(&long_key),
+        "narrow transport withholds the 100-char name"
+    );
     assert!(agent.validate_tool_allowed(&long_key).is_err());
 
     // And back: the exclusion is lifted rather than left stale.
