@@ -1216,13 +1216,20 @@ impl Registry {
         tools.remove(name)
     }
 
-    /// Unregister all tools matching a prefix
-    pub async fn unregister_prefix(&self, prefix: &str) -> Vec<String> {
+    /// Unregister every MCP proxy tool, or only those belonging to `server`.
+    /// Membership is decided by `Tool::mcp_identity`, not by the
+    /// `mcp__{server}__` key prefix: a server named `a` must not take the
+    /// tools of a server named `a__b` with it.
+    pub async fn unregister_mcp_tools(&self, server: Option<&str>) -> Vec<String> {
         let mut tools = self.tools.write().await;
         let to_remove: Vec<String> = tools
-            .keys()
-            .filter(|k| k.starts_with(prefix))
-            .cloned()
+            .iter()
+            .filter(|(_, tool)| match (tool.mcp_identity(), server) {
+                (Some((owner, _)), Some(server)) => owner == server,
+                (Some(_), None) => true,
+                (None, _) => false,
+            })
+            .map(|(name, _)| name.clone())
             .collect();
         for name in &to_remove {
             tools.remove(name);
