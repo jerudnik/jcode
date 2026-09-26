@@ -1399,6 +1399,9 @@ pub struct App {
     // CPU animating screens nobody is looking at. Defaults to true because not
     // every terminal reports focus events.
     client_focused: bool,
+    // Terminal modes enabled at startup, re-armed on FocusGained via
+    // `reapply_terminal_modes` (never focus reporting itself).
+    terminal_modes: super::TerminalModeState,
     // Optional client runtime memory logger for low-overhead attribution journaling.
     runtime_memory_log: Option<RuntimeMemoryLogController>,
     // Once-per-idle-period retained-heap trim state (see idle_heap_release.rs).

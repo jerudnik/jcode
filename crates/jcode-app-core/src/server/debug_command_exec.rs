@@ -268,18 +268,9 @@ pub(super) async fn execute_debug_command(
 
     if trimmed == "mcp" || trimmed == "mcp:servers" {
         let agent = agent.lock().await;
-        let tool_names = agent.tool_names().await;
         let mut connected: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for name in tool_names {
-            if let Some(rest) = name.strip_prefix("mcp__") {
-                let mut parts = rest.splitn(2, "__");
-                if let (Some(server), Some(tool)) = (parts.next(), parts.next()) {
-                    connected
-                        .entry(server.to_string())
-                        .or_default()
-                        .push(tool.to_string());
-                }
-            }
+        for (_, server, tool) in agent.mcp_tool_identities().await {
+            connected.entry(server).or_default().push(tool);
         }
         for tools in connected.values_mut() {
             tools.sort();

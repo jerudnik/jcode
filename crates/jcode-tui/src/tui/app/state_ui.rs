@@ -86,6 +86,26 @@ impl App {
         }
     }
 
+    /// Record which optional terminal modes startup enabled, so focus events
+    /// can re-arm exactly those.
+    pub fn set_terminal_modes(&mut self, modes: crate::tui::TerminalModeState) {
+        self.terminal_modes = modes;
+    }
+
+    /// Re-arm bracketed paste, mouse capture and kitty flags after the
+    /// terminal regained focus. See `reapply_terminal_modes_to` for why focus
+    /// reporting is never re-emitted here.
+    pub(super) fn reapply_terminal_modes(&mut self) {
+        let modes = self.terminal_modes;
+        let result = crate::tui::reapply_terminal_modes_to(&mut std::io::stdout(), modes);
+        crate::logging::info(&format!(
+            "EVENT event=TUI_TERMINAL_MODES phase=reapplied trigger=focus_gained mouse_capture={} keyboard_enhanced={} ok={}",
+            modes.mouse_capture,
+            modes.keyboard_enhanced,
+            result.is_ok()
+        ));
+    }
+
     pub(super) fn note_client_focus(&mut self, force: bool) {
         let Some(session_id) = self.active_client_session_id() else {
             return;

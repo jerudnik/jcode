@@ -820,9 +820,11 @@ impl Agent {
                         let _ = event_tx.send(ServerEvent::MessageEnd);
                     }
                     StreamEvent::SessionId(sid) => {
+                        // This is a provider resume handle, not the local session ID.
+                        // Forwarding it as ServerEvent::SessionId would rebind the
+                        // client's reconnect target away from its stored transcript.
                         self.provider_session_id = Some(sid.clone());
-                        self.session.provider_session_id = Some(sid.clone());
-                        let _ = event_tx.send(ServerEvent::SessionId { session_id: sid });
+                        self.session.provider_session_id = Some(sid);
                     }
                     StreamEvent::OpenAIReasoning {
                         id,

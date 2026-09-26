@@ -46,6 +46,10 @@ impl Tool for McpTool {
         self.tool_def.input_schema.clone()
     }
 
+    fn mcp_identity(&self) -> Option<(&str, &str)> {
+        Some((&self.server_name, &self.tool_def.name))
+    }
+
     async fn execute(&self, input: Value, _ctx: ToolContext) -> Result<ToolOutput> {
         let input = if input.is_null() {
             Value::Object(serde_json::Map::new())

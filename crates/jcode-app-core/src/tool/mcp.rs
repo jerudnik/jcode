@@ -25,7 +25,7 @@ struct McpToolInput {
 
 pub struct McpManagementTool {
     manager: Arc<RwLock<McpManager>>,
-    registry: Option<crate::tool::Registry>,
+    registry: Option<crate::tool::WeakRegistry>,
 }
 
 impl McpManagementTool {
@@ -36,8 +36,11 @@ impl McpManagementTool {
         }
     }
 
-    pub fn with_registry(mut self, registry: crate::tool::Registry) -> Self {
-        self.registry = Some(registry);
+    /// Attach the registry the tool should mutate when servers connect or
+    /// disconnect. Holds a non-owning handle so a tool stored inside the
+    /// registry does not keep it alive.
+    pub fn with_registry(mut self, registry: &crate::tool::Registry) -> Self {
+        self.registry = Some(registry.downgrade());
         self
     }
 }
@@ -199,6 +202,21 @@ impl McpManagementTool {
             output.push('\n');
         }
 
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            let ambiguous = registry.mcp_ambiguous_keys().await;
+            if !ambiguous.is_empty() {
+                output.push_str("Refused ambiguous tool names (rename one server so `mcp__{server}__{tool}` stays unique):\n");
+                for (name, claimants) in &ambiguous {
+                    let listed: Vec<String> = claimants
+                        .iter()
+                        .map(|(server, tool)| format!("{server}/{tool}"))
+                        .collect();
+                    output.push_str(&format!("  - {}: claimed by {}\n", name, listed.join(", ")));
+                }
+                output.push('\n');
+            }
+        }
+
         if !configured.is_empty() {
             output.push_str("Configured but not connected:\n");
             for (name, enabled) in &configured {
@@ -238,6 +256,8 @@ impl McpManagementTool {
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             }
         } else {
             let manager = self.manager.read().await;
@@ -288,10 +308,10 @@ impl McpManagementTool {
                 drop(manager);
 
                 // Register the new tools in the registry
-                if let Some(ref registry) = self.registry {
+                if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
                     let mcp_tools = crate::mcp::create_mcp_tools(Arc::clone(&self.manager)).await;
                     for (name, tool) in mcp_tools {
-                        if name.starts_with(&format!("mcp__{}__", server_name)) {
+                        if tool.mcp_identity().map(|(s, _)| s) == Some(server_name.as_str()) {
                             registry.register(name, tool).await;
                         }
                     }
@@ -344,10 +364,8 @@ impl McpManagementTool {
         drop(manager);
 
         // Unregister tools for this server
-        if let Some(ref registry) = self.registry {
-            let removed = registry
-                .unregister_prefix(&format!("mcp__{}__", server_name))
-                .await;
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            let removed = registry.unregister_mcp_tools(Some(&server_name)).await;
             crate::logging::event_info(
                 "MCP_LIFECYCLE",
                 vec![
@@ -371,8 +389,8 @@ impl McpManagementTool {
 
         if config.servers.is_empty() {
             // Unregister all existing MCP tools before reporting empty
-            if let Some(ref registry) = self.registry {
-                registry.unregister_prefix("mcp__").await;
+            if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+                registry.unregister_mcp_tools(None).await;
             }
             return Ok(ToolOutput::new(
                 "No servers found in config.\n\n\
@@ -383,8 +401,8 @@ impl McpManagementTool {
         }
 
         // Unregister all existing MCP server tools before reload
-        if let Some(ref registry) = self.registry {
-            registry.unregister_prefix("mcp__").await;
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            registry.unregister_mcp_tools(None).await;
         }
 
         let mut manager = self.manager.write().await;
@@ -395,7 +413,7 @@ impl McpManagementTool {
         drop(manager);
 
         // Re-register tools from fresh connections
-        if let Some(ref registry) = self.registry {
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
             let mcp_tools = crate::mcp::create_mcp_tools(Arc::clone(&self.manager)).await;
             for (name, tool) in mcp_tools {
                 registry.register(name, tool).await;
@@ -586,6 +604,8 @@ mod tests {
                 url: None,
                 enabled: Some(false),
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = Arc::new(RwLock::new(McpManager::with_config(config)));

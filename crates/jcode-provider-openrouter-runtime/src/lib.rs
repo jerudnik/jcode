@@ -1295,6 +1295,23 @@ impl OpenRouterProvider {
         Ok(normalized)
     }
 
+    /// Tool-name limit per OpenAI-compatible profile. Kimi was probed at 128
+    /// accepted / 129 rejected. Z.AI and xAI accepted every sampled name,
+    /// including invalid ones, so they carry no rejection evidence; 128 keeps
+    /// them aligned with the validating peers rather than claiming more.
+    /// Every other profile inherits the documented OpenAI limit of 64 until
+    /// probed.
+    pub(crate) fn tool_name_limit_for_profile(
+        profile_id: Option<&str>,
+    ) -> jcode_provider_core::ToolNameLimit {
+        match profile_id {
+            Some("kimi") | Some("zai") | Some("grok-direct") => {
+                jcode_provider_core::ToolNameLimit::PROBED_128
+            }
+            _ => jcode_provider_core::ToolNameLimit::CONSERVATIVE,
+        }
+    }
+
     fn profile_rejects_image_input(profile_id: Option<&str>) -> bool {
         matches!(profile_id, Some(id) if id.eq_ignore_ascii_case("deepseek") || id.eq_ignore_ascii_case("zai"))
     }

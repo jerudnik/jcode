@@ -585,7 +585,7 @@ pub(super) async fn send_history(
         available_models,
         available_model_routes,
         skills,
-        tool_names,
+        mcp_tool_identities,
         upstream_provider,
         resolved_credential,
         connection_type,
@@ -614,7 +614,7 @@ pub(super) async fn send_history(
         let image_render_ms = 0;
 
         let tool_names_start = Instant::now();
-        let tool_names = agent_guard.tool_names().await;
+        let mcp_tool_identities = agent_guard.mcp_tool_identities().await;
         let tool_names_ms = tool_names_start.elapsed().as_millis();
 
         let (available_models, available_models_ms) = if include_model_catalog {
@@ -660,7 +660,7 @@ pub(super) async fn send_history(
             available_models,
             available_model_routes,
             skills,
-            tool_names,
+            mcp_tool_identities,
             agent_guard.last_upstream_provider(),
             agent_guard.active_resolved_credential(),
             agent_guard.last_connection_type(),
@@ -685,13 +685,11 @@ pub(super) async fn send_history(
     let side_panel = crate::side_panel::snapshot_for_session(session_id).unwrap_or_default();
     let side_panel_ms = side_panel_start.elapsed().as_millis();
 
+    // Attribute by identity, not by parsing the composed key: a server named
+    // `a__b` must count under `a__b`, not `a`.
     let mut mcp_map: BTreeMap<String, usize> = BTreeMap::new();
-    for name in &tool_names {
-        if let Some(rest) = name.strip_prefix("mcp__")
-            && let Some((server, _tool)) = rest.split_once("__")
-        {
-            *mcp_map.entry(server.to_string()).or_default() += 1;
-        }
+    for (_, server, _) in &mcp_tool_identities {
+        *mcp_map.entry(server.clone()).or_default() += 1;
     }
     let mcp_servers: Vec<String> = mcp_map
         .into_iter()
