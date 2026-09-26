@@ -26,7 +26,9 @@ sources fail under the same rule.
 
 ## APM-managed MCP servers
 
-Jcode loads MCP config from these project-local files, in order:
+Jcode loads MCP config from these project-local files, in order, resolved
+against the session's working directory (interactive sessions) or the process
+working directory after `-C` (headless `jcode run`):
 
 1. `.apm/mcp.json`
 2. `.agents/mcp.json`

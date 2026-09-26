@@ -487,8 +487,9 @@ impl McpConfig {
         merged
     }
 
-    /// Load from default locations (merges jcode global + local, local overrides),
-    /// resolving project-local config against the process working directory.
+    /// Load the global locations only (`~/.jcode/mcp.json` and the Claude Code
+    /// user config). Project-local files are skipped: callers that know the
+    /// project directory use [`Self::load_for_dir`] with `Some(dir)`.
     pub fn load() -> Self {
         Self::load_for_dir(None)
     }

@@ -92,14 +92,21 @@ pub struct McpManager {
 impl McpManager {
     /// Create a new manager in owned in-process mode (used by tests and local harnesses).
     pub fn new() -> Self {
+        Self::new_for_dir(None)
+    }
+
+    /// Owned in-process manager that resolves project-local MCP config against
+    /// `project_dir` (headless `jcode run` in a project directory). `None`
+    /// loads only the global config, like [`Self::new`].
+    pub fn new_for_dir(project_dir: Option<std::path::PathBuf>) -> Self {
         Self {
             pool: None,
             pool_handles: RwLock::new(HashMap::new()),
             owned_clients: RwLock::new(HashMap::new()),
             died_cooldown: RwLock::new(HashMap::new()),
-            config: McpConfig::load(),
+            config: McpConfig::load_for_dir(project_dir.as_deref()),
             session_id: "owned".to_string(),
-            project_dir: None,
+            project_dir,
             activity: jcode_core::activity::noop_activity_authority(),
         }
     }
