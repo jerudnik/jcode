@@ -1064,24 +1064,17 @@ pub async fn run_single_message_command(
         super::provider_init::init_provider_for_validation(choice, model).await?
     };
     let registry = crate::tool::Registry::new(provider.clone()).await;
-    // Load MCP servers from ~/.jcode/mcp.json so headless `jcode run` has the
-    // same `mcp__*` tools as interactive/server sessions. This is non-blocking:
-    // `register_mcp_tools` advertises cached tool schemas synchronously (so the
-    // first locked tool snapshot already contains MCP tools, for zero
-    // prompt-cache miss) and connects in the background (connect-on-first-call).
-    // For a short single-message run, startup latency is unchanged.
-    // (#390, #206 Phase 2)
+    // Load MCP servers from ~/.jcode/mcp.json plus the project-local files
+    // (.jcode/mcp.json, .mcp.json, ...) resolved against the process working
+    // directory, which `-C` has already applied, so headless `jcode run` has
+    // the same `mcp__*` tools as an interactive session opened in that
+    // directory. This is non-blocking: `register_mcp_tools_for_dir` advertises
+    // cached tool schemas synchronously (so the first locked tool snapshot
+    // already contains MCP tools, for zero prompt-cache miss) and connects in
+    // the background (connect-on-first-call). For a short single-message run,
+    // startup latency is unchanged. (#390, #206 Phase 2)
     if run_command_mcp_enabled() {
-        registry.register_mcp_tools(None, None, None).await;
-        // Cold-cache gap: when a configured MCP server has no cached schema yet
-        // (first ever use, or reconfigured), advertise-early registers nothing
-        // for it, and a single-turn `jcode run` locks its tool snapshot before
-        // the background connection finishes, so the model would never see those
-        // tools. Long-lived sessions recover on a later turn, but `jcode run`
-        // has no later turn. So, only when the cache is cold for some configured
-        // server, briefly wait for the first connection to register tools before
-        // the agent runs. Warm runs skip this entirely and stay instant. (#390)
-        wait_for_cold_cache_mcp_tools(&registry).await;
+        register_run_command_mcp_tools(&registry).await;
     }
     let mut agent = crate::agent::Agent::new(provider.clone(), registry);
     restore_agent_session_if_requested(&mut agent, resume_session)?;
@@ -1103,6 +1096,26 @@ pub async fn run_single_message_command(
     }
 
     Ok(())
+}
+
+/// Register MCP tools for a headless `jcode run`, resolving project-local
+/// config against the process working directory (`-C` has already been
+/// applied), then bridge the cold-cache gap.
+///
+/// Cold-cache gap: when a configured MCP server has no cached schema yet
+/// (first ever use, or reconfigured), advertise-early registers nothing for
+/// it, and a single-turn `jcode run` locks its tool snapshot before the
+/// background connection finishes, so the model would never see those tools.
+/// Long-lived sessions recover on a later turn, but `jcode run` has no later
+/// turn. So, only when the cache is cold for some configured server, briefly
+/// wait for the first connection to register tools before the agent runs.
+/// Warm runs skip this entirely and stay instant. (#390)
+pub(super) async fn register_run_command_mcp_tools(registry: &crate::tool::Registry) {
+    let project_dir = std::env::current_dir().ok();
+    registry
+        .register_mcp_tools_for_dir(None, None, None, project_dir.clone())
+        .await;
+    wait_for_cold_cache_mcp_tools(registry, project_dir.as_deref()).await;
 }
 
 pub(super) fn run_command_auto_poke_enabled() -> bool {
@@ -1142,9 +1155,10 @@ fn run_command_mcp_cold_wait() -> std::time::Duration {
 /// Returns the set of MCP servers configured for this run that have no usable
 /// cached schema yet (cold cache). Advertise-early can only pre-register tools
 /// for servers whose schemas are cached, so these are the servers whose tools
-/// would otherwise miss the single-turn snapshot.
-fn cold_cache_mcp_servers() -> Vec<String> {
-    let config = crate::mcp::McpConfig::load();
+/// would otherwise miss the single-turn snapshot. `project_dir` must match the
+/// directory the registry loaded, so project-local servers are counted too.
+fn cold_cache_mcp_servers(project_dir: Option<&std::path::Path>) -> Vec<String> {
+    let config = crate::mcp::McpConfig::load_for_dir(project_dir);
     if config.servers.is_empty() {
         return Vec::new();
     }
@@ -1162,8 +1176,11 @@ fn cold_cache_mcp_servers() -> Vec<String> {
 /// (or the budget elapses) so the single turn's locked tool snapshot includes
 /// them. Warm caches return immediately because `cold_cache_mcp_servers` is
 /// empty. (#390)
-async fn wait_for_cold_cache_mcp_tools(registry: &crate::tool::Registry) {
-    let cold_servers = cold_cache_mcp_servers();
+async fn wait_for_cold_cache_mcp_tools(
+    registry: &crate::tool::Registry,
+    project_dir: Option<&std::path::Path>,
+) {
+    let cold_servers = cold_cache_mcp_servers(project_dir);
     if cold_servers.is_empty() {
         return;
     }
@@ -1178,10 +1195,13 @@ async fn wait_for_cold_cache_mcp_tools(registry: &crate::tool::Registry) {
     ));
     let deadline = std::time::Instant::now() + budget;
     loop {
-        let names = registry.tool_names().await;
+        // Match by identity, not key prefix: server `a` must not be counted
+        // as registered because `a__b` registered `mcp__a__b__read`.
+        let identities = registry.mcp_tool_identities().await;
         let covered = cold_servers.iter().all(|server| {
-            let prefix = format!("mcp__{}__", server);
-            names.iter().any(|name| name.starts_with(&prefix))
+            identities
+                .iter()
+                .any(|(_, registered, _)| registered == server)
         });
         if covered {
             crate::logging::info(

@@ -86,6 +86,11 @@ the ambient-roots check, therefore run both locally and in hosted CI.
 
 - Python-based recipes need Python 3.11+; `pre-pr` pins Python (and vale)
   through `nix shell`, so a stale system interpreter cannot false-fail it.
+- Preflight scopes its blocking rustfmt and clippy gates to files this branch
+  changed relative to the remote `main` it discovers from Git (the remote that
+  local `main` tracks, then any remote with a `main`). Set `PREFLIGHT_BASE` to
+  compare against something else; a stale local `main` is used only when no
+  remote `main` exists.
 - The recipe runs preflight with `--no-branch-handoff`: the branch-handoff
   gate inventories every local branch and would block PR creation on other
   sessions' in-progress work. Run plain `scripts/preflight.sh` when you want

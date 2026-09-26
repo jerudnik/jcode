@@ -143,6 +143,6 @@ permission. Consequences:
 - Non-ASCII server or tool names: bytes and characters diverge; the limits
   above are in characters and were only probed in ASCII. Treat a non-ASCII
   name as outside the charset and therefore excluded per section 3.
-- `jcode run` ignoring project-local MCP config is a separate defect
-  (`register_mcp_tools(None, ..)` passes no project directory to
-  `McpConfig::load_for_dir`).
+- Headless `jcode run` now resolves project-local MCP config against the
+  process working directory (`register_run_command_mcp_tools`), matching
+  interactive sessions.

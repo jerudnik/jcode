@@ -1060,7 +1060,9 @@ impl Registry {
                 ),
             ))
         } else {
-            Arc::new(RwLock::new(McpManager::new()))
+            // Owned managers (headless `jcode run`, harnesses) still honour the
+            // project directory so project-local MCP config is loaded.
+            Arc::new(RwLock::new(McpManager::new_for_dir(working_dir)))
         };
 
         // Register MCP management tool immediately (with registry for dynamic tool registration)
