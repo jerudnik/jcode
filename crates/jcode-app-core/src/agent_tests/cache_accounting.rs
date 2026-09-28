@@ -47,6 +47,9 @@ async fn stored_prompt_tokens_none_for_unknown_provider_with_cache_counters() {
             );
             assert_eq!(usage.cache_read_input_tokens, read);
             assert_eq!(usage.cache_creation_input_tokens, write);
+            let persisted = serde_json::to_value(usage).unwrap();
+            assert_eq!(persisted["provider"], agent.provider_name());
+            assert_eq!(persisted["model"], agent.provider_model());
         }
     }
 }

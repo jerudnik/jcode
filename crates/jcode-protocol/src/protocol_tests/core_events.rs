@@ -591,6 +591,25 @@ fn test_token_usage_totals_cache_prompt_is_optional_on_the_wire() -> Result<()> 
 }
 
 #[test]
+fn test_token_usage_totals_pricing_buckets_optional_on_the_wire() -> Result<()> {
+    let mut value = serde_json::to_value(TokenUsageTotals::default())?;
+    assert!(value.get("pricing_buckets").is_none());
+    value["pricing_buckets"] = serde_json::json!([{
+        "provider": "OpenAI", "model": "gpt-4.1", "messages_with_token_usage": 1,
+        "input_tokens": 10_000, "output_tokens": 100,
+        "cache_read_input_tokens": 6_000, "cache_creation_input_tokens": 2_000,
+    }]);
+    let decoded: TokenUsageTotals = serde_json::from_value(value)?;
+    let restored = serde_json::to_value(decoded)?;
+    assert_eq!(restored["pricing_buckets"][0]["model"], "gpt-4.1");
+    assert_eq!(
+        restored["pricing_buckets"][0]["cache_read_input_tokens"],
+        6_000
+    );
+    Ok(())
+}
+
+#[test]
 fn test_token_usage_totals_read_complete_defaults_true_on_old_wire() -> Result<()> {
     let legacy = serde_json::json!({
         "messages_with_token_usage": 1,

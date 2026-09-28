@@ -34,6 +34,19 @@ When opening in a new terminal:
 - If terminal launch is unavailable, the UI prints manual `jcode --resume <id>` commands.
 - The picker remains open after launching and clears the current multi-selection so more sessions can be opened.
 
+## Restored usage and cost
+
+When a remote client restores history, cost estimates use the provider and
+model recorded with each request. Totals are grouped by that pair before pricing,
+so switching providers does not mix incompatible cache counters or model rates.
+If any usage record lacks either identity, the client retains the legacy estimate
+from aggregate counters and the currently active model.
+
+These are estimates, not billing records. Current prices, service tier,
+cache-retention preference, and the active route's billing mode still apply.
+Session cache-read ratios show unknown when any contributing cache report omitted
+its read count. Explicit zero remains a known zero.
+
 ## Saved sessions
 
 `/save [label]` bookmarks the current session so it appears in the saved section of the picker. `/unsave` removes that bookmark.

@@ -1128,7 +1128,7 @@ fn push_cache_baseline(lines: &mut Vec<String>, label: &str, baseline: Option<&K
 pub(super) const INCOMPLETE_CACHE_READ_RATIO: &str = "unknown (read accounting incomplete)";
 
 fn format_cache_stats(app: &App) -> String {
-    let remote_usage = app.remote_token_usage_totals;
+    let remote_usage = app.remote_token_usage_totals.as_ref();
     let remote_cache_reported = remote_usage
         .map(|usage| usage.cache_reported_input_tokens)
         .unwrap_or(0);

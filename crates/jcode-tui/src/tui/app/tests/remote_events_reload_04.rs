@@ -1751,6 +1751,55 @@ fn test_resumed_session_seeds_cost_from_history_token_totals() {
 }
 
 #[test]
+fn test_resumed_session_seeds_cost_from_pricing_buckets_per_model() {
+    let _guard = super::test_support::lock_test_env();
+    crate::provider::anthropic::set_cache_ttl_1h(true);
+    let mut openai = cache_accounting_openai_app();
+    openai.remote_provider_model = Some("gpt-4.1".into());
+    openai.accrue_remote_call_cost(10_000, 100, 6_000, 2_000);
+    let openai_cost = openai.cost.total_cost;
+    let mut anthropic = cache_accounting_openai_app();
+    anthropic.remote_provider_name = Some("Anthropic".into());
+    anthropic.remote_provider_model = Some("claude-sonnet-4-6".into());
+    anthropic.accrue_remote_call_cost(1_000, 100, 7_000, 2_000);
+    let anthropic_cost = anthropic.cost.total_cost;
+    let expected = openai_cost + anthropic_cost;
+    let totals: crate::protocol::TokenUsageTotals = serde_json::from_value(serde_json::json!({
+        "messages_with_token_usage": 2, "input_tokens": 11_000, "output_tokens": 200,
+        "cache_reported_input_tokens": 11_000, "cache_prompt_tokens": 20_000,
+        "cache_read_input_tokens": 13_000, "cache_creation_input_tokens": 4_000,
+        "pricing_buckets": [
+            {"provider": "OpenAI", "model": "gpt-4.1", "messages_with_token_usage": 1,
+             "input_tokens": 10_000, "output_tokens": 100,
+             "cache_read_input_tokens": 6_000, "cache_creation_input_tokens": 2_000},
+            {"provider": "Anthropic", "model": "claude-sonnet-4-6", "messages_with_token_usage": 1,
+             "input_tokens": 1_000, "output_tokens": 100,
+             "cache_read_input_tokens": 7_000, "cache_creation_input_tokens": 2_000}
+        ]
+    }))
+    .unwrap();
+    let mut app = cache_accounting_openai_app();
+    app.accrue_remote_call_cost(10_000, 100, 6_000, 2_000);
+    let next_call = app.cost.total_cost;
+    app.cost.total_cost = 0.0;
+    app.seed_cost_from_history_totals(&totals);
+    assert!(
+        (app.cost.total_cost - expected).abs() < 1e-6,
+        "{} != {expected}",
+        app.cost.total_cost
+    );
+    app.seed_cost_from_history_totals(&totals);
+    assert!((app.cost.total_cost - expected).abs() < 1e-6);
+    // Historical lookup must not replace the active route's pricing memo.
+    app.accrue_remote_call_cost(10_000, 100, 6_000, 2_000);
+    assert!((app.cost.total_cost - expected - next_call).abs() < 1e-6);
+    app.remote_resolved_credential = Some(jcode_provider_core::ResolvedCredential::Oauth);
+    app.cost.total_cost = 0.0;
+    app.seed_cost_from_history_totals(&totals);
+    assert_eq!(app.cost.total_cost, 0.0);
+}
+
+#[test]
 fn test_remote_fast_mode_tier_bills_premium_rates_and_reprices_on_toggle() {
     // `/fast on` (priority tier) bills premium per-token rates on Opus 4.6
     // ($30/$150 vs $5/$25). The pricing memo key includes the tier so toggling

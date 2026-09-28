@@ -78,8 +78,22 @@ pub struct SessionActivitySnapshot {
     pub current_tool_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PricingBucketTotals {
+    pub provider: String,
+    pub model: String,
+    pub messages_with_token_usage: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_input_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TokenUsageTotals {
+    /// None if any usage record lacks its original provider or model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing_buckets: Option<Vec<PricingBucketTotals>>,
     /// False when a contributing cache report omitted its read count.
     /// Old servers omitted this field and retain their previous display behavior.
     #[serde(default = "default_cache_read_complete")]
@@ -106,6 +120,7 @@ fn default_cache_read_complete() -> bool {
 impl Default for TokenUsageTotals {
     fn default() -> Self {
         Self {
+            pricing_buckets: None,
             cache_read_complete: true,
             cache_prompt_tokens: None,
             messages_with_token_usage: 0,

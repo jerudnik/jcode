@@ -29,7 +29,7 @@ fn optional_token_usage_totals(totals: TokenUsageTotals) -> Option<TokenUsageTot
     (totals.messages_with_token_usage > 0).then_some(totals)
 }
 
-fn optional_total_tokens(totals: TokenUsageTotals) -> Option<(u64, u64)> {
+fn optional_total_tokens(totals: &TokenUsageTotals) -> Option<(u64, u64)> {
     (totals.messages_with_token_usage > 0).then_some((totals.input_tokens, totals.output_tokens))
 }
 
@@ -549,7 +549,7 @@ async fn send_history_from_persisted_session(
         available_model_routes: Vec::new(),
         mcp_servers: Vec::new(),
         skills: Vec::new(),
-        total_tokens: optional_total_tokens(token_usage_totals),
+        total_tokens: optional_total_tokens(&token_usage_totals),
         token_usage_totals: optional_token_usage_totals(token_usage_totals),
         all_sessions,
         client_count: Some(current_client_count),
@@ -758,7 +758,7 @@ async fn send_history_with_guard(
         available_model_routes,
         mcp_servers,
         skills,
-        total_tokens: optional_total_tokens(token_usage_totals),
+        total_tokens: optional_total_tokens(&token_usage_totals),
         token_usage_totals: optional_token_usage_totals(token_usage_totals),
         all_sessions,
         client_count: Some(current_client_count),

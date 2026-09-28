@@ -337,20 +337,82 @@ impl App {
         &mut self,
         totals: &crate::protocol::TokenUsageTotals,
     ) {
-        if totals.input_tokens == 0 && totals.output_tokens == 0 {
+        if totals.pricing_buckets.is_none() && totals.input_tokens == 0 && totals.output_tokens == 0
+        {
             return;
         }
         let Some(pricing) = self.resolve_remote_cost_pricing() else {
             return;
         };
-        let cost = pricing.cost_for_usage(
-            totals.input_tokens,
-            totals.output_tokens,
-            totals.cache_read_input_tokens,
-            totals.cache_creation_input_tokens,
-        );
+        // Billing mode, rates, service tier and cache TTL use today's settings.
+        // Historical credential/tier/TTL choices were not persisted.
+        let cost: f32 = if let Some(buckets) = &totals.pricing_buckets {
+            buckets
+                .iter()
+                .map(|bucket| {
+                    self.pricing_for_provider_model(&bucket.provider, &bucket.model)
+                        .cost_for_usage(
+                            bucket.input_tokens,
+                            bucket.output_tokens,
+                            bucket.cache_read_input_tokens,
+                            bucket.cache_creation_input_tokens,
+                        )
+                })
+                .sum()
+        } else {
+            pricing.cost_for_usage(
+                totals.input_tokens,
+                totals.output_tokens,
+                totals.cache_read_input_tokens,
+                totals.cache_creation_input_tokens,
+            )
+        };
         if cost.is_finite() {
             self.cost.total_cost = cost;
+        }
+    }
+
+    /// Historical lookup must not overwrite the active model's pricing memo.
+    fn pricing_for_provider_model(&self, provider: &str, model: &str) -> ResolvedTokenPricing {
+        let provider = provider.to_lowercase();
+        let is_anthropic = provider.contains("anthropic") || provider.contains("claude");
+        let is_openai = provider.contains("openai");
+        let source_key = if is_anthropic {
+            "claude:api-key".to_string()
+        } else if is_openai {
+            "openai:api-key".to_string()
+        } else {
+            crate::provider_activity::source_key_for_provider_label(&provider, None)
+        };
+        let estimate = crate::provider::pricing::metered_pricing_for_source_with_tier(
+            &source_key,
+            model,
+            self.active_service_tier_for_pricing().as_deref(),
+        );
+        let per_mtok = |micros: Option<u64>| micros.map(|m| m as f32 / 1_000_000.0);
+        ResolvedTokenPricing {
+            prompt_price: per_mtok(
+                estimate
+                    .as_ref()
+                    .and_then(|p| p.input_price_per_mtok_micros),
+            )
+            .unwrap_or(15.0),
+            completion_price: per_mtok(
+                estimate
+                    .as_ref()
+                    .and_then(|p| p.output_price_per_mtok_micros),
+            )
+            .unwrap_or(60.0),
+            cache_read_price: per_mtok(
+                estimate
+                    .as_ref()
+                    .and_then(|p| p.cache_read_price_per_mtok_micros),
+            ),
+            is_anthropic,
+            is_openai,
+            accounting_mode: cache_accounting_mode(&provider),
+            openai_cache_write_premium: is_openai
+                && crate::provider::openai::uses_prompt_cache_options(model),
         }
     }
 
