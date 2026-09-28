@@ -49,17 +49,6 @@ miss alarm is correctly suppressed (`app.rs`, explicit-read guard). Decide
 whether the session ratio should also read `unknown` when any contributing
 request lacked a read count.
 
-## 4. Compaction keeps a name heuristic for third-party providers
-
-`effective_context_tokens_from_usage` in `jcode-compaction-core` resolves
-OpenAI and Anthropic by name and falls back to
-`cache_creation > 0 || cache_read > input` for everyone else. OpenRouter
-and Gemini report reads as subsets, and an OpenRouter write count for an
-OpenAI-backed model would flip them to split accounting and over-count
-the budget. Custom `openai-compatible` profile names that do not contain
-`openai` take the same path. The contract asked for the fallback to label
-itself as legacy/unknown; today it is stored as a resolved `prompt_tokens`.
-
 ## Evidence
 
 - Review report: swarm session `session_lizard_1790602372078_3716387460964f05`,

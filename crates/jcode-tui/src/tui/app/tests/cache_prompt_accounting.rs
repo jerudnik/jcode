@@ -18,6 +18,19 @@ fn cache_accounting_stats(app: &mut App) -> String {
 }
 
 #[test]
+fn cost_for_usage_openrouter_writes_not_double_billed() {
+    let mut app = cache_accounting_openai_app();
+    app.remote_provider_name = Some("openrouter".to_string());
+    app.accrue_remote_call_cost(10_000, 100, 6_000, 2_000);
+    let expected = (2_000.0 * 10.0 + 6_000.0 + 2_000.0 * 10.0 + 100.0 * 40.0) / 1_000_000.0;
+    assert!(
+        (app.cost.total_cost - expected).abs() < 0.000001,
+        "{} != {expected}",
+        app.cost.total_cost
+    );
+}
+
+#[test]
 fn cache_accounting_openai_writes_are_subsets_live_and_completed() {
     let mut app = cache_accounting_openai_app();
     app.streaming.streaming_input_tokens = 10_000;
