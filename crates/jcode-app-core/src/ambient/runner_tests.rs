@@ -12,6 +12,9 @@ use std::time::Duration;
 
 use crate::storage::EnvVarGuard;
 
+#[path = "runner_live_delivery_tests.rs"]
+mod live_delivery;
+
 struct TestProvider;
 
 #[derive(Clone, Default)]

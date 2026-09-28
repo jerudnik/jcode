@@ -861,6 +861,7 @@ impl Request {
         matches!(
             self,
             Request::Ping { .. }
+                | Request::NotifySession { .. }
                 | Request::CommMessage { .. }
                 | Request::CommList { .. }
                 | Request::CommProposePlan { .. }
