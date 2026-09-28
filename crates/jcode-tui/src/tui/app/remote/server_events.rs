@@ -702,18 +702,23 @@ pub(in crate::tui::app) fn handle_server_event(
                     .token_accounting
                     .total_output_tokens
                     .saturating_add(output.saturating_sub(previous_output));
-                // Bill snapshot deltas so repeated reports charge each token once.
-                app.accrue_remote_call_cost(
-                    input.saturating_sub(previous_input),
-                    output.saturating_sub(previous_output),
-                    app.streaming
-                        .streaming_cache_read_tokens
-                        .unwrap_or(0)
-                        .saturating_sub(previous_cache_read.unwrap_or(0)),
-                    app.streaming
-                        .streaming_cache_creation_tokens
-                        .unwrap_or(0)
-                        .saturating_sub(previous_cache_creation.unwrap_or(0)),
+                // Bill the cost difference between the previous and current
+                // snapshots. Pricing the token deltas instead would bill a token
+                // as fresh input in one frame and never refund it when a later
+                // frame reports it as a cache read or write.
+                app.accrue_remote_snapshot_cost(
+                    (
+                        previous_input,
+                        previous_output,
+                        previous_cache_read.unwrap_or(0),
+                        previous_cache_creation.unwrap_or(0),
+                    ),
+                    (
+                        input,
+                        output,
+                        app.streaming.streaming_cache_read_tokens.unwrap_or(0),
+                        app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
+                    ),
                 );
 
                 let had_cache_telemetry =

@@ -282,6 +282,38 @@ impl App {
         self.record_api_key_spend(call_cost);
     }
 
+    /// Accrue the cost difference between two usage snapshots of the same
+    /// in-flight call: `(input, output, cache_read, cache_creation)`.
+    ///
+    /// Repeated usage reports replace each other rather than add up, and a
+    /// later report can reclassify tokens (an OpenAI terminal frame may carry
+    /// only `cache_write_tokens`). Pricing whole snapshots and accruing the
+    /// difference bills each token once at its final category; pricing the
+    /// per-field deltas would leave the earlier fresh-input charge in place.
+    pub(super) fn accrue_remote_snapshot_cost(
+        &mut self,
+        previous: (u64, u64, u64, u64),
+        current: (u64, u64, u64, u64),
+    ) {
+        if previous == current {
+            return;
+        }
+        let Some(pricing) = self.resolve_remote_cost_pricing() else {
+            return;
+        };
+        let cost_of = |(input, output, read, write): (u64, u64, u64, u64)| {
+            pricing.cost_for_usage(input, output, read, write)
+        };
+        let call_cost = cost_of(current) - cost_of(previous);
+        if !call_cost.is_finite() {
+            return;
+        }
+        self.cost.total_cost = (self.cost.total_cost + call_cost).max(0.0);
+        // A negative difference is a refund of a category already charged;
+        // the spend ledger only records positive spend.
+        self.record_api_key_spend(call_cost);
+    }
+
     /// Seed `cost.total_cost` from token totals restored when resuming a
     /// session, so the cost widget reflects prior spend instead of showing `$0`
     /// until a new call happens.

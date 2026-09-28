@@ -5,6 +5,10 @@ fn cache_accounting_openai_app() -> App {
     app.remote_provider_name = Some("OpenAI".to_string());
     app.remote_provider_model = Some("gpt-5.6".to_string());
     app.remote_resolved_credential = Some(jcode_provider_core::ResolvedCredential::ApiKey);
+    app.cost.cached_price_model = Some("gpt-5.6".to_string());
+    app.cost.cached_prompt_price = Some(10.0);
+    app.cost.cached_completion_price = Some(40.0);
+    app.cost.cached_cache_read_price = Some(1.0);
     app
 }
 
@@ -104,6 +108,15 @@ fn cache_accounting_remote_snapshots_count_openai_prompt_once() {
     assert!(
         stats.contains("cache_write_pct_of_effective_prompt: 20%"),
         "{stats}"
+    );
+    // Cost follows the final classification of the whole snapshot, not the
+    // sum of per-frame deltas: 2k fresh + 6k read + 2k write + 100 output at
+    // the test rates ($10 / $1 / $12.5 / $40 per 1M), each token billed once.
+    let expected = (2_000.0 * 10.0 + 6_000.0 * 1.0 + 2_000.0 * 12.5 + 100.0 * 40.0) / 1_000_000.0;
+    assert!(
+        (app.cost.total_cost - expected).abs() < 0.000001,
+        "{} != {expected}",
+        app.cost.total_cost
     );
 }
 

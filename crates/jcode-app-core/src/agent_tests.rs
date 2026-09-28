@@ -1655,6 +1655,53 @@ async fn messages_for_provider_applies_manual_compaction_in_native_auto_mode() {
     }
 }
 
+struct FullyCachedAnthropicProvider;
+
+#[async_trait]
+impl Provider for FullyCachedAnthropicProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let (_tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(1);
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self)
+    }
+}
+
+/// Contract fixture C4: a fully cached Anthropic request reports input 0 with
+/// the whole prompt as a cache read. That prompt is still resent cold when the
+/// cache expires, so it must feed the observed compaction context.
+#[tokio::test]
+async fn fully_cached_anthropic_usage_updates_observed_compaction_context() {
+    let provider: Arc<dyn Provider> = Arc::new(FullyCachedAnthropicProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    agent.update_compaction_usage_from_stream(0, Some(300_000), Some(5_000));
+    let observed = agent
+        .registry
+        .compaction()
+        .read()
+        .await
+        .effective_token_count();
+    assert_eq!(observed, 305_000);
+}
+
 #[tokio::test]
 async fn messages_for_provider_falls_back_when_native_auto_crosses_threshold_without_event() {
     let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
