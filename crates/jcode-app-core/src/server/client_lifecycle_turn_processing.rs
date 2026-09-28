@@ -220,6 +220,49 @@ async fn process_message_streaming_mpsc_with_existing_user_message(
     )
     .map_err(|refused| anyhow::anyhow!("turn refused: {refused}"))?;
     let mut agent = agent.lock().await;
+    run_streaming_turn_on_locked_agent(
+        &mut agent,
+        content,
+        images,
+        system_reminder,
+        event_tx,
+        reuse_existing_user_message,
+    )
+    .await
+}
+
+/// Same as [`process_message_streaming_mpsc`] for a caller that already holds
+/// the agent lock (e.g. a wake turn that reserved the idle agent up front, see
+/// #1152). The activity lease is acquired here, inside the turn task, while
+/// the reservation is held; a ShuttingDown refusal ends the turn before it
+/// starts and the caller drops the reservation.
+pub(crate) async fn process_locked_message_streaming_mpsc(
+    agent: &mut Agent,
+    content: &str,
+    images: Vec<(String, String)>,
+    system_reminder: Option<String>,
+    event_tx: mpsc::UnboundedSender<ServerEvent>,
+) -> Result<()> {
+    let _lease = shutdown::acquire_lease(
+        jcode_core::activity::ActivityClass::ProviderTurn,
+        "streaming-turn",
+    )
+    .map_err(|refused| anyhow::anyhow!("turn refused: {refused}"))?;
+    run_streaming_turn_on_locked_agent(agent, content, images, system_reminder, event_tx, false)
+        .await
+}
+
+/// Shared body of the streaming-turn processors: runs the turn on an
+/// already-locked agent and keeps the completion bookkeeping (memory log,
+/// heap release) identical for lock-acquiring and pre-locked callers.
+async fn run_streaming_turn_on_locked_agent(
+    agent: &mut Agent,
+    content: &str,
+    images: Vec<(String, String)>,
+    system_reminder: Option<String>,
+    event_tx: mpsc::UnboundedSender<ServerEvent>,
+    reuse_existing_user_message: bool,
+) -> Result<()> {
     let session_id = agent.session_id().to_string();
     let result = agent
         .run_once_streaming_mpsc_with_existing_user_message(
