@@ -14,7 +14,8 @@ async fn e2e_seed_requires_explicit_replacement_and_clears_stale_state() {
     let (initial_version, initial_ids) = {
         let mut plans = fx.swarm_plans.write().await;
         let plan = plans.get_mut(&fx.swarm_id).expect("seeded plan");
-        plan.task_progress.insert("old".to_string(), Default::default());
+        plan.task_progress
+            .insert("old".to_string(), Default::default());
         plan.participants.insert("stale-participant".to_string());
         assert!(plan.node_meta.contains_key("old"));
         (
@@ -38,7 +39,10 @@ async fn e2e_seed_requires_explicit_replacement_and_clears_stale_state() {
     {
         let plans = fx.swarm_plans.read().await;
         let plan = &plans[&fx.swarm_id];
-        assert_eq!(plan.version, initial_version, "rejection must not mutate plan");
+        assert_eq!(
+            plan.version, initial_version,
+            "rejection must not mutate plan"
+        );
         assert_eq!(
             plan.items
                 .iter()
@@ -67,7 +71,13 @@ async fn e2e_seed_requires_explicit_replacement_and_clears_stale_state() {
     let plan = &plans[&fx.swarm_id];
     assert_eq!(plan.version, initial_version + 1);
     assert_eq!(plan.mode, "light");
-    assert_eq!(plan.items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["new"]);
+    assert_eq!(
+        plan.items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["new"]
+    );
     assert!(!plan.node_meta.contains_key("old"));
     assert!(plan.node_meta.contains_key("new"));
     assert!(plan.task_progress.is_empty());
@@ -96,11 +106,20 @@ async fn e2e_replacement_rejects_in_flight_work_without_mutating_roles() {
         .write()
         .await
         .insert(fx.swarm_id.clone(), "stale-coordinator".to_string());
-    fx.swarm_members.write().await.get_mut(&fx.coord).unwrap().role = "agent".to_string();
+    fx.swarm_members
+        .write()
+        .await
+        .get_mut(&fx.coord)
+        .unwrap()
+        .role = "agent".to_string();
 
     fx.seed_replacing("light", true, vec![node_spec("new", "implement", &[])])
         .await;
-    let rejected = fx.client_rx.recv().await.expect("active replacement rejection");
+    let rejected = fx
+        .client_rx
+        .recv()
+        .await
+        .expect("active replacement rejection");
     assert!(matches!(
         rejected,
         ServerEvent::Error { message, .. }
@@ -111,9 +130,15 @@ async fn e2e_replacement_rejects_in_flight_work_without_mutating_roles() {
     let plan = &plans[&fx.swarm_id];
     assert_eq!(plan.version, version);
     assert_eq!(plan.items[0].id, "active");
-    assert_eq!(plan.items[0].assigned_to.as_deref(), Some(fx.worker.as_str()));
+    assert_eq!(
+        plan.items[0].assigned_to.as_deref(),
+        Some(fx.worker.as_str())
+    );
     drop(plans);
-    assert_eq!(fx.swarm_coordinators.read().await[&fx.swarm_id], "stale-coordinator");
+    assert_eq!(
+        fx.swarm_coordinators.read().await[&fx.swarm_id],
+        "stale-coordinator"
+    );
     assert_eq!(fx.swarm_members.read().await[&fx.coord].role, "agent");
 }
 
@@ -138,8 +163,15 @@ async fn e2e_identical_seed_without_replace_is_rejected_without_node_churn() {
 
     let plans = fx.swarm_plans.read().await;
     let plan = &plans[&fx.swarm_id];
-    assert_eq!(plan.version, version, "a rejected replay must not bump plan version");
-    assert_eq!(plan.items.len(), item_count, "a rejected replay must not add nodes");
+    assert_eq!(
+        plan.version, version,
+        "a rejected replay must not bump plan version"
+    );
+    assert_eq!(
+        plan.items.len(),
+        item_count,
+        "a rejected replay must not add nodes"
+    );
     drop(plans);
     let events: Vec<_> = std::iter::from_fn(|| fx.client_rx.try_recv().ok()).collect();
     assert!(
@@ -149,4 +181,65 @@ async fn e2e_identical_seed_without_replace_is_rejected_without_node_churn() {
         )),
         "an identical raw-protocol replay must require an explicit lifecycle choice: {events:?}"
     );
+}
+
+/// A graph that exhausted a hard budget is frozen and cannot be unfrozen;
+/// the pause message tells the coordinator to start a smaller replacement.
+/// That replacement must therefore be admitted while the plan is frozen, as
+/// long as nothing is in flight, and must reset the ledger for the new graph.
+#[tokio::test]
+async fn e2e_replacement_is_admitted_on_a_frozen_budget_paused_graph() {
+    let (_env, _runtime) = RuntimeEnvGuard::new();
+    let mut fx = graph_fixture_named("swarm-paused", "coord-paused", "worker-paused").await;
+
+    fx.seed("light", vec![node_spec("old", "explore", &[])])
+        .await;
+    let _ = fx.client_rx.recv().await.expect("initial seed response");
+
+    let initial_version = {
+        let mut plans = fx.swarm_plans.write().await;
+        let plan = plans.get_mut(&fx.swarm_id).expect("seeded plan");
+        for item in &mut plan.items {
+            item.status = "completed".to_string();
+            item.assigned_to = Some(fx.worker.clone());
+        }
+        // Model the scheduler's own pause: frozen with an exhausted ledger.
+        plan.frozen = true;
+        let mut ledger = plan.safety_ledger.clone().expect("seed starts a ledger");
+        ledger.status = jcode_plan::dag::PlanSafetyStatus::PausedBudgetExceeded;
+        plan.safety_ledger = Some(ledger);
+        plan.version
+    };
+
+    fx.seed_replacing("light", false, vec![node_spec("new", "implement", &[])])
+        .await;
+    match fx.client_rx.recv().await.expect("growth rejection") {
+        ServerEvent::Error { message, .. } => {
+            assert!(message.contains("frozen"), "{message}");
+            assert!(message.contains("replace_existing=true"), "{message}");
+        }
+        other => panic!("expected frozen rejection, got {other:?}"),
+    }
+
+    fx.seed_replacing("light", true, vec![node_spec("new", "implement", &[])])
+        .await;
+    if let ServerEvent::Error { message, .. } =
+        fx.client_rx.recv().await.expect("replacement response")
+    {
+        panic!("replacement must be admitted: {message}");
+    }
+
+    let plans = fx.swarm_plans.read().await;
+    let plan = &plans[&fx.swarm_id];
+    assert_eq!(plan.version, initial_version + 1);
+    assert!(!plan.frozen, "a fresh graph starts unfrozen");
+    assert_eq!(
+        plan.items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["new"]
+    );
+    let ledger = plan.safety_ledger.as_ref().expect("fresh ledger");
+    assert_eq!(ledger.status, jcode_plan::dag::PlanSafetyStatus::Running);
 }
