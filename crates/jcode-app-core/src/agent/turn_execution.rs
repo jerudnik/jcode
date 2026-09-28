@@ -731,9 +731,7 @@ impl Agent {
         // allow-listed worker session would reject aliased calls that the
         // registry itself would accept.
         let resolved = crate::tool::Registry::resolve_tool_name(name);
-        if let Some(allowed) = self.allowed_tools.as_ref()
-            && !allowed.contains(resolved)
-        {
+        if !crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), resolved) {
             return Err(anyhow::anyhow!("Tool '{}' is not allowed", resolved));
         }
         if self.disabled_tools.contains(resolved) {
