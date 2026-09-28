@@ -26,6 +26,9 @@ use tokio::sync::{Mutex, RwLock, broadcast as tokio_broadcast};
 mod broadcast;
 mod lifecycle;
 #[cfg(test)]
+// The suite deliberately exercises the deprecated `SwarmMember::status`
+// mirror alongside the lifecycle API for W23 parity coverage.
+#[allow(deprecated)]
 mod tests;
 
 pub(in crate::server) use broadcast::*;
@@ -533,10 +536,9 @@ pub(in crate::server) async fn update_member_status_with_report_tldr(
             reason: lifecycle.reason.clone(),
             updated_at_unix_ms: lifecycle.updated_at_unix_ms,
         };
-        if let Err(error) = crate::session::Session::persist_swarm_lifecycle(
-            session_id,
-            stored_lifecycle,
-        ) {
+        if let Err(error) =
+            crate::session::Session::persist_swarm_lifecycle(session_id, stored_lifecycle)
+        {
             log_swarm_lifecycle(
                 "member_lifecycle_persist_failed",
                 vec![
