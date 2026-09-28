@@ -462,6 +462,92 @@ async fn idle_live_agent_reservation_blocks_a_second_wake_until_released() {
 }
 
 #[tokio::test]
+async fn concurrent_wakes_start_exactly_one_live_turn() {
+    // Two wakes race for the same idle live session. The reservation must let
+    // exactly one start; the loser sees the agent busy. After the winner's
+    // terminal Done the session is reservable again for a follow-up wake.
+    let provider = Arc::new(StreamingMockProvider::default());
+    provider.queue_response(vec![
+        StreamEvent::TextDelta("First wake finished.".to_string()),
+        StreamEvent::MessageEnd { stop_reason: None },
+    ]);
+    provider.queue_response(vec![
+        StreamEvent::TextDelta("Follow-up wake finished.".to_string()),
+        StreamEvent::MessageEnd { stop_reason: None },
+    ]);
+    let provider_dyn: Arc<dyn Provider> = provider.clone();
+    let agent = test_agent(provider_dyn).await;
+    let session_id = agent.lock().await.session_id().to_string();
+    let sessions = Arc::new(RwLock::new(HashMap::from([(
+        session_id.clone(),
+        agent.clone(),
+    )])));
+    let (member_event_tx, mut member_event_rx) = mpsc::unbounded_channel();
+    let member = attached_swarm_member(&session_id, member_event_tx);
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([(session_id.clone(), member)])));
+    let (swarms_by_id, event_history, event_counter, swarm_event_tx) = empty_swarm_status_state();
+    let wake = |message: &'static str| {
+        let session_id = session_id.clone();
+        let sessions = Arc::clone(&sessions);
+        let swarm_members = Arc::clone(&swarm_members);
+        let swarms_by_id = Arc::clone(&swarms_by_id);
+        let event_history = Arc::clone(&event_history);
+        let event_counter = Arc::clone(&event_counter);
+        let swarm_event_tx = swarm_event_tx.clone();
+        async move {
+            super::live_turn::run_live_turn_if_idle(
+                &session_id,
+                message,
+                None,
+                &sessions,
+                super::live_turn::LiveTurnSwarmContext::new(
+                    &swarm_members,
+                    &swarms_by_id,
+                    &event_history,
+                    &event_counter,
+                    &swarm_event_tx,
+                ),
+            )
+            .await
+        }
+    };
+
+    let (first, second) = tokio::join!(wake("first wake"), wake("second wake"));
+    assert!(
+        first ^ second,
+        "exactly one of two racing wakes may start a turn (first={first}, second={second})"
+    );
+
+    let saw_done = timeout(Duration::from_secs(2), async {
+        loop {
+            match member_event_rx.recv().await {
+                Some(ServerEvent::Done { id: 0 }) => return true,
+                Some(_) => continue,
+                None => return false,
+            }
+        }
+    })
+    .await
+    .expect("winning wake should emit a terminal Done promptly");
+    assert!(saw_done);
+
+    let follow_up = timeout(Duration::from_secs(2), async {
+        loop {
+            if wake("follow-up wake").await {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(
+        follow_up,
+        "the reservation must be released once the tracked turn completes"
+    );
+}
+
+#[tokio::test]
 async fn wake_turn_tracks_member_status_and_emits_terminal_done() {
     let provider = Arc::new(StreamingMockProvider::default());
     provider.queue_response(vec![
