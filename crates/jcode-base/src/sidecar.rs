@@ -875,7 +875,9 @@ impl Sidecar {
                 .header("Authorization", format!("Bearer {}", creds.access_token))
                 .header(
                     "User-Agent",
-                    crate::provider::anthropic::CLAUDE_CLI_USER_AGENT,
+                    &crate::provider::anthropic::claude_cli_identity()
+                        .await
+                        .user_agent,
                 )
                 .header("anthropic-version", "2023-06-01")
                 .header("anthropic-beta", OAUTH_BETA_HEADERS)

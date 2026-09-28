@@ -133,21 +133,20 @@ fn preferences_path() -> Result<PathBuf> {
     Ok(home.join(".config/jcode/desktop-state.json"))
 }
 
+/// Serializes every test that mutates `JCODE_DESKTOP_STATE`. The variable is
+/// process-global, so tests in other modules must take this same lock.
+#[cfg(test)]
+pub(crate) static DESKTOP_STATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn saves_and_loads_preferences() -> Result<()> {
-        let Ok(_guard) = env_lock().lock() else {
-            anyhow::bail!("desktop prefs test env lock poisoned");
-        };
+        let _guard = DESKTOP_STATE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir =
             std::env::temp_dir().join(format!("jcode-desktop-prefs-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);

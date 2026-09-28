@@ -117,6 +117,8 @@ This repository defaults to the TUI target. In a self-development session:
 4. Continue automatically after reload.
 5. Confirm the running revision or behavior. Use `debug_socket` testers and frames for TUI changes.
 
+Automatic client handoffs reuse the selected build without rebuilding a different checkout. Fresh launches and manual resumes still rebuild stale source unless `--no-build` is set. Explicit `--build` requests take precedence.
+
 Outside a self-development session, the tool exposes the `enter`, `setup`, `reload`, `status`, and `find-config` on-ramp actions but not build actions. Use direct local Cargo builds only when `selfdev` is unavailable or the documented fallback is required. Desktop builds and desktop UI debugging are reserved for desktop-specific tasks.
 
 ## Nix, remote builders, and caches

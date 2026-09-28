@@ -62,10 +62,10 @@ automatically for the default Claude runtime path.
 
 Required behaviors (applied by the Anthropic provider):
 - Use the Messages endpoint with `?beta=true`.
-- Use the shared `CLAUDE_CLI_USER_AGENT` from
-  `crates/jcode-base/src/provider/anthropic.rs` for inference, profile, and
-  sidecar requests. Billing attribution and preflight metadata use the same
-  client version.
+- Use the shared `claude_cli_identity()` from
+  `crates/jcode-provider-core/src/claude_cli_identity.rs` for inference, profile,
+  model catalog, usage, and sidecar requests. Billing attribution and preflight
+  metadata use that same client version.
 - Send `anthropic-beta: oauth-2025-04-20,claude-code-20250219`.
 - Prepend the system blocks with the Claude Code identity line as the first
   block:
@@ -93,6 +93,16 @@ units, `intent`, and background delivery controls. Only its wire name changes.
 OAuth formatting does not grant tool permissions or override assignment grants.
 
 Notes:
+- On the first OAuth request, Jcode queries `claude --version` using the
+  executable on its PATH. This does not start a Claude session. Detection has
+  a two-second timeout and a 1 KiB stdout limit. The result is cached for the
+  process lifetime, so restart Jcode after installing or upgrading Claude Code.
+- If Claude Code is missing, exits unsuccessfully, times out, or returns an
+  unrecognized version, Jcode logs a warning and uses the reviewed `2.1.257`
+  fallback. This is not a promise of future model compatibility. If Anthropic
+  rejects the version, install or update Claude Code and restart Jcode. An
+  installed older version is reported as-is, not silently raised to the fallback.
+- API-key requests do not query Claude Code or use its OAuth identity fields.
 - If the OAuth token expires, refresh via the Claude OAuth refresh endpoint.
 - Without the identity line and allow-listed tool names, the API will reject
   OAuth requests even if the token is otherwise valid.
