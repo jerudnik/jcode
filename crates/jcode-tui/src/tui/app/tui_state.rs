@@ -1524,6 +1524,8 @@ impl crate::tui::TuiState for App {
         let cache_hit_info = (self.token_accounting.total_cache_prompt_tokens > 0
             || history_cache.is_some())
         .then(|| crate::tui::info_widget::CacheHitInfo {
+            read_known: self.token_accounting.cache_read_accounting_complete
+                && history_cache.is_none_or(|usage| usage.cache_read_complete),
             prompt_tokens: history_prompt.map(|prompt| {
                 prompt.saturating_add(self.token_accounting.total_cache_prompt_tokens)
             }),

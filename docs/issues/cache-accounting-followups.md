@@ -38,17 +38,6 @@ record time, or keep per-message `StoredTokenUsage` plus provider identity
 and reprice by walking the history on restore. Do not add
 `cache_prompt_tokens` into the existing formula; it does not partition.
 
-## 3. Write-only telemetry shows a 0% session read ratio
-
-When a request reports `cache_creation` but no `cache_read`
-(`last_cache_read_tokens = None`), `record_completed_stream_cache_usage`
-adds 0 to the session read total while the denominator is known, so
-`/cache stats` prints `0%` for the session even though the last read is
-unknown. The per-request `last_ratio()` correctly reports `None` and the
-miss alarm is correctly suppressed (`app.rs`, explicit-read guard). Decide
-whether the session ratio should also read `unknown` when any contributing
-request lacked a read count.
-
 ## Evidence
 
 - Review report: swarm session `session_lizard_1790602372078_3716387460964f05`,

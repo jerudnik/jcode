@@ -1245,6 +1245,7 @@ pub(super) async fn handle_comm_list_models(
 
 fn zero_token_usage_totals() -> TokenUsageTotals {
     TokenUsageTotals {
+        cache_read_complete: true,
         cache_prompt_tokens: Some(0),
         messages_with_token_usage: 0,
         input_tokens: 0,
@@ -1256,6 +1257,7 @@ fn zero_token_usage_totals() -> TokenUsageTotals {
 }
 
 fn add_token_usage_totals(total: &mut TokenUsageTotals, next: TokenUsageTotals) {
+    total.cache_read_complete &= next.cache_read_complete;
     // Zip semantics, as in Session::token_usage_totals: one member without
     // per-request prompt accounting makes the fleet prompt total unknown.
     total.cache_prompt_tokens = total

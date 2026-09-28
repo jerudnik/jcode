@@ -33,6 +33,25 @@ mod headless_spawn;
 
 struct MockProvider;
 
+#[test]
+fn fleet_rollup_read_complete_and_semantics() {
+    let mut total = super::zero_token_usage_totals();
+    let mut next = serde_json::to_value(super::zero_token_usage_totals()).unwrap();
+    next["cache_read_complete"] = false.into();
+    next["cache_creation_input_tokens"] = 2_000.into();
+    super::add_token_usage_totals(&mut total, serde_json::from_value(next).unwrap());
+    assert_eq!(
+        serde_json::to_value(total).unwrap()["cache_read_complete"],
+        false
+    );
+    super::add_token_usage_totals(&mut total, super::zero_token_usage_totals());
+    assert_eq!(
+        serde_json::to_value(total).unwrap()["cache_read_complete"],
+        false
+    );
+    assert_eq!(total.cache_creation_input_tokens, 2_000);
+}
+
 #[async_trait]
 impl Provider for MockProvider {
     async fn complete(
@@ -175,7 +194,12 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
     let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
         swarm_id.clone(),
         VersionedPlan {
-            items: vec![plan_item("task-verify", "running", "high", Some("rollup-worker"))],
+            items: vec![plan_item(
+                "task-verify",
+                "running",
+                "high",
+                Some("rollup-worker"),
+            )],
             version: 7,
             participants: HashSet::from(["rollup-coord".to_string(), "rollup-worker".to_string()]),
             task_progress: HashMap::new(),
@@ -213,7 +237,10 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
             assert_eq!(swarms.len(), 1);
             let entry = &swarms[0];
             assert_eq!(entry.swarm_id, swarm_id);
-            assert_eq!(entry.coordinator_session_id.as_deref(), Some("rollup-coord"));
+            assert_eq!(
+                entry.coordinator_session_id.as_deref(),
+                Some("rollup-coord")
+            );
             assert_eq!(entry.coordinator_name.as_deref(), Some("falcon"));
             assert_eq!(entry.coordinator_status.as_deref(), Some("ready"));
             assert_eq!(entry.member_count, 2);

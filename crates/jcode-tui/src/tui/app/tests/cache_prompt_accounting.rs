@@ -250,3 +250,89 @@ fn cache_accounting_missing_last_read_remains_unknown() {
             .is_none()
     );
 }
+
+#[test]
+fn cache_accounting_write_only_session_marks_read_ratio_unknown() {
+    let mut app = cache_accounting_openai_app();
+    app.streaming.streaming_input_tokens = 10_000;
+    app.streaming.streaming_cache_creation_tokens = Some(2_000);
+    assert!(
+        cache_accounting_stats(&mut app).contains(super::state_ui::INCOMPLETE_CACHE_READ_RATIO)
+    );
+    app.record_completed_stream_cache_usage();
+    let info = app.info_widget_data().cache_hit_info.unwrap();
+    assert_eq!(info.hit_ratio(), None);
+    assert_eq!(info.last_read_tokens, None);
+    assert_eq!(info.creation_tokens, 2_000);
+    assert!(
+        cache_accounting_stats(&mut app).contains(super::state_ui::INCOMPLETE_CACHE_READ_RATIO)
+    );
+
+    app.begin_kv_cache_request(&[Message::user("next")], &[], "system", "");
+    app.streaming.streaming_cache_read_tokens = Some(6_000);
+    app.streaming.streaming_cache_creation_tokens = Some(0);
+    app.record_completed_stream_cache_usage();
+    let info = app.info_widget_data().cache_hit_info.unwrap();
+    assert_eq!(info.hit_ratio(), None);
+    assert_eq!(info.last_ratio(), Some(0.6));
+    assert_eq!(info.read_tokens, 6_000);
+    assert!(
+        cache_accounting_stats(&mut app).contains(super::state_ui::INCOMPLETE_CACHE_READ_RATIO)
+    );
+
+    let mut known = cache_accounting_openai_app();
+    known.streaming.streaming_input_tokens = 10_000;
+    known.streaming.streaming_cache_read_tokens = Some(0);
+    known.streaming.streaming_cache_creation_tokens = Some(2_000);
+    known.record_completed_stream_cache_usage();
+    let info = known.info_widget_data().cache_hit_info.unwrap();
+    assert_eq!(info.hit_ratio(), Some(0.0));
+    assert_eq!(info.last_read_tokens, Some(0));
+    assert!(
+        !cache_accounting_stats(&mut known).contains(super::state_ui::INCOMPLETE_CACHE_READ_RATIO)
+    );
+}
+
+#[test]
+fn cache_accounting_history_missing_reads_preserves_unknown_ratio() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut app = cache_accounting_openai_app();
+    app.remote_token_usage_totals = Some(
+        serde_json::from_value(serde_json::json!({
+            "cache_read_complete": false,
+            "messages_with_token_usage": 1,
+            "input_tokens": 10_000,
+            "output_tokens": 100,
+            "cache_prompt_tokens": 10_000,
+            "cache_reported_input_tokens": 10_000,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 2_000
+        }))
+        .unwrap(),
+    );
+    let info = app.info_widget_data().cache_hit_info.unwrap();
+    assert_eq!(info.hit_ratio(), None);
+    assert_eq!(info.creation_tokens, 2_000);
+    assert!(
+        cache_accounting_stats(&mut app).contains(super::state_ui::INCOMPLETE_CACHE_READ_RATIO)
+    );
+    app.remote_token_usage_totals = None;
+    app.streaming.streaming_input_tokens = 10_000;
+    app.record_completed_stream_cache_usage();
+    assert!(app.info_widget_data().cache_hit_info.is_none());
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    app.handle_server_event(
+        crate::protocol::ServerEvent::TokenUsage {
+            input: 10_000,
+            output: 100,
+            cache_read_input: None,
+            cache_creation_input: Some(2_000),
+        },
+        &mut remote,
+    );
+    assert_eq!(
+        app.info_widget_data().cache_hit_info.unwrap().hit_ratio(),
+        None
+    );
+}

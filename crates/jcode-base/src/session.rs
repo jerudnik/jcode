@@ -1267,6 +1267,7 @@ request in this new forked session, using the inherited conversation only as con
             if usage.cache_read_input_tokens.is_some()
                 || usage.cache_creation_input_tokens.is_some()
             {
+                totals.cache_read_complete &= usage.cache_read_input_tokens.is_some();
                 totals.cache_prompt_tokens = totals
                     .cache_prompt_tokens
                     .zip(usage.prompt_tokens)

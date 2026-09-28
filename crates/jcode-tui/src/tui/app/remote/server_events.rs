@@ -726,6 +726,8 @@ pub(in crate::tui::app) fn handle_server_event(
                 let has_cache_telemetry = app.streaming.streaming_cache_read_tokens.is_some()
                     || app.streaming.streaming_cache_creation_tokens.is_some();
                 if has_cache_telemetry {
+                    app.token_accounting.cache_read_accounting_complete &=
+                        app.streaming.streaming_cache_read_tokens.is_some();
                     let prompt = crate::tui::info_widget::effective_prompt_tokens(
                         &app.kv_cache_provider_name(),
                         input,
@@ -1449,6 +1451,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.kv_cache.current_api_usage_recorded = false;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
                 app.token_accounting.total_cache_prompt_tokens = 0;
+                app.token_accounting.cache_read_accounting_complete = true;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
@@ -1558,6 +1561,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.token_accounting.total_output_tokens = 0;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
                 app.token_accounting.total_cache_prompt_tokens = 0;
+                app.token_accounting.cache_read_accounting_complete = true;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;

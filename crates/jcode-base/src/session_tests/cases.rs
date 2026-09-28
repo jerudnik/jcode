@@ -2491,3 +2491,34 @@ fn cache_prompt_totals_preserve_mixed_provider_accounting_and_legacy_unknown() {
     assert_eq!(session.token_usage_totals().cache_prompt_tokens, None);
     assert_eq!(session.token_usage_totals().cache_read_input_tokens, 19_000);
 }
+
+#[test]
+fn token_usage_totals_read_complete_false_when_record_lacks_read() {
+    for (read, write, complete) in [
+        (None, Some(2_000), false),
+        (Some(0), Some(2_000), true),
+        (None, None, true),
+    ] {
+        let mut session = Session::create_with_id("read_completeness".into(), None, None);
+        let usage: StoredTokenUsage = serde_json::from_value(serde_json::json!({
+            "input_tokens": 10_000, "output_tokens": 100, "prompt_tokens": 10_000,
+            "cache_read_input_tokens": read, "cache_creation_input_tokens": write,
+        }))
+        .unwrap();
+        session.add_message_ext(Role::Assistant, vec![], None, Some(usage));
+        assert_eq!(
+            serde_json::to_value(session.token_usage_totals()).unwrap()["cache_read_complete"],
+            complete
+        );
+        let explicit: StoredTokenUsage = serde_json::from_value(serde_json::json!({
+            "input_tokens": 10_000, "output_tokens": 100, "prompt_tokens": 10_000,
+            "cache_read_input_tokens": 0,
+        }))
+        .unwrap();
+        session.add_message_ext(Role::Assistant, vec![], None, Some(explicit));
+        assert_eq!(
+            serde_json::to_value(session.token_usage_totals()).unwrap()["cache_read_complete"],
+            complete
+        );
+    }
+}

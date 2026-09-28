@@ -664,8 +664,9 @@ struct CommandCandidatesCache {
 /// Grouped out of [`App`] to keep the cohesive token/cache totals together. The
 /// `total_*` fields accumulate over the whole session; the `last_*` fields hold
 /// the most recently reported per-turn values used for cache TTL display.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct TokenAccounting {
+    cache_read_accounting_complete: bool,
     // Total session token usage (accumulated across all turns)
     total_input_tokens: u64,
     total_output_tokens: u64,
@@ -681,6 +682,27 @@ struct TokenAccounting {
     last_cache_creation_tokens: Option<u64>,
     last_cache_optimal_input_tokens: Option<u64>,
     cache_next_optimal_input_tokens: Option<u64>,
+}
+
+impl Default for TokenAccounting {
+    fn default() -> Self {
+        Self {
+            cache_read_accounting_complete: true,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_reported_input_tokens: 0,
+            total_cache_prompt_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_optimal_input_tokens: 0,
+            last_cache_reported_input_tokens: None,
+            last_cache_prompt_tokens: None,
+            last_cache_read_tokens: None,
+            last_cache_creation_tokens: None,
+            last_cache_optimal_input_tokens: None,
+            cache_next_optimal_input_tokens: None,
+        }
+    }
 }
 
 /// KV cache baseline tracking and per-turn cache-miss attribution.
@@ -1817,6 +1839,8 @@ impl App {
             return true;
         }
 
+        self.token_accounting.cache_read_accounting_complete &=
+            self.streaming.streaming_cache_read_tokens.is_some();
         self.token_accounting.total_cache_prompt_tokens = self
             .token_accounting
             .total_cache_prompt_tokens
