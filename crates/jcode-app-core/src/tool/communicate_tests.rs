@@ -1266,6 +1266,7 @@ fn format_swarm_fleet_renders_live_rollup() {
         },
         needs_operator_input: true,
         tokens: Some(TokenUsageTotals {
+            cache_prompt_tokens: None,
             messages_with_token_usage: 2,
             input_tokens: 100,
             output_tokens: 40,

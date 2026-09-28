@@ -201,6 +201,7 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
             },
             needs_operator_input: false,
             tokens: Some(TokenUsageTotals {
+                cache_prompt_tokens: None,
                 messages_with_token_usage: 1,
                 input_tokens: 10,
                 output_tokens: 5,

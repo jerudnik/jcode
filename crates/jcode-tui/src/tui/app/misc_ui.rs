@@ -15,6 +15,11 @@ pub(crate) struct ResolvedTokenPricing {
     /// Whether the active model is Anthropic/Claude (drives split-accounting and
     /// the cache-write premium).
     pub is_anthropic: bool,
+    /// OpenAI reports both reads and writes as subsets of input_tokens.
+    pub is_openai: bool,
+    /// OpenAI documents the 1.25x cache-write rate for GPT-5.6 and later
+    /// (the prompt_cache_options era); earlier models have no write charge.
+    pub openai_cache_write_premium: bool,
 }
 
 impl ResolvedTokenPricing {
@@ -26,11 +31,8 @@ impl ResolvedTokenPricing {
     ///     Subtracting cache-read from input again would double count it and bill
     ///     fresh input at ~$0 on cache-hit turns.
     ///   - Subset accounting (OpenAI-style): cached tokens are counted INSIDE
-    ///     `input_tokens`, so we subtract the cache-read portion to bill it at the
-    ///     cheaper cache rate.
-    ///
-    /// Mirrors the heuristic the cache/context paths use (see
-    /// `effective_prompt_tokens` / `effective_context_tokens_from_usage`).
+    ///     `input_tokens`, so subtract both reads and writes before pricing each
+    ///     category once. Modern OpenAI cache writes use a 1.25x input rate.
     pub fn cost_for_usage(
         &self,
         input_tokens: u64,
@@ -38,13 +40,15 @@ impl ResolvedTokenPricing {
         cache_read_tokens: u64,
         cache_creation_tokens: u64,
     ) -> f32 {
-        let split_accounting =
-            self.is_anthropic || cache_creation_tokens > 0 || cache_read_tokens > input_tokens;
+        let split_accounting = self.is_anthropic
+            || (!self.is_openai && (cache_creation_tokens > 0 || cache_read_tokens > input_tokens));
 
         let fresh_input_tokens = if split_accounting {
             input_tokens
         } else {
-            input_tokens.saturating_sub(cache_read_tokens.min(input_tokens))
+            input_tokens
+                .saturating_sub(cache_read_tokens)
+                .saturating_sub(cache_creation_tokens)
         };
 
         let prompt_cost = (fresh_input_tokens as f32 * self.prompt_price) / 1_000_000.0;
@@ -55,19 +59,17 @@ impl ResolvedTokenPricing {
             Some(price) => (cache_read_tokens as f32 * price) / 1_000_000.0,
             None => (cache_read_tokens as f32 * self.prompt_price) / 1_000_000.0,
         };
-        // Cache *writes* (cache-creation) are billed at a premium over the base
-        // input rate. Anthropic charges 1.25x for the 5-minute TTL and 2x for the
-        // 1-hour TTL; other split-accounting providers we approximate at the base
-        // input rate. Subset-accounting providers fold writes into `input_tokens`
-        // (and rarely report a creation count), so we only add this for split
-        // accounting to avoid double counting.
-        let cache_write_cost = if split_accounting && cache_creation_tokens > 0 {
+        // Write pricing replaces ordinary input pricing, it is not an extra
+        // charge on top of already-billed OpenAI input tokens.
+        let cache_write_cost = if cache_creation_tokens > 0 {
             let multiplier = if self.is_anthropic {
                 if crate::provider::anthropic::is_cache_ttl_1h() {
                     2.0
                 } else {
                     1.25
                 }
+            } else if self.is_openai && self.openai_cache_write_premium {
+                1.25
             } else {
                 1.0
             };
@@ -227,6 +229,9 @@ impl App {
             completion_price,
             cache_read_price,
             is_anthropic,
+            is_openai,
+            openai_cache_write_premium: is_openai
+                && crate::provider::openai::uses_prompt_cache_options(&model),
         };
 
         let call_cost = pricing.cost_for_usage(
@@ -274,6 +279,38 @@ impl App {
             cache_creation_delta,
         );
         self.cost.total_cost += call_cost;
+        self.record_api_key_spend(call_cost);
+    }
+
+    /// Accrue the cost difference between two usage snapshots of the same
+    /// in-flight call: `(input, output, cache_read, cache_creation)`.
+    ///
+    /// Repeated usage reports replace each other rather than add up, and a
+    /// later report can reclassify tokens (an OpenAI terminal frame may carry
+    /// only `cache_write_tokens`). Pricing whole snapshots and accruing the
+    /// difference bills each token once at its final category; pricing the
+    /// per-field deltas would leave the earlier fresh-input charge in place.
+    pub(super) fn accrue_remote_snapshot_cost(
+        &mut self,
+        previous: (u64, u64, u64, u64),
+        current: (u64, u64, u64, u64),
+    ) {
+        if previous == current {
+            return;
+        }
+        let Some(pricing) = self.resolve_remote_cost_pricing() else {
+            return;
+        };
+        let cost_of = |(input, output, read, write): (u64, u64, u64, u64)| {
+            pricing.cost_for_usage(input, output, read, write)
+        };
+        let call_cost = cost_of(current) - cost_of(previous);
+        if !call_cost.is_finite() {
+            return;
+        }
+        self.cost.total_cost = (self.cost.total_cost + call_cost).max(0.0);
+        // A negative difference is a refund of a category already charged;
+        // the spend ledger only records positive spend.
         self.record_api_key_spend(call_cost);
     }
 
@@ -374,6 +411,9 @@ impl App {
             completion_price: *self.cost.cached_completion_price.get_or_insert(60.0),
             cache_read_price: self.cost.cached_cache_read_price,
             is_anthropic,
+            is_openai,
+            openai_cache_write_premium: is_openai
+                && crate::provider::openai::uses_prompt_cache_options(&model),
         })
     }
 
@@ -553,5 +593,60 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod cache_cost_tests {
+    use super::ResolvedTokenPricing;
+
+    #[test]
+    fn openai_cache_writes_replace_uncached_input_cost() {
+        let pricing = ResolvedTokenPricing {
+            prompt_price: 10.0,
+            completion_price: 40.0,
+            cache_read_price: Some(1.0),
+            is_anthropic: false,
+            is_openai: true,
+            openai_cache_write_premium: true,
+        };
+        // 10K total = 2K ordinary + 6K cache reads + 2K cache writes.
+        let cost = pricing.cost_for_usage(10_000, 100, 6_000, 2_000);
+        let expected = (2_000.0 * 10.0 + 6_000.0 + 2_000.0 * 12.5 + 100.0 * 40.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 0.000001, "{cost} != {expected}");
+        assert!((pricing.cost_for_usage(10_000, 0, 6_000, 0) - 0.046).abs() < 0.000001);
+    }
+
+    #[test]
+    fn openai_legacy_models_bill_cache_writes_at_the_input_rate() {
+        // Before GPT-5.6 OpenAI documents no cache-write charge, so writes are
+        // still a subset of input but priced at 1.0x rather than 1.25x.
+        let pricing = ResolvedTokenPricing {
+            prompt_price: 10.0,
+            completion_price: 40.0,
+            cache_read_price: Some(1.0),
+            is_anthropic: false,
+            is_openai: true,
+            openai_cache_write_premium: false,
+        };
+        let cost = pricing.cost_for_usage(10_000, 100, 6_000, 2_000);
+        let expected = (2_000.0 * 10.0 + 6_000.0 + 2_000.0 * 10.0 + 100.0 * 40.0) / 1_000_000.0;
+        assert!((cost - expected).abs() < 0.000001, "{cost} != {expected}");
+    }
+
+    #[test]
+    fn write_premium_follows_the_prompt_cache_options_era() {
+        assert!(crate::provider::openai::uses_prompt_cache_options(
+            "gpt-5.6-sol"
+        ));
+        assert!(crate::provider::openai::uses_prompt_cache_options(
+            "gpt-6-astra"
+        ));
+        assert!(!crate::provider::openai::uses_prompt_cache_options(
+            "gpt-5.4"
+        ));
+        assert!(!crate::provider::openai::uses_prompt_cache_options(
+            "gpt-4.1"
+        ));
     }
 }

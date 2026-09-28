@@ -669,10 +669,12 @@ struct TokenAccounting {
     total_output_tokens: u64,
     // Total session KV cache usage for turns where the provider reported cache telemetry.
     total_cache_reported_input_tokens: u64,
+    total_cache_prompt_tokens: u64,
     total_cache_read_tokens: u64,
     total_cache_creation_tokens: u64,
     total_cache_optimal_input_tokens: u64,
     last_cache_reported_input_tokens: Option<u64>,
+    last_cache_prompt_tokens: Option<u64>,
     last_cache_read_tokens: Option<u64>,
     last_cache_creation_tokens: Option<u64>,
     last_cache_optimal_input_tokens: Option<u64>,
@@ -1755,7 +1757,10 @@ impl App {
         if self.kv_cache.current_api_usage_recorded {
             return false;
         }
-        if self.streaming.streaming_input_tokens == 0 {
+        if self.streaming.streaming_input_tokens == 0
+            && self.streaming.streaming_cache_read_tokens.unwrap_or(0) == 0
+            && self.streaming.streaming_cache_creation_tokens.unwrap_or(0) == 0
+        {
             return false;
         }
 
@@ -1765,6 +1770,7 @@ impl App {
         // For split-accounting providers (Anthropic) bare `input` is only the
         // uncached remainder, so the reusable prefix is input + read + creation.
         let effective_prompt_tokens = crate::tui::info_widget::effective_prompt_tokens(
+            &self.kv_cache_provider_name(),
             self.streaming.streaming_input_tokens,
             self.streaming.streaming_cache_read_tokens.unwrap_or(0),
             self.streaming.streaming_cache_creation_tokens.unwrap_or(0),
@@ -1795,6 +1801,11 @@ impl App {
             return true;
         }
 
+        self.token_accounting.total_cache_prompt_tokens = self
+            .token_accounting
+            .total_cache_prompt_tokens
+            .saturating_add(effective_prompt_tokens);
+        self.token_accounting.last_cache_prompt_tokens = Some(effective_prompt_tokens);
         self.token_accounting.total_cache_reported_input_tokens = self
             .token_accounting
             .total_cache_reported_input_tokens
@@ -1815,10 +1826,9 @@ impl App {
             .saturating_add(self.streaming.streaming_cache_creation_tokens.unwrap_or(0));
         self.token_accounting.last_cache_reported_input_tokens =
             Some(self.streaming.streaming_input_tokens);
-        self.token_accounting.last_cache_read_tokens =
-            Some(self.streaming.streaming_cache_read_tokens.unwrap_or(0));
+        self.token_accounting.last_cache_read_tokens = self.streaming.streaming_cache_read_tokens;
         self.token_accounting.last_cache_creation_tokens =
-            Some(self.streaming.streaming_cache_creation_tokens.unwrap_or(0));
+            self.streaming.streaming_cache_creation_tokens;
         self.token_accounting.last_cache_optimal_input_tokens = optimal_input_tokens;
 
         self.log_kv_cache_usage_summary(&request, optimal_input_tokens);
@@ -1843,12 +1853,16 @@ impl App {
         let input_tokens = self.streaming.streaming_input_tokens;
         let read_tokens = self.streaming.streaming_cache_read_tokens.unwrap_or(0);
         let creation_tokens = self.streaming.streaming_cache_creation_tokens.unwrap_or(0);
-        let read_pct = ratio_pct(read_tokens, input_tokens);
-        let creation_pct = ratio_pct(creation_tokens, input_tokens);
+        let prompt_tokens = self
+            .token_accounting
+            .last_cache_prompt_tokens
+            .unwrap_or(input_tokens);
+        let read_pct = ratio_pct(read_tokens, prompt_tokens);
+        let creation_pct = ratio_pct(creation_tokens, prompt_tokens);
         let optimal_read_pct = optimal_input_tokens.map(|optimal| ratio_pct(read_tokens, optimal));
         let session_read_pct = ratio_pct(
             self.token_accounting.total_cache_read_tokens,
-            self.token_accounting.total_cache_reported_input_tokens,
+            self.token_accounting.total_cache_prompt_tokens,
         );
         let session_optimal_read_pct = if self.token_accounting.total_cache_optimal_input_tokens > 0
         {
@@ -2045,7 +2059,11 @@ impl App {
             return;
         }
 
-        let read_tokens = self.streaming.streaming_cache_read_tokens.unwrap_or(0);
+        // Missing telemetry is not an explicit cache miss. Write-only usage
+        // and providers omitting cached_tokens must not trigger harness alarms.
+        let Some(read_tokens) = self.streaming.streaming_cache_read_tokens else {
+            return;
+        };
         let missed_tokens = expected_tokens.saturating_sub(read_tokens);
         if missed_tokens < Self::KV_CACHE_MIN_MISSED_TOKENS {
             return;
@@ -2202,13 +2220,14 @@ impl App {
     }
 
     fn kv_cache_provider_name(&self) -> String {
-        if self.uses_server_or_replay_metadata() {
+        let provider = if self.uses_server_or_replay_metadata() {
             self.remote_provider_name
                 .clone()
                 .unwrap_or_else(|| self.provider.name().to_string())
         } else {
             self.provider.name().to_string()
-        }
+        };
+        self.cache_provider_identity(&provider)
     }
 
     fn kv_cache_provider_model(&self) -> String {

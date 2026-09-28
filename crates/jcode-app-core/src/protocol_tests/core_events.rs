@@ -5,6 +5,7 @@ fn test_request_roundtrip() -> Result<()> {
         content: "hello".to_string(),
         images: vec![],
         system_reminder: None,
+        no_reply: false,
     };
     let json = serde_json::to_string(&req)?;
     let decoded = parse_request_json(&json)?;
@@ -36,140 +37,24 @@ fn test_compacted_history_request_roundtrip() -> Result<()> {
 fn test_notify_auth_changed_provider_hint_is_optional() -> Result<()> {
     let legacy = r#"{"type":"notify_auth_changed","id":9}"#;
     let decoded = parse_request_json(legacy)?;
-    let Request::NotifyAuthChanged { id, provider, auth } = decoded else {
+    let Request::NotifyAuthChanged { id, provider } = decoded else {
         return Err(anyhow!("wrong request type"));
     };
     assert_eq!(id, 9);
     assert_eq!(provider, None);
-    assert_eq!(auth, None);
 
     let req = Request::NotifyAuthChanged {
         id: 10,
         provider: Some("azure-openai".to_string()),
-        auth: None,
     };
     let json = serde_json::to_string(&req)?;
     assert!(json.contains("\"provider\":\"azure-openai\""));
     let decoded = parse_request_json(&json)?;
-    let Request::NotifyAuthChanged { id, provider, auth } = decoded else {
+    let Request::NotifyAuthChanged { id, provider } = decoded else {
         return Err(anyhow!("wrong request type"));
     };
     assert_eq!(id, 10);
     assert_eq!(provider.as_deref(), Some("azure-openai"));
-    assert_eq!(auth, None);
-    Ok(())
-}
-
-#[test]
-fn test_notify_auth_changed_typed_auth_payload_roundtrip() -> Result<()> {
-    let req = Request::NotifyAuthChanged {
-        id: 11,
-        provider: Some("cerebras".to_string()),
-        auth: Some(AuthChanged {
-            provider: AuthProviderId::new("cerebras"),
-            credential_source: Some(AuthCredentialSource::ApiKeyFile),
-            auth_method: Some(AuthMethod::RemoteTuiPasteApiKey),
-            expected_runtime: Some(RuntimeProviderKey::new("openai-compatible")),
-            expected_catalog_namespace: Some(CatalogNamespace::new("cerebras")),
-        }),
-    };
-    let json = serde_json::to_string(&req)?;
-    assert!(json.contains("\"provider\":\"cerebras\""));
-    assert!(json.contains("\"auth_method\":\"remote_tui_paste_api_key\""));
-    assert!(json.contains("\"expected_runtime\":\"openai-compatible\""));
-    assert!(json.contains("\"expected_catalog_namespace\":\"cerebras\""));
-
-    let decoded = parse_request_json(&json)?;
-    let Request::NotifyAuthChanged { id, provider, auth } = decoded else {
-        return Err(anyhow!("wrong request type"));
-    };
-    assert_eq!(id, 11);
-    assert_eq!(provider.as_deref(), Some("cerebras"));
-    let auth = auth.expect("typed auth payload should roundtrip");
-    assert_eq!(auth.provider.as_str(), "cerebras");
-    assert_eq!(
-        auth.credential_source,
-        Some(AuthCredentialSource::ApiKeyFile)
-    );
-    assert_eq!(auth.auth_method, Some(AuthMethod::RemoteTuiPasteApiKey));
-    assert_eq!(
-        auth.expected_runtime
-            .as_ref()
-            .map(RuntimeProviderKey::as_str),
-        Some("openai-compatible")
-    );
-    assert_eq!(
-        auth.expected_catalog_namespace
-            .as_ref()
-            .map(CatalogNamespace::as_str),
-        Some("cerebras")
-    );
-    Ok(())
-}
-
-#[test]
-fn test_rewind_request_roundtrip() -> Result<()> {
-    let req = Request::Rewind {
-        id: 8,
-        message_index: 3,
-    };
-    let json = serde_json::to_string(&req)?;
-    assert!(json.contains("\"type\":\"rewind\""));
-    let decoded = parse_request_json(&json)?;
-    assert_eq!(decoded.id(), 8);
-    let Request::Rewind { message_index, .. } = decoded else {
-        return Err(anyhow!("wrong request type"));
-    };
-    assert_eq!(message_index, 3);
-    Ok(())
-}
-
-#[test]
-fn test_rewind_undo_request_roundtrip() -> Result<()> {
-    let req = Request::RewindUndo { id: 9 };
-    let json = serde_json::to_string(&req)?;
-    assert!(json.contains("\"type\":\"rewind_undo\""));
-    let decoded = parse_request_json(&json)?;
-    assert_eq!(decoded.id(), 9);
-    let Request::RewindUndo { .. } = decoded else {
-        return Err(anyhow!("wrong request type"));
-    };
-    Ok(())
-}
-
-#[test]
-fn test_rename_session_request_roundtrip() -> Result<()> {
-    let req = Request::RenameSession {
-        id: 10,
-        title: Some("Release planning".to_string()),
-    };
-    let json = serde_json::to_string(&req)?;
-    assert!(json.contains("\"type\":\"rename_session\""));
-    assert!(json.contains("\"title\":\"Release planning\""));
-    let decoded = parse_request_json(&json)?;
-    assert_eq!(decoded.id(), 10);
-    let Request::RenameSession { title, .. } = decoded else {
-        return Err(anyhow!("wrong request type"));
-    };
-    assert_eq!(title.as_deref(), Some("Release planning"));
-    Ok(())
-}
-
-#[test]
-fn test_rename_session_clear_request_roundtrip_omits_title() -> Result<()> {
-    let req = Request::RenameSession {
-        id: 11,
-        title: None,
-    };
-    let json = serde_json::to_string(&req)?;
-    assert!(json.contains("\"type\":\"rename_session\""));
-    assert!(!json.contains("\"title\""));
-    let decoded = parse_request_json(&json)?;
-    assert_eq!(decoded.id(), 11);
-    let Request::RenameSession { title, .. } = decoded else {
-        return Err(anyhow!("wrong request type"));
-    };
-    assert!(title.is_none());
     Ok(())
 }
 
@@ -188,26 +73,15 @@ fn test_event_roundtrip() -> Result<()> {
 }
 
 #[test]
-fn test_session_renamed_event_roundtrip() -> Result<()> {
-    let event = ServerEvent::SessionRenamed {
-        session_id: "sess_123".to_string(),
-        title: Some("Release planning".to_string()),
-        display_title: "Release planning".to_string(),
-    };
+fn test_context_message_added_event_roundtrip() -> Result<()> {
+    let event = ServerEvent::ContextMessageAdded { id: 42 };
     let json = encode_event(&event);
-    assert!(json.contains("\"type\":\"session_renamed\""));
+    assert!(json.contains("\"type\":\"context_message_added\""));
     let decoded = parse_event_json(json.trim())?;
-    let ServerEvent::SessionRenamed {
-        session_id,
-        title,
-        display_title,
-    } = decoded
-    else {
+    let ServerEvent::ContextMessageAdded { id } = decoded else {
         return Err(anyhow!("wrong event type"));
     };
-    assert_eq!(session_id, "sess_123");
-    assert_eq!(title.as_deref(), Some("Release planning"));
-    assert_eq!(display_title, "Release planning");
+    assert_eq!(id, 42);
     Ok(())
 }
 
@@ -267,8 +141,7 @@ fn test_generated_image_event_roundtrip() -> Result<()> {
         metadata_path,
         output_format,
         revised_prompt,
-    } = decoded
-    else {
+    } = decoded else {
         return Err(anyhow!("wrong event type"));
     };
     assert_eq!(id, "ig_123");
@@ -276,39 +149,6 @@ fn test_generated_image_event_roundtrip() -> Result<()> {
     assert_eq!(metadata_path.as_deref(), Some("/tmp/generated.json"));
     assert_eq!(output_format, "png");
     assert_eq!(revised_prompt.as_deref(), Some("A polished image prompt"));
-    Ok(())
-}
-
-#[test]
-fn test_side_pane_images_event_roundtrip() -> Result<()> {
-    let event = ServerEvent::SidePaneImages {
-        session_id: "session_active".to_string(),
-        images: vec![jcode_session_types::RenderedImage {
-            media_type: "image/png".to_string(),
-            data: "base64-data".to_string(),
-            label: Some("openclaw.png".to_string()),
-            source: jcode_session_types::RenderedImageSource::ToolResult {
-                tool_name: "read".to_string(),
-            },
-            anchor: None,
-        }],
-    };
-    let json = encode_event(&event);
-    assert!(json.contains("\"type\":\"side_pane_images\""));
-    let decoded = parse_event_json(json.trim())?;
-    let ServerEvent::SidePaneImages { session_id, images } = decoded else {
-        return Err(anyhow!("wrong event type"));
-    };
-    assert_eq!(session_id, "session_active");
-    assert_eq!(images.len(), 1);
-    assert_eq!(images[0].media_type, "image/png");
-    assert_eq!(images[0].label.as_deref(), Some("openclaw.png"));
-    assert_eq!(
-        images[0].source,
-        jcode_session_types::RenderedImageSource::ToolResult {
-            tool_name: "read".to_string(),
-        }
-    );
     Ok(())
 }
 
@@ -353,10 +193,7 @@ fn test_history_event_decodes_without_compaction_mode_for_older_servers() -> Res
     assert_eq!(provider_model.as_deref(), Some("gpt-5.4"));
     assert_eq!(available_models, vec!["gpt-5.4"]);
     assert_eq!(connection_type.as_deref(), Some("websocket"));
-    assert_eq!(
-        compaction_mode,
-        jcode_config_types::CompactionMode::Reactive
-    );
+    assert_eq!(compaction_mode, crate::config::CompactionMode::Reactive);
     assert!(!side_panel.has_pages());
     Ok(())
 }
@@ -367,6 +204,7 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         id: 101,
         session_id: "ses_test_456".to_string(),
         messages: vec![HistoryMessage {
+            response_stats: None,
             role: "assistant".to_string(),
             content: "hello".to_string(),
             tool_calls: None,
@@ -407,16 +245,18 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         subagent_model: None,
         autoreview_enabled: None,
         autojudge_enabled: None,
-        compaction_mode: jcode_config_types::CompactionMode::Reactive,
+        compaction_mode: crate::config::CompactionMode::Reactive,
         activity: None,
-        side_panel: jcode_side_panel_types::SidePanelSnapshot {
+        side_panel: crate::side_panel::SidePanelSnapshot {
+            focus_revision: 0,
             focused_page_id: Some("page-1".to_string()),
-            pages: vec![jcode_side_panel_types::SidePanelPage {
+            pages: vec![crate::side_panel::SidePanelPage {
                 id: "page-1".to_string(),
                 title: "Notes".to_string(),
                 file_path: "/tmp/notes.md".to_string(),
-                format: jcode_side_panel_types::SidePanelPageFormat::Markdown,
-                source: jcode_side_panel_types::SidePanelPageSource::Managed,
+                format: crate::side_panel::SidePanelPageFormat::Markdown,
+                pdf_data: None,
+                source: crate::side_panel::SidePanelPageSource::Managed,
                 content: "# Notes".to_string(),
                 updated_at_ms: 42,
             }],
@@ -459,6 +299,7 @@ fn test_compacted_history_event_roundtrip() -> Result<()> {
         id: 77,
         session_id: "ses_compact_123".to_string(),
         messages: vec![HistoryMessage {
+            response_stats: None,
             role: "assistant".to_string(),
             content: "older response".to_string(),
             tool_calls: None,
@@ -498,14 +339,16 @@ fn test_compacted_history_event_roundtrip() -> Result<()> {
 #[test]
 fn test_side_panel_state_event_roundtrip() -> Result<()> {
     let event = ServerEvent::SidePanelState {
-        snapshot: jcode_side_panel_types::SidePanelSnapshot {
+        snapshot: crate::side_panel::SidePanelSnapshot {
+            focus_revision: 0,
             focused_page_id: Some("page-1".to_string()),
-            pages: vec![jcode_side_panel_types::SidePanelPage {
+            pages: vec![crate::side_panel::SidePanelPage {
                 id: "page-1".to_string(),
                 title: "Notes".to_string(),
                 file_path: "/tmp/notes.md".to_string(),
-                format: jcode_side_panel_types::SidePanelPageFormat::Markdown,
-                source: jcode_side_panel_types::SidePanelPageSource::Managed,
+                format: crate::side_panel::SidePanelPageFormat::Markdown,
+                pdf_data: None,
+                source: crate::side_panel::SidePanelPageSource::Managed,
                 content: "updated".to_string(),
                 updated_at_ms: 99,
             }],
@@ -562,29 +405,5 @@ fn test_error_event_retry_after_back_compat_default() -> Result<()> {
     assert_eq!(id, 7);
     assert_eq!(message, "oops");
     assert_eq!(retry_after_secs, None);
-    Ok(())
-}
-
-/// Old servers and old session files never wrote `cache_prompt_tokens`. The
-/// field must read back as None (unknown), and None must not be written, so
-/// old and new peers exchange History payloads unchanged.
-#[test]
-fn test_token_usage_totals_cache_prompt_is_optional_on_the_wire() -> Result<()> {
-    let legacy = r#"{"messages_with_token_usage":2,"input_tokens":123,"output_tokens":45,"cache_reported_input_tokens":100,"cache_read_input_tokens":80,"cache_creation_input_tokens":10}"#;
-    let totals: TokenUsageTotals = serde_json::from_str(legacy)?;
-    assert_eq!(totals.cache_prompt_tokens, None);
-    assert_eq!(totals.input_tokens, 123);
-    let json = serde_json::to_string(&totals)?;
-    assert!(!json.contains("cache_prompt_tokens"), "{json}");
-
-    let known = TokenUsageTotals {
-        cache_prompt_tokens: Some(130),
-        ..totals
-    };
-    let json = serde_json::to_string(&known)?;
-    assert!(json.contains("\"cache_prompt_tokens\":130"), "{json}");
-    let restored: TokenUsageTotals = serde_json::from_str(&json)?;
-    assert_eq!(restored.cache_prompt_tokens, Some(130));
-    assert_eq!(restored.cache_read_input_tokens, 80);
     Ok(())
 }
