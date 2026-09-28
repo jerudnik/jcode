@@ -7,8 +7,8 @@ use super::{
     member_status_is_dead, now_unix_ms, parse_swarm_tasks, refresh_swarm_task_staleness,
     remove_session_from_swarm, salvage_assignments_of_dead_member, swarm_ancestors,
     swarm_is_self_or_ancestor, swarm_member_status_at, swarm_spawn_depth,
-    terminal_status_for_turn_error,
-    touch_swarm_task_progress, update_member_status, update_member_status_with_report,
+    terminal_status_for_turn_error, touch_swarm_task_progress, update_member_status,
+    update_member_status_with_report,
 };
 use crate::plan::PlanItem;
 use crate::protocol::{NotificationType, ServerEvent};
@@ -1345,6 +1345,91 @@ async fn refresh_swarm_task_staleness_marks_running_tasks_stale_and_heartbeat_re
         Some("checkpoint saved")
     );
     assert!(progress.stale_since_unix_ms.is_none());
+}
+
+/// A stopped worker's heartbeat task can outlive its assignment. When the
+/// task has since been reassigned, that late touch must not rewrite
+/// `assigned_session_id` to the old worker: the grant lookup requires it to
+/// match `assigned_to`, so the replacement worker would lose its grant and be
+/// refused every tool call while `swarm status` still shows it running.
+#[tokio::test]
+async fn touch_from_a_replaced_assignee_does_not_steal_the_assignment() {
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        "swarm-1".to_string(),
+        HashSet::from(["old-worker".to_string(), "new-worker".to_string()]),
+    )])));
+    let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+        "swarm-1".to_string(),
+        VersionedPlan {
+            items: vec![PlanItem {
+                content: "task".to_string(),
+                status: "running".to_string(),
+                priority: "medium".to_string(),
+                id: "task-1".to_string(),
+                subsystem: None,
+                file_scope: Vec::new(),
+                blocked_by: Vec::new(),
+                assigned_to: Some("new-worker".to_string()),
+            }],
+            version: 1,
+            participants: HashSet::from(["new-worker".to_string()]),
+            task_progress: HashMap::from([(
+                "task-1".to_string(),
+                crate::server::SwarmTaskProgress {
+                    assigned_session_id: Some("new-worker".to_string()),
+                    ..Default::default()
+                },
+            )]),
+            mode: "light".to_string(),
+            node_meta: HashMap::new(),
+            max_nodes: None,
+            frozen: false,
+            safety_ledger: None,
+        },
+    )])));
+
+    let revived = touch_swarm_task_progress(
+        "swarm-1",
+        "task-1",
+        Some("old-worker"),
+        Some("late tool done".to_string()),
+        None,
+        &swarm_members,
+        &swarms_by_id,
+        &swarm_plans,
+        &swarm_coordinators,
+    )
+    .await;
+    assert!(!revived);
+    {
+        let plans = swarm_plans.read().await;
+        let progress = &plans["swarm-1"].task_progress["task-1"];
+        assert_eq!(progress.assigned_session_id.as_deref(), Some("new-worker"));
+        assert_eq!(
+            progress.last_detail, None,
+            "stale touch must not record detail"
+        );
+    }
+
+    // The real assignee still touches normally.
+    touch_swarm_task_progress(
+        "swarm-1",
+        "task-1",
+        Some("new-worker"),
+        Some("working".to_string()),
+        None,
+        &swarm_members,
+        &swarms_by_id,
+        &swarm_plans,
+        &swarm_coordinators,
+    )
+    .await;
+    let plans = swarm_plans.read().await;
+    let progress = &plans["swarm-1"].task_progress["task-1"];
+    assert_eq!(progress.assigned_session_id.as_deref(), Some("new-worker"));
+    assert_eq!(progress.last_detail.as_deref(), Some("working"));
 }
 
 #[test]

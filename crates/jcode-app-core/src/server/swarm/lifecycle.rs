@@ -430,7 +430,10 @@ pub(in crate::server) fn expired_terminal_member_ids(
 /// the session's agent loop is gone, so no heartbeat or turn end will ever
 /// arrive for tasks it holds.
 #[deprecated(note = "use SwarmLifecycleStatus::is_dead_state")]
-#[allow(dead_code, reason = "parity bridge kept for the W23 compatibility tests")]
+#[allow(
+    dead_code,
+    reason = "parity bridge kept for the W23 compatibility tests"
+)]
 pub(in crate::server) fn member_status_is_dead(status: &str) -> bool {
     matches!(
         jcode_swarm_core::MemberLifecycleState::from_compatibility_status(status),
@@ -672,6 +675,16 @@ pub(in crate::server) async fn touch_swarm_task_progress(
         let Some(item) = plan.items.iter_mut().find(|item| item.id == task_id) else {
             return false;
         };
+        // Only the item's current assignee may touch its progress. A
+        // heartbeat task or late tool event from a worker that was stopped and
+        // replaced must not write itself back as `assigned_session_id`; that
+        // would strip the replacement worker's assignment grant while
+        // `assigned_to` still names it.
+        if let (Some(caller), Some(owner)) = (assigned_session_id, item.assigned_to.as_deref())
+            && caller != owner
+        {
+            return false;
+        }
         let progress = plan.task_progress.entry(task_id.to_string()).or_default();
         if let Some(session_id) = assigned_session_id {
             progress.assigned_session_id = Some(session_id.to_string());
