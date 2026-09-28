@@ -1,3 +1,4 @@
+use super::queue_recovery::recover_rejected_queued_continuation;
 use super::*;
 use crate::tool::selfdev::ReloadContext;
 use crate::tui::TuiState;
@@ -1094,7 +1095,7 @@ pub(in crate::tui::app) fn handle_server_event(
             // Reconnect can report idle before the server's turn-end dispatch. Requeue
             // the rejected follow-up and adopt the still-running turn to avoid data loss.
             if message == "Already processing a message"
-                && recover_undelivered_queued_continuation(app, "server busy rejection")
+                && recover_rejected_queued_continuation(app)
             {
                 app.is_processing = true;
                 app.status = ProcessingStatus::Thinking(Instant::now());

@@ -10,6 +10,159 @@
 // reload snapshot must therefore fold it back into the queue.
 
 #[test]
+fn test_busy_automatic_continuation_waits_for_running_turn_without_retrying() {
+    // An explicit "Already processing" rejection proves the send was not
+    // accepted, so even an automatic (auto_retry) reminder is safe to requeue.
+    // The running turn is re-adopted and only its real completion releases
+    // the queue; live stream activity must not demote it to a synthetic
+    // startup send.
+    for auto_retry in [false, true] {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.auto_poke_incomplete_todos = false;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        remote.mark_history_loaded();
+        rt.block_on(remote::begin_remote_send(
+            &mut app,
+            &mut remote,
+            String::new(),
+            vec![],
+            true,
+            Some("Continue the pending task".to_string()),
+            auto_retry,
+            2,
+        ))
+        .unwrap();
+        let rejected_id = app.current_message_id.unwrap();
+        app.handle_server_event(
+            crate::protocol::ServerEvent::Error {
+                id: rejected_id,
+                message: "Already processing a message".to_string(),
+                retry_after_secs: None,
+            },
+            &mut remote,
+        );
+
+        assert!(app.is_processing, "auto_retry={auto_retry}");
+        assert!(app.current_message_id.is_none(), "auto_retry={auto_retry}");
+        assert!(
+            app.rate_limit_pending_message.is_none(),
+            "auto_retry={auto_retry}"
+        );
+        assert!(app.rate_limit_reset.is_none(), "auto_retry={auto_retry}");
+        assert_eq!(
+            app.hidden_queued_system_messages,
+            ["Continue the pending task"],
+            "auto_retry={auto_retry}"
+        );
+        assert!(
+            !app.display_messages().iter().any(|m| m.role == "error"),
+            "auto_retry={auto_retry}"
+        );
+        assert!(
+            app.pending_fallback_offer.is_none(),
+            "auto_retry={auto_retry}"
+        );
+
+        // Real live activity clears the resume snapshot. That must not turn
+        // the running turn into a synthetic startup send on the next event.
+        app.handle_server_event(
+            crate::protocol::ServerEvent::ReasoningDelta {
+                text: "Still working".to_string(),
+            },
+            &mut remote,
+        );
+        assert!(app.remote_resume_activity.is_none());
+        rt.block_on(remote::process_remote_followups(&mut app, &mut remote));
+        rt.block_on(remote::handle_tick(&mut app, &mut remote));
+        assert!(app.is_processing, "auto_retry={auto_retry}");
+        assert!(app.current_message_id.is_none(), "auto_retry={auto_retry}");
+        assert_eq!(
+            app.hidden_queued_system_messages,
+            ["Continue the pending task"],
+            "auto_retry={auto_retry}"
+        );
+
+        app.handle_server_event(crate::protocol::ServerEvent::MessageEnd, &mut remote);
+        let ops = app.stream_buffer.flush();
+        app.apply_stream_ops(ops);
+        app.handle_server_event(crate::protocol::ServerEvent::Done { id: 0 }, &mut remote);
+        assert!(
+            !app.is_processing,
+            "only real turn completion releases the queue (auto_retry={auto_retry})"
+        );
+        rt.block_on(remote::process_remote_followups(&mut app, &mut remote));
+        assert!(app.is_processing, "auto_retry={auto_retry}");
+        assert!(app.hidden_queued_system_messages.is_empty());
+        assert_eq!(
+            app.rate_limit_pending_message
+                .as_ref()
+                .unwrap()
+                .system_reminder
+                .as_deref(),
+            Some("Continue the pending task")
+        );
+    }
+}
+
+#[test]
+fn test_external_stream_with_queued_followup_is_not_synthetic_startup() {
+    // A turn started elsewhere (wake, resume, another client) streams into
+    // this client with no local request id. A queued follow-up must wait for
+    // it instead of the dispatcher treating the turn as a stuck startup send.
+    let mut app = create_test_app();
+    app.is_remote = true;
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+    app.queued_messages
+        .push("Wait until this turn ends".to_string());
+    app.handle_server_event(
+        crate::protocol::ServerEvent::ReasoningDelta {
+            text: "Working on the original task".to_string(),
+        },
+        &mut remote,
+    );
+    rt.block_on(remote::process_remote_followups(&mut app, &mut remote));
+    assert!(app.is_processing);
+    assert!(app.current_message_id.is_none());
+    assert_eq!(app.queued_messages(), &["Wait until this turn ends"]);
+    assert!(app.rate_limit_pending_message.is_none());
+}
+
+#[test]
+fn test_disconnect_does_not_requeue_auto_retry_continuation() {
+    // A disconnect leaves delivery unknown: the server may already be running
+    // an automatic continuation. Unlike an explicit busy rejection, it must
+    // not be folded back into the queue, or it would replay once reattached.
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    app.is_processing = true;
+    app.status = ProcessingStatus::Streaming;
+    app.current_message_id = Some(12);
+    app.rate_limit_pending_message = Some(PendingRemoteMessage {
+        content: String::new(),
+        images: vec![],
+        is_system: true,
+        system_reminder: Some("automatic reminder".to_string()),
+        auto_retry: true,
+        retry_attempts: 0,
+        retry_at: None,
+    });
+    app.rate_limit_reset = None;
+
+    let mut state = remote::RemoteRunState::default();
+    remote::handle_disconnect(&mut app, &mut state, None);
+
+    assert!(app.queued_messages().is_empty());
+    assert!(app.hidden_queued_system_messages.is_empty());
+}
+
+#[test]
 fn test_disconnect_recovers_inflight_queued_continuation_to_queue() {
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();

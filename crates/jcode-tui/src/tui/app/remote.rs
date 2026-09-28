@@ -1099,6 +1099,11 @@ pub(super) async fn process_remote_followups(app: &mut App, remote: &mut RemoteC
     }
 
     let synthetic_startup_dispatch = app.is_processing
+        // Only a locally staged send is synthetic. A resumed/external turn
+        // has no request id either, and its resume marker is cleared as soon
+        // as live stream events arrive. Never demote that running turn just
+        // because a follow-up is queued.
+        && matches!(app.status, ProcessingStatus::Sending)
         && app.current_message_id.is_none()
         && app.remote_resume_activity.is_none()
         && (app.submit_input_on_startup
