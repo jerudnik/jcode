@@ -208,6 +208,7 @@ struct KvCacheBaseline {
     ///   uncached remainder of that one request.
     input_tokens: u64,
     completed_at: Instant,
+    cache_ttl_secs: Option<u64>,
     provider: String,
     model: String,
     upstream_provider: Option<String>,
@@ -218,6 +219,7 @@ struct KvCacheBaseline {
 struct PendingKvCacheRequest {
     turn_number: usize,
     call_index: u16,
+    cache_ttl_secs: Option<u64>,
     provider: String,
     model: String,
     upstream_provider: Option<String>,
@@ -1555,6 +1557,10 @@ impl App {
         self.kv_cache.pending_kv_cache_request = Some(PendingKvCacheRequest {
             turn_number,
             call_index: self.kv_cache.kv_cache_turn_call_index,
+            cache_ttl_secs: crate::tui::cache_ttl_for_provider_model(
+                &self.kv_cache_provider_name(),
+                Some(&self.kv_cache_provider_model()),
+            ),
             provider: self.kv_cache_provider_name(),
             model: self.kv_cache_provider_model(),
             upstream_provider: self.upstream_provider.clone(),
@@ -1601,6 +1607,10 @@ impl App {
         self.kv_cache.pending_kv_cache_request = Some(PendingKvCacheRequest {
             turn_number,
             call_index: self.kv_cache.kv_cache_turn_call_index,
+            cache_ttl_secs: crate::tui::cache_ttl_for_provider_model(
+                &self.kv_cache_provider_name(),
+                Some(&self.kv_cache_provider_model()),
+            ),
             provider: self.kv_cache_provider_name(),
             model: self.kv_cache_provider_model(),
             upstream_provider: self.upstream_provider.clone(),
@@ -1670,13 +1680,13 @@ impl App {
             let Some(baseline) = self.kv_cache.kv_cache_baseline.as_ref() else {
                 return false;
             };
-            if self.kv_cache.cold_cache_warned_baseline_completed_at == Some(baseline.completed_at)
+            if crate::provider::cache_ttl_is_estimate(&baseline.provider)
+                || self.kv_cache.cold_cache_warned_baseline_completed_at
+                    == Some(baseline.completed_at)
             {
                 return false;
             }
-            let Some(ttl_secs) =
-                crate::tui::cache_ttl_for_provider_model(&baseline.provider, Some(&baseline.model))
-            else {
+            let Some(ttl_secs) = baseline.cache_ttl_secs else {
                 return false;
             };
             if baseline.completed_at.elapsed().as_secs() < ttl_secs {
@@ -1707,9 +1717,13 @@ impl App {
         baseline: &KvCacheBaseline,
         trigger: ColdCacheWarningTrigger,
     ) -> bool {
-        let Some(ttl_secs) =
-            crate::tui::cache_ttl_for_provider_model(&baseline.provider, Some(&baseline.model))
-        else {
+        if crate::provider::cache_ttl_is_estimate(&baseline.provider)
+            || baseline.provider != self.kv_cache_provider_name()
+            || baseline.model != self.kv_cache_provider_model()
+        {
+            return false;
+        }
+        let Some(ttl_secs) = baseline.cache_ttl_secs else {
             return false;
         };
         let age_secs = baseline.completed_at.elapsed().as_secs();
@@ -1732,7 +1746,8 @@ impl App {
         } else {
             tokens.to_string()
         };
-        // Keep this to a single short line. The idle trigger fires the moment
+        // Only the active Anthropic/Claude route reaches this warning, so /cache
+        // can extend its retention. Keep this to a single short line. The idle trigger fires the moment
         // the TTL expires, so an "N ago" detail would always read ~0s there;
         // the request-start fallback can fire long after expiry (e.g.
         // suspended TUI), where the age is genuinely informative.
@@ -1793,6 +1808,7 @@ impl App {
                 session_id: baseline_session_id,
                 input_tokens: self.streaming.streaming_input_tokens,
                 completed_at: Instant::now(),
+                cache_ttl_secs: request.cache_ttl_secs,
                 provider: request.provider,
                 model: request.model,
                 upstream_provider: request.upstream_provider,
@@ -1837,6 +1853,7 @@ impl App {
             session_id: baseline_session_id,
             input_tokens: effective_prompt_tokens,
             completed_at: Instant::now(),
+            cache_ttl_secs: request.cache_ttl_secs,
             provider: request.provider,
             model: request.model,
             upstream_provider: request.upstream_provider,
@@ -1904,9 +1921,14 @@ impl App {
             .map(|baseline| baseline.input_tokens);
         let missed_tokens =
             baseline_input_tokens.map(|baseline| baseline.saturating_sub(read_tokens));
-        let ttl_secs = request.baseline.as_ref().and_then(|baseline| {
-            crate::tui::cache_ttl_for_provider_model(&baseline.provider, Some(&baseline.model))
-        });
+        let ttl_secs = request
+            .baseline
+            .as_ref()
+            .and_then(|baseline| baseline.cache_ttl_secs);
+        let ttl_is_estimate = request
+            .baseline
+            .as_ref()
+            .is_some_and(|baseline| crate::provider::cache_ttl_is_estimate(&baseline.provider));
         let ttl_remaining_secs = ttl_secs
             .zip(baseline_age_secs)
             .map(|(ttl, age)| ttl.saturating_sub(age));
@@ -1971,7 +1993,7 @@ impl App {
              optimal_input={:?} optimal_read_pct={:?} missed_tokens={:?} miss={} \
              session_input={} session_read={} session_write={} session_read_pct={} \
              session_optimal_input={} session_optimal_read_pct={:?} \
-             baseline_input={:?} baseline_age_secs={:?} ttl_secs={:?} ttl_remaining_secs={:?} \
+             baseline_input={:?} baseline_age_secs={:?} ttl_secs={:?} ttl_remaining_secs={:?} ttl_is_estimate={} \
              prefix_matches={:?} common_prefix_messages={:?} first_changed_message_index={:?} \
              system_changed={:?} tools_changed={:?} message_prefix_changed={:?} message_full_hash_changed={:?} dynamic_changed={:?} \
              message_count={:?} baseline_message_count={:?} tool_count={:?} baseline_tool_count={:?} \
@@ -2003,6 +2025,7 @@ impl App {
             baseline_age_secs,
             ttl_secs,
             ttl_remaining_secs,
+            ttl_is_estimate,
             request.baseline_messages_prefix_matches,
             common_prefix_messages,
             first_changed_message_index,
@@ -2041,6 +2064,10 @@ impl App {
                 .count()
                 .max(1),
             call_index: 1,
+            cache_ttl_secs: crate::tui::cache_ttl_for_provider_model(
+                &self.kv_cache_provider_name(),
+                Some(&self.kv_cache_provider_model()),
+            ),
             provider: self.kv_cache_provider_name(),
             model: self.kv_cache_provider_model(),
             upstream_provider: self.upstream_provider.clone(),
@@ -2185,8 +2212,8 @@ impl App {
             return KvCacheMissReason::UpstreamSwitch;
         }
 
-        if let Some(ttl_secs) =
-            crate::tui::cache_ttl_for_provider_model(&baseline.provider, Some(&baseline.model))
+        if let Some(ttl_secs) = baseline.cache_ttl_secs
+            && !crate::provider::cache_ttl_is_estimate(&baseline.provider)
             && baseline.completed_at.elapsed() >= Duration::from_secs(ttl_secs)
         {
             return KvCacheMissReason::Expired;

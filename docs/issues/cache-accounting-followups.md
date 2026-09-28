@@ -1,5 +1,5 @@
 ---
-title: "Cache accounting: restored-history cost, estimate warnings and unknown ratios"
+title: "Cache accounting: restored-history cost and unknown accounting"
 status: open
 priority: medium
 owner: unassigned
@@ -11,15 +11,14 @@ related:
   - crates/jcode-compaction-core/src/lib.rs
 ---
 
-# Cache accounting: restored-history cost, estimate warnings and unknown ratios
+# Cache accounting: restored-history cost and unknown accounting
 
 The per-request cache accounting port (upstream 8343408df, 8ef938219,
 c0be37ce1, db75c8013) landed with the contract's core invariants covered:
 resolved `prompt_tokens` per request, `cache_prompt_tokens` totals with
 zip semantics, snapshot-difference cost accrual, and a compaction feed that
 no longer drops fully cached Anthropic prompts. The independent review
-(gpt-6-astra, 2026-09-28) left four items that are real but outside that
-port's scope. None is a regression from before the port.
+(gpt-6-astra, 2026-09-28) identified these remaining follow-ups.
 
 ## 1. Restored history is priced from raw aggregates with the current model
 
@@ -38,15 +37,6 @@ Fix direction: persist a per-request cost (or per-provider sub-totals) at
 record time, or keep per-message `StoredTokenUsage` plus provider identity
 and reprice by walking the history on restore. Do not add
 `cache_prompt_tokens` into the existing formula; it does not partition.
-
-## 2. Estimated TTLs still produce definitive expiry warnings
-
-`cache_ttl_is_estimate` is consulted only by `/cache stats`. The KV-cache
-warnings in `app.rs` (around `Prompt cache went cold` and the
-`/cache to extend` hint) treat an OpenAI estimate as a hard expiry, and the
-`/cache` extend hint is Anthropic-only advice shown on OpenAI routes.
-Upstream b3a005e41 and f9185a14e cover this; they were not in the reviewed
-port set.
 
 ## 3. Write-only telemetry shows a 0% session read ratio
 
