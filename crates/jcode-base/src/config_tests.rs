@@ -1441,3 +1441,72 @@ id = "gateway-model"
         Config::invalidate_cache();
     });
 }
+
+#[test]
+fn mcp_tools_mode_defaults_to_auto_with_8000_threshold() {
+    let cfg = ToolConfig::default();
+    assert_eq!(cfg.mcp_tools, super::McpToolsMode::Auto);
+    assert_eq!(cfg.mcp_tools_token_threshold, 8000);
+
+    let parsed: Config = toml::from_str("[tools]\nprofile = \"full\"\n").expect("parse");
+    assert_eq!(parsed.tools.mcp_tools, super::McpToolsMode::Auto);
+    assert_eq!(parsed.tools.mcp_tools_token_threshold, 8000);
+}
+
+#[test]
+fn mcp_tools_mode_round_trips_through_toml_and_parse() {
+    use super::McpToolsMode;
+    for (raw, expected) in [
+        ("auto", McpToolsMode::Auto),
+        ("eager", McpToolsMode::Eager),
+        ("deferred", McpToolsMode::Deferred),
+    ] {
+        let cfg: Config = toml::from_str(&format!(
+            "[tools]\nmcp_tools = \"{raw}\"\nmcp_tools_token_threshold = 1234\n"
+        ))
+        .expect("mode should parse");
+        assert_eq!(cfg.tools.mcp_tools, expected, "{raw}");
+        assert_eq!(cfg.tools.mcp_tools_token_threshold, 1234);
+        assert_eq!(McpToolsMode::parse(raw), Some(expected));
+        assert_eq!(expected.as_str(), raw);
+        let serialized = toml::to_string(&cfg.tools).expect("serialize");
+        let round_trip: ToolConfig = toml::from_str(&serialized).expect("deserialize");
+        assert_eq!(round_trip.mcp_tools, expected);
+    }
+}
+
+#[test]
+fn mcp_tools_mode_parser_normalizes_known_values_and_rejects_unknown_values() {
+    use super::McpToolsMode;
+    assert_eq!(
+        McpToolsMode::parse(" Deferred "),
+        Some(McpToolsMode::Deferred)
+    );
+    assert_eq!(McpToolsMode::parse("nope"), None);
+    assert!(toml::from_str::<Config>("[tools]\nmcp_tools = \"nope\"\n").is_err());
+}
+
+#[test]
+fn mcp_tools_environment_overrides_apply_and_fall_back_on_invalid_values() {
+    use super::McpToolsMode;
+    let _guard = crate::storage::lock_test_env();
+    let _mode = crate::storage::EnvVarGuard::set("JCODE_MCP_TOOLS", "deferred");
+    let _threshold = crate::storage::EnvVarGuard::set("JCODE_MCP_TOOLS_TOKEN_THRESHOLD", "42");
+    let mut cfg = Config::default();
+    cfg.apply_env_overrides();
+    assert_eq!(cfg.tools.mcp_tools, McpToolsMode::Deferred);
+    assert_eq!(cfg.tools.mcp_tools_token_threshold, 42);
+
+    crate::env::set_var("JCODE_MCP_TOOLS", "bogus");
+    crate::env::set_var("JCODE_MCP_TOOLS_TOKEN_THRESHOLD", "-1");
+    let mut cfg: Config =
+        toml::from_str("[tools]\nmcp_tools = \"eager\"\nmcp_tools_token_threshold = 5\n")
+            .expect("parse");
+    cfg.apply_env_overrides();
+    assert_eq!(
+        cfg.tools.mcp_tools,
+        McpToolsMode::Auto,
+        "invalid env mode falls back to the default, not the file value"
+    );
+    assert_eq!(cfg.tools.mcp_tools_token_threshold, 8000);
+}
