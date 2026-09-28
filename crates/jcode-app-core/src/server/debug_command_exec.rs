@@ -305,7 +305,7 @@ pub(super) async fn execute_debug_command(
         let tool_names = agent.tool_names().await;
         let mcp_tools: Vec<&str> = tool_names
             .iter()
-            .filter(|name| name.starts_with("mcp__"))
+            .filter(|name| name.starts_with("mcp__") || crate::tool::is_fixed_mcp_tool(name))
             .map(|name| name.as_str())
             .collect();
         return Ok(serde_json::to_string_pretty(&mcp_tools).unwrap_or_else(|_| "[]".to_string()));

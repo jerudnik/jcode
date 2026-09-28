@@ -453,6 +453,13 @@ impl Agent {
         // `mcp_late_register_resolved` flag makes this a one-shot check so we do
         // not rescan the registry on every subsequent turn.
         if let Some(ref locked) = self.locked_tools {
+            // A locked deferred surface cannot change when per-server tools
+            // finish registering: the fixed pair already covers them. Return
+            // without consuming the latch or rescanning, so registration never
+            // resets the provider prompt cache for an identical surface.
+            if Self::locked_uses_fixed_mcp_surface(locked) {
+                return locked.clone();
+            }
             if self.mcp_late_register_resolved {
                 return locked.clone();
             }
@@ -494,13 +501,100 @@ impl Agent {
     /// session's `allowed_tools`, `disabled_tools`, self-dev filters, and the
     /// active transport's tool-name limit.
     async fn build_filtered_tool_definitions(&mut self) -> Vec<ToolDefinition> {
-        let mut tools = self.registry.definitions(self.allowed_tools.as_ref()).await;
-        if !self.disabled_tools.is_empty() {
-            tools.retain(|tool| !self.disabled_tools.contains(&tool.name));
-        }
+        let mut tools = self.mcp_exposure_candidates().await;
+        self.mcp_tool_name_candidates = tools
+            .iter()
+            .filter(|tool| tool.name.starts_with("mcp__"))
+            .map(|tool| tool.name.clone())
+            .collect();
         self.apply_tool_name_limit(&mut tools);
+        Self::apply_mcp_tool_exposure(
+            &mut tools,
+            self.mcp_tools_mode,
+            self.mcp_tools_token_threshold,
+            self.allowed_tools.as_ref(),
+        );
+        tools.retain(|tool| crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), &tool.name));
         Self::apply_selfdev_tool_surface(&mut tools, self.session.is_canary);
         tools
+    }
+
+    /// Explicit mcp_call permission can dispatch the catalog even when no
+    /// individual proxy is allow-listed. Include those definitions only while
+    /// resolving exposure; eager visibility still uses the exact allow list.
+    async fn mcp_exposure_candidates(&self) -> Vec<ToolDefinition> {
+        let explicit_call = self
+            .allowed_tools
+            .as_ref()
+            .is_some_and(|allowed| allowed.contains(crate::tool::MCP_CALL_TOOL_NAME));
+        let mut tools = self.registry.definitions(None).await;
+        tools.retain(|tool| {
+            !self.disabled_tools.contains(&tool.name)
+                && (crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), &tool.name)
+                    || (explicit_call && tool.name.starts_with("mcp__")))
+        });
+        tools
+    }
+
+    /// True when a locked snapshot advertises the deferred fixed surface and
+    /// no per-tool `mcp__*` proxies.
+    pub(super) fn locked_uses_fixed_mcp_surface(locked: &[ToolDefinition]) -> bool {
+        let mut has_fixed = false;
+        for tool in locked {
+            if tool.name.starts_with("mcp__") {
+                return false;
+            }
+            if crate::tool::is_fixed_mcp_tool(&tool.name) {
+                has_fixed = true;
+            }
+        }
+        has_fixed
+    }
+
+    /// Resolve the MCP exposure mode over an already policy-filtered set.
+    /// Runs before the snapshot locks, so the locked list is mode-resolved.
+    ///
+    /// `Eager` keeps every `mcp__*` proxy and drops the fixed pair, which is
+    /// today's exact surface. `Deferred` drops the proxies and keeps the pair
+    /// only when at least one proxy was visible, so a session with no MCP
+    /// catalog keeps today's exact surface too. `Auto` defers when the
+    /// filtered eager surface's prompt-token estimate exceeds `threshold`; a
+    /// threshold of 0 therefore defers any non-empty catalog.
+    pub(super) fn apply_mcp_tool_exposure(
+        tools: &mut Vec<ToolDefinition>,
+        mode: crate::config::McpToolsMode,
+        threshold: usize,
+        allowed: Option<&HashSet<String>>,
+    ) {
+        use crate::config::McpToolsMode;
+        let has_proxies = tools.iter().any(|tool| tool.name.starts_with("mcp__"));
+        let estimate: usize = tools
+            .iter()
+            .filter(|tool| !crate::tool::is_fixed_mcp_tool(&tool.name))
+            .map(ToolDefinition::prompt_token_estimate)
+            .sum();
+        let defer = match mode {
+            McpToolsMode::Eager => false,
+            McpToolsMode::Deferred => true,
+            McpToolsMode::Auto => has_proxies && estimate > threshold,
+        };
+        if defer && has_proxies {
+            logging::event_info(
+                "MCP_EXPOSURE",
+                vec![
+                    ("mode", mode.as_str().to_string()),
+                    ("surface", "deferred".to_string()),
+                    ("eager_token_estimate", estimate.to_string()),
+                    ("threshold", threshold.to_string()),
+                ],
+            );
+            tools.retain(|tool| !tool.name.starts_with("mcp__"));
+        } else {
+            tools.retain(|tool| {
+                !crate::tool::is_fixed_mcp_tool(&tool.name)
+                    || (has_proxies && allowed.is_some_and(|set| set.contains(&tool.name)))
+            });
+        }
     }
 
     /// Withhold tools whose advertised name the active transport would reject
@@ -534,6 +628,7 @@ impl Agent {
             );
         }
         crate::tool::set_session_name_exclusions(&self.session.id, excluded.clone());
+        crate::tool::set_session_mcp_name_limit(&self.session.id, limit);
         self.name_excluded_tools = excluded;
         self.locked_tool_name_limit = Some(limit);
     }
@@ -548,6 +643,28 @@ impl Agent {
         };
         let current = self.provider.capabilities().tool_name_limit;
         if current == previous {
+            return;
+        }
+        crate::tool::set_session_mcp_name_limit(&self.session.id, current);
+        if self.locked_tools.as_ref().is_some_and(|tools| {
+            Self::locked_uses_fixed_mcp_surface(tools)
+                && tools.iter().all(|tool| current.accepts(&tool.name))
+        }) && self
+            .name_excluded_tools
+            .iter()
+            .all(|name| name.starts_with("mcp__"))
+        {
+            self.name_excluded_tools = self
+                .mcp_tool_name_candidates
+                .iter()
+                .filter(|name| !current.accepts(name))
+                .cloned()
+                .collect();
+            crate::tool::set_session_name_exclusions(
+                &self.session.id,
+                self.name_excluded_tools.clone(),
+            );
+            self.locked_tool_name_limit = Some(current);
             return;
         }
         let excluded_would_change = !self.name_excluded_tools.is_empty()
@@ -600,7 +717,9 @@ impl Agent {
         let allowed = self.allowed_tools.as_ref();
         registry_names.iter().any(|name| {
             name.starts_with("mcp__")
-                && allowed.map(|set| set.contains(name)).unwrap_or(true)
+                && allowed.is_none_or(|set| {
+                    set.contains(name) || set.contains(crate::tool::MCP_CALL_TOOL_NAME)
+                })
                 && !self.disabled_tools.contains(name)
                 // A name withheld by the transport limit is absent from the
                 // snapshot on purpose; it must not consume the one-shot latch.
@@ -640,10 +759,16 @@ impl Agent {
         if self.session.is_canary {
             self.registry.register_selfdev_tools().await;
         }
-        let mut tools = self.registry.definitions(self.allowed_tools.as_ref()).await;
-        if !self.disabled_tools.is_empty() {
-            tools.retain(|tool| !self.disabled_tools.contains(&tool.name));
-        }
+        let mut tools = self.mcp_exposure_candidates().await;
+        let limit = self.provider.capabilities().tool_name_limit;
+        tools.retain(|tool| limit.accepts(&tool.name));
+        Self::apply_mcp_tool_exposure(
+            &mut tools,
+            self.mcp_tools_mode,
+            self.mcp_tools_token_threshold,
+            self.allowed_tools.as_ref(),
+        );
+        tools.retain(|tool| crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), &tool.name));
         Self::apply_selfdev_tool_surface(&mut tools, self.session.is_canary);
         tools
     }

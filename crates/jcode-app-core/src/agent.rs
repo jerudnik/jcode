@@ -297,6 +297,15 @@ pub struct Agent {
     system_prompt_override: Option<String>,
     /// Whether memory features are enabled for this session
     memory_enabled: bool,
+    /// MCP exposure mode snapshotted at construction so a config edit cannot
+    /// flip the locked surface mid-session.
+    mcp_tools_mode: crate::config::McpToolsMode,
+    /// Prompt-token estimate above which `Auto` defers the MCP surface.
+    mcp_tools_token_threshold: usize,
+    /// MCP names considered at the last snapshot, including names withheld
+    /// by the transport. Route changes can refresh dispatch exclusions without
+    /// rebuilding a locked deferred prompt.
+    mcp_tool_name_candidates: HashSet<String>,
     /// One-step undo snapshot captured before the most recent rewind.
     rewind_undo_snapshot: Option<RewindUndoSnapshot>,
     /// Channel for tools to request stdin input from the user
@@ -401,6 +410,9 @@ impl Agent {
             locked_tool_name_limit: None,
             system_prompt_override: None,
             memory_enabled: crate::config::config().features.memory,
+            mcp_tools_mode: crate::config::config().tools.mcp_tools,
+            mcp_tools_token_threshold: crate::config::config().tools.mcp_tools_token_threshold,
+            mcp_tool_name_candidates: HashSet::new(),
             rewind_undo_snapshot: None,
             stdin_request_tx: None,
             provider_runtime_state: ProviderRuntimeState::observed(initial_provider_model),

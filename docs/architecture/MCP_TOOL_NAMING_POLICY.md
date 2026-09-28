@@ -107,22 +107,45 @@ future server cannot take a session down.
 
 ## 4. Permissions stay on exact identity
 
-Every gate in `Registry::execute` (session tool policy allow and disable sets,
-ambient action tier, swarm assignment grant) and every `--tools` allow-list
-keys on the registered composed name. Section 2 makes that name a bijection
-onto `(server, tool)`, so a name-keyed permission is an exact-identity
-permission. Consequences:
+Eager MCP proxies use the registered composed name in session allow and deny
+sets. Section 2 makes that name a bijection onto `(server, tool)`, so a
+name-keyed permission is an exact-identity permission.
+
+The deferred surface has one narrow inference exception: an allow-list with
+any `mcp__*` entry also permits visibility and execution of `mcp_search` and
+`mcp_call`. This is not a wildcard permission. Each `mcp_call` dispatch checks
+the exact composed key for the supplied `(server, tool)`. It is allowed only
+when the session has no allow-list, the exact key is allowed, or `mcp_call`
+itself is explicitly allowed. An inferred `mcp_call` entry is never inserted
+into the allow-list, so allowing one identity cannot grant another.
+
+Explicitly allowing `mcp_call` grants broad dispatch through that tool, not
+visibility or execution of every eager proxy. `mcp_search` alone grants no
+dispatch permission. Search results omit disabled servers, ambiguous keys,
+and identities blocked by the same dispatch checks.
+
+Consequences:
 
 - No umbrella `mcp` permission, and no `mcp__{server}__*` wildcard grants.
-- A permission never survives a collision: the ambiguous key is not
-  registered, so it cannot be granted.
+- Deny always wins, including an exact dispatched-key deny or a `mcp_call`
+  deny against an explicitly allowed or inferred call.
+- A permission never survives a collision: both eager registration and
+  deferred dispatch refuse an ambiguous key, even with explicit `mcp_call`.
 - Per-transport exclusion (section 3) does not change permissions. An
   excluded tool is refused by the agent's exclusion gate on that transport,
   not newly permitted or denied.
-- Worker MCP grants remain an explicit coordinator decision per tool identity.
-- Prompt caching: exclusion changes the advertised tool array only when an
-  excluded tool exists. No configured server has one today (longest composed
-  name is 60), so cache keys for current users are unchanged.
+- Ambient, assignment-grant, scope, and pre-tool gates still run against the
+  invoked tool name. Inference does not expand worker grants. A coordinator
+  must explicitly decide worker authority for the fixed surface as well as
+  individual MCP tools.
+- A locked deferred surface does not consume the late-registration latch or
+  reset the prompt cache when more tools register. Auto resolves before the
+  initial lock and re-estimates only on the existing one-shot late-registration
+  rebuild, or an explicit unlock. Route changes that still accept the fixed
+  names preserve that lock and refresh known MCP name exclusions separately.
+
+See [MCP tool exposure](../MCP_TOOLS.md) for modes, thresholds, and upgrade
+behavior.
 
 ## 5. Where this lives in code
 
@@ -135,6 +158,11 @@ permission. Consequences:
   `validate_tool_allowed` (`crates/jcode-app-core/src/agent/turn_execution.rs`).
 - `McpConfig::warn_ambiguous_server_names` in `crates/jcode-base/src/mcp/protocol.rs`.
 - The `mcp` tool's `list` action reports refused ambiguous names.
+- `McpSearchTool` and `McpCallTool` live in
+  `crates/jcode-app-core/src/tool/mcp.rs`; both startup paths use
+  `register_fixed_mcp_surface`.
+- `session_mcp_dispatch_is_allowed` checks exact dispatch keys. The separate
+  `tool_is_allowed` predicate infers only visibility/execution of the fixed pair.
 
 ## 6. Out of scope
 
