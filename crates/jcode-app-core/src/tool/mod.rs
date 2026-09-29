@@ -71,6 +71,7 @@ struct SessionToolPolicy {
     /// `batch` call, which executes through the registry directly, cannot
     /// reach a tool the provider never saw.
     name_excluded_tools: HashSet<String>,
+    mcp_name_limit: Option<jcode_provider_core::ToolNameLimit>,
 }
 
 static SESSION_TOOL_POLICIES: LazyLock<StdRwLock<HashMap<String, SessionToolPolicy>>> =
@@ -88,12 +89,16 @@ pub(crate) fn set_session_tool_policy(
         .get(session_id)
         .map(|policy| policy.name_excluded_tools.clone())
         .unwrap_or_default();
+    let mcp_name_limit = policies
+        .get(session_id)
+        .and_then(|policy| policy.mcp_name_limit);
     policies.insert(
         session_id.to_string(),
         SessionToolPolicy {
             allowed_tools,
             disabled_tools,
             name_excluded_tools,
+            mcp_name_limit,
         },
     );
 }
@@ -111,6 +116,20 @@ pub(crate) fn set_session_name_exclusions(session_id: &str, excluded: HashSet<St
         .name_excluded_tools = excluded;
 }
 
+/// Deferred tools can arrive after the prompt locks. Check their names at
+/// dispatch too, without scanning or changing the locked prompt.
+pub(crate) fn set_session_mcp_name_limit(
+    session_id: &str,
+    limit: jcode_provider_core::ToolNameLimit,
+) {
+    SESSION_TOOL_POLICIES
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(session_id.to_string())
+        .or_default()
+        .mcp_name_limit = Some(limit);
+}
+
 pub(crate) fn clear_session_tool_policy(session_id: &str) {
     let mut policies = SESSION_TOOL_POLICIES
         .write()
@@ -124,6 +143,48 @@ fn session_tool_policy(session_id: &str) -> Option<SessionToolPolicy> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(session_id)
         .cloned()
+}
+
+pub const MCP_SEARCH_TOOL_NAME: &str = "mcp_search";
+pub const MCP_CALL_TOOL_NAME: &str = "mcp_call";
+
+pub fn is_fixed_mcp_tool(name: &str) -> bool {
+    matches!(name, MCP_SEARCH_TOOL_NAME | MCP_CALL_TOOL_NAME)
+}
+
+/// Inference exposes only the fixed pair, never another MCP identity.
+pub(crate) fn tool_is_allowed(allowed: Option<&HashSet<String>>, name: &str) -> bool {
+    allowed.is_none_or(|set| {
+        set.contains(name)
+            || (is_fixed_mcp_tool(name) && set.iter().any(|entry| entry.starts_with("mcp__")))
+    })
+}
+
+pub(crate) fn session_mcp_dispatch_is_allowed(session_id: &str, name: &str) -> Result<()> {
+    let Some(policy) = session_tool_policy(session_id) else {
+        return Ok(());
+    };
+    if policy.disabled_tools.contains(name) || policy.disabled_tools.contains(MCP_CALL_TOOL_NAME) {
+        return Err(anyhow::anyhow!("MCP tool '{}' is disabled", name));
+    }
+    if policy.name_excluded_tools.contains(name)
+        || policy
+            .mcp_name_limit
+            .is_some_and(|limit| !limit.accepts(name))
+    {
+        return Err(anyhow::anyhow!(
+            "MCP tool '{}' is not advertised on this transport",
+            name
+        ));
+    }
+    if policy
+        .allowed_tools
+        .as_ref()
+        .is_some_and(|allowed| !allowed.contains(name) && !allowed.contains(MCP_CALL_TOOL_NAME))
+    {
+        return Err(anyhow::anyhow!("MCP tool '{}' is not allowed", name));
+    }
+    Ok(())
 }
 
 /// Registry of available tools (Arc-wrapped for sharing)
@@ -429,7 +490,7 @@ impl Registry {
         let tools = self.tools.read().await;
         let mut defs: Vec<ToolDefinition> = tools
             .iter()
-            .filter(|(name, _)| allowed_tools.map(|set| set.contains(*name)).unwrap_or(true))
+            .filter(|(name, _)| tool_is_allowed(allowed_tools, name))
             .map(|(name, tool)| {
                 let mut def = tool.to_definition();
                 // Use registry key as the tool name (important for MCP tools where
@@ -698,9 +759,7 @@ impl Registry {
         let tools = self.tools.read().await;
         let resolved_name = Self::resolve_tool_name(name);
         if let Some(policy) = session_tool_policy(&ctx.session_id) {
-            if let Some(allowed) = policy.allowed_tools.as_ref()
-                && !allowed.contains(resolved_name)
-            {
+            if !tool_is_allowed(policy.allowed_tools.as_ref(), resolved_name) {
                 return Err(anyhow::anyhow!("Tool '{}' is not allowed", resolved_name));
             }
             if policy.disabled_tools.contains(resolved_name) {
@@ -1069,6 +1128,7 @@ impl Registry {
         let mcp_tool = mcp::McpManagementTool::new(Arc::clone(&mcp_manager)).with_registry(self);
         self.register("mcp".to_string(), Arc::new(mcp_tool) as Arc<dyn Tool>)
             .await;
+        mcp::register_fixed_mcp_surface(self, &mcp_manager).await;
 
         // Check if we have enabled servers to connect to. Disabled servers stay
         // configured (visible to the mcp management tool, connectable by name)

@@ -18,4 +18,4 @@ pub use pool::{
 };
 pub use protocol::*;
 pub use schema_cache::{McpSchemaCache, fingerprint_config};
-pub use tool::{McpTool, create_mcp_tools, create_mcp_tools_from_cached};
+pub use tool::{McpTool, create_mcp_tools, create_mcp_tools_from_cached, render_call_result};

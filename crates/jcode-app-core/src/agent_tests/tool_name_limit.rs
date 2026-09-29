@@ -5,10 +5,10 @@ use jcode_provider_core::{ProviderCapabilities, ToolNameLimit};
 /// Provider whose only interesting property is its tool-name limit. The
 /// model name selects the limit so a test can switch transports through the
 /// agent's normal model-switch path: `wide` is 128, anything else is 64.
-struct LimitedNameProvider(Arc<Mutex<ToolNameLimit>>);
+pub(super) struct LimitedNameProvider(Arc<Mutex<ToolNameLimit>>);
 
 impl LimitedNameProvider {
-    fn with(limit: ToolNameLimit) -> Self {
+    pub(super) fn with(limit: ToolNameLimit) -> Self {
         Self(Arc::new(Mutex::new(limit)))
     }
 
@@ -84,7 +84,10 @@ async fn agent_with_mcp_tools(limit: ToolNameLimit, tools: &[&str]) -> Agent {
     for (name, proxy) in create_mcp_tools_from_cached("probe", &defs, manager) {
         registry.register(name, proxy).await;
     }
-    Agent::new(provider, registry)
+    let mut agent = Agent::new(provider, registry);
+    // These tests exercise per-proxy name limits, independent of Auto's budget.
+    agent.mcp_tools_mode = crate::config::McpToolsMode::Eager;
+    agent
 }
 
 #[tokio::test]
@@ -121,8 +124,10 @@ async fn transport_limit_withholds_over_long_names_and_refuses_their_execution()
     assert!(err.to_string().contains("not advertised on this transport"));
     assert_eq!(agent.name_excluded_tool_names(), vec![over_key.clone()]);
 
-    // The tool stays registered for transports that allow it.
-    assert!(agent.tool_names().await.contains(&over_key));
+    // Debug exposure follows the same transport filtering as the provider.
+    // Registration remains available for a later route that accepts it.
+    assert!(!agent.tool_names().await.contains(&over_key));
+    assert!(agent.registry.tool_names().await.contains(&over_key));
 
     crate::env::remove_var("JCODE_HOME");
     crate::config::Config::invalidate_cache();

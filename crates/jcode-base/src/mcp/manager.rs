@@ -417,6 +417,44 @@ impl McpManager {
         tools
     }
 
+    /// Enabled configured tools, including fingerprint-matched cached schemas.
+    /// Live definitions win for the same identity; this does not change all_tools.
+    pub async fn searchable_tools(&self) -> Vec<(String, McpToolDef)> {
+        self.searchable_tools_with_cache(&super::schema_cache::McpSchemaCache::load())
+            .await
+    }
+
+    async fn searchable_tools_with_cache(
+        &self,
+        cache: &super::schema_cache::McpSchemaCache,
+    ) -> Vec<(String, McpToolDef)> {
+        let mut catalog = std::collections::BTreeMap::new();
+        for (server, config) in &self.config.servers {
+            if !config.is_enabled() {
+                continue;
+            }
+            if let Some(tools) = cache.tools_for(server, config) {
+                for tool in tools {
+                    catalog.insert((server.clone(), tool.name.clone()), tool.clone());
+                }
+            }
+        }
+        for (server, tool) in self.all_tools().await {
+            if self
+                .config
+                .servers
+                .get(&server)
+                .is_some_and(|cfg| cfg.is_enabled())
+            {
+                catalog.insert((server, tool.name.clone()), tool);
+            }
+        }
+        catalog
+            .into_iter()
+            .map(|((server, _), tool)| (server, tool))
+            .collect()
+    }
+
     /// Call a tool on a specific server.
     ///
     /// Connect-on-first-call: if the server is configured but not yet connected
@@ -1008,8 +1046,133 @@ mod provenance_integration_tests {
     use std::io::Write;
     use std::time::Duration;
 
-    /// Write a minimal stdio MCP server as a shell script: answers
-    /// initialize, tools/list, and tools/call with canned JSON-RPC replies.
+    fn stdio_server_config(command: &str, enabled: Option<bool>) -> McpServerConfig {
+        McpServerConfig {
+            command: command.to_string(),
+            args: vec![],
+            env: HashMap::new(),
+            shared: false,
+            transport: None,
+            url: None,
+            enabled,
+            disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
+        }
+    }
+
+    fn cached_tool(name: &str, description: &str) -> McpToolDef {
+        McpToolDef {
+            name: name.to_string(),
+            description: Some(description.to_string()),
+            input_schema: serde_json::json!({"type": "object"}),
+        }
+    }
+
+    #[tokio::test]
+    async fn searchable_tools_merges_cache_and_live_and_hides_disabled_or_stale() {
+        let _env_guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::storage::EnvVarGuard::set("JCODE_HOME", temp.path());
+        let server_path = write_fake_mcp_server(temp.path());
+        let live_server = "search-live";
+        let cached_server = "search-cached";
+        let disabled_server = "search-disabled";
+        let stale_server = "search-stale";
+
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            live_server.to_string(),
+            stdio_server_config(&server_path.to_string_lossy(), None),
+        );
+        config.servers.insert(
+            cached_server.to_string(),
+            stdio_server_config("/nonexistent/cached-only", None),
+        );
+        config.servers.insert(
+            disabled_server.to_string(),
+            stdio_server_config("/nonexistent/disabled", Some(false)),
+        );
+        config.servers.insert(
+            stale_server.to_string(),
+            stdio_server_config("/nonexistent/stale-new-command", None),
+        );
+
+        let mut cache = super::super::schema_cache::McpSchemaCache::default();
+        // The live server has a stale cached description; live must win.
+        cache.update(
+            live_server,
+            config.servers.get(live_server).unwrap(),
+            vec![cached_tool("create_card", "cached description")],
+        );
+        cache.update(
+            cached_server,
+            config.servers.get(cached_server).unwrap(),
+            vec![cached_tool("cached_only", "from cache")],
+        );
+        cache.update(
+            disabled_server,
+            config.servers.get(disabled_server).unwrap(),
+            vec![cached_tool("hidden", "disabled server")],
+        );
+        // Fingerprint mismatch: cached under a different command.
+        cache.update(
+            stale_server,
+            &stdio_server_config("/nonexistent/stale-old-command", None),
+            vec![cached_tool("stale", "reconfigured server")],
+        );
+
+        let manager = McpManager::with_config(config.clone());
+        cache.save();
+        let before_connect = manager.searchable_tools().await;
+        let names: Vec<(String, String)> = before_connect
+            .iter()
+            .map(|(server, tool)| (server.clone(), tool.name.clone()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                (cached_server.to_string(), "cached_only".to_string()),
+                (live_server.to_string(), "create_card".to_string()),
+            ],
+            "disabled and fingerprint-mismatched servers never enter the catalog"
+        );
+        assert_eq!(
+            before_connect[1].1.description.as_deref(),
+            Some("cached description")
+        );
+
+        manager
+            .connect(live_server, config.servers.get(live_server).unwrap())
+            .await
+            .expect("fake MCP server must connect");
+        // Replace the connect-refreshed disk cache with stale definitions so
+        // this assertion proves the live overlay, not merely cache refresh.
+        cache.save();
+        let after_connect = manager.searchable_tools().await;
+        assert_eq!(
+            after_connect.len(),
+            2,
+            "live entry replaces, never duplicates"
+        );
+        let live = after_connect
+            .iter()
+            .find(|(server, _)| server == live_server)
+            .unwrap();
+        assert_eq!(
+            live.1.description.as_deref(),
+            Some("fake card"),
+            "live definition overrides the cached one"
+        );
+        assert_eq!(
+            manager.all_tools().await.len(),
+            1,
+            "all_tools keeps its connected-only contract"
+        );
+        manager.disconnect_all().await;
+    }
+
+    /// Write a minimal stdio MCP server with canned JSON-RPC replies.
     fn write_fake_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
         let path = dir.join("fake-mcp-server.sh");
         let script = r##"#!/bin/bash

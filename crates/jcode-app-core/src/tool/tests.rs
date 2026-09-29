@@ -163,7 +163,12 @@ async fn mcp_management_upgrades_registry_through_surviving_clone() {
         names.sort();
         assert_eq!(
             names,
-            vec!["mcp".to_string(), "mcp__ordinary__sentinel".to_string()],
+            vec![
+                "mcp".to_string(),
+                "mcp__ordinary__sentinel".to_string(),
+                crate::tool::MCP_CALL_TOOL_NAME.to_string(),
+                crate::tool::MCP_SEARCH_TOOL_NAME.to_string(),
+            ],
             "reload must remove only MCP proxies for {case} config"
         );
     }

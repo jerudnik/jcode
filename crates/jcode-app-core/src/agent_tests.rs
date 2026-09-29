@@ -26,6 +26,8 @@ mod cache_accounting;
 mod hidden_reminder;
 #[path = "agent_tests/interrupt.rs"]
 mod interrupt;
+#[path = "agent_tests/mcp_deferral.rs"]
+mod mcp_deferral;
 #[path = "agent_tests/tool_name_limit.rs"]
 mod tool_name_limit;
 #[path = "agent_tests/turn_dedupe.rs"]
@@ -2382,6 +2384,7 @@ async fn mcp_tools_registered_after_lock_are_visible_to_agent() {
     let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
     let registry = Registry::new(provider.clone()).await;
     let mut agent = Agent::new(provider, registry);
+    agent.mcp_tools_mode = crate::config::McpToolsMode::Eager;
 
     // First turn locks the snapshot (this is what happens before the async MCP
     // registration spawn completes).
@@ -2444,6 +2447,7 @@ async fn mcp_late_registration_rebuild_happens_at_most_once() {
     let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
     let registry = Registry::new(provider.clone()).await;
     let mut agent = Agent::new(provider, registry);
+    agent.mcp_tools_mode = crate::config::McpToolsMode::Eager;
 
     // First turn locks the snapshot with no MCP tools yet.
     let _ = agent.tool_definitions().await;

@@ -60,41 +60,55 @@ impl Tool for McpTool {
         let result = manager
             .call_tool(&self.server_name, &self.tool_def.name, input)
             .await?;
+        Ok(render_call_result(
+            &self.server_name,
+            &self.tool_def.name,
+            result,
+        ))
+    }
+}
 
-        // Convert MCP content blocks to output string
-        let mut output_parts = Vec::new();
-        for block in result.content {
-            match block {
-                ContentBlock::Text { text } => {
+/// Render an MCP `tools/call` result as tool output. Shared by the eager
+/// `mcp__{server}__{tool}` proxies and the deferred `mcp_call` surface so
+/// both spellings of a call produce identical output.
+pub fn render_call_result(
+    server: &str,
+    tool: &str,
+    result: super::protocol::ToolCallResult,
+) -> ToolOutput {
+    // Convert MCP content blocks to output string
+    let mut output_parts = Vec::new();
+    for block in result.content {
+        match block {
+            ContentBlock::Text { text } => {
+                output_parts.push(text);
+            }
+            ContentBlock::Image { data, mime_type } => {
+                output_parts.push(format!("[Image: {} ({} bytes)]", mime_type, data.len()));
+            }
+            ContentBlock::Resource { resource } => {
+                if let Some(text) = resource.text {
                     output_parts.push(text);
-                }
-                ContentBlock::Image { data, mime_type } => {
-                    output_parts.push(format!("[Image: {} ({} bytes)]", mime_type, data.len()));
-                }
-                ContentBlock::Resource { resource } => {
-                    if let Some(text) = resource.text {
-                        output_parts.push(text);
-                    } else if let Some(blob) = resource.blob {
-                        output_parts.push(format!(
-                            "[Resource: {} ({} bytes)]",
-                            resource.uri,
-                            blob.len()
-                        ));
-                    } else {
-                        output_parts.push(format!("[Resource: {}]", resource.uri));
-                    }
+                } else if let Some(blob) = resource.blob {
+                    output_parts.push(format!(
+                        "[Resource: {} ({} bytes)]",
+                        resource.uri,
+                        blob.len()
+                    ));
+                } else {
+                    output_parts.push(format!("[Resource: {}]", resource.uri));
                 }
             }
         }
+    }
 
-        let output = output_parts.join("\n");
-        let title = format!("mcp:{}:{}", self.server_name, self.tool_def.name);
+    let output = output_parts.join("\n");
+    let title = format!("mcp:{}:{}", server, tool);
 
-        if result.is_error {
-            Ok(ToolOutput::new(format!("Error: {}", output)).with_title(title))
-        } else {
-            Ok(ToolOutput::new(output).with_title(title))
-        }
+    if result.is_error {
+        ToolOutput::new(format!("Error: {}", output)).with_title(title)
+    } else {
+        ToolOutput::new(output).with_title(title)
     }
 }
 

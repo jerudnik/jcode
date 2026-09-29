@@ -114,6 +114,8 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_KV_CACHE_MISS_NOTICES",
     "JCODE_LATEX_RENDERING",
     "JCODE_MARKDOWN_SPACING",
+    "JCODE_MCP_TOOLS",
+    "JCODE_MCP_TOOLS_TOKEN_THRESHOLD",
     "JCODE_MEMORY_EMBEDDING_API_KEY_ENV",
     "JCODE_MEMORY_EMBEDDING_BACKEND",
     "JCODE_MEMORY_EMBEDDING_BASE_URL",
@@ -694,8 +696,38 @@ impl AcpConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpToolsMode {
+    #[default]
+    Auto,
+    Eager,
+    Deferred,
+}
+
+impl McpToolsMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "eager" => Some(Self::Eager),
+            "deferred" => Some(Self::Deferred),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Eager => "eager",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
+pub const DEFAULT_MCP_TOOLS_TOKEN_THRESHOLD: usize = 8000;
+
 /// Controls which tools are sent to the model.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolConfig {
     /// Tool profile: "full" (default), "acp", "minimal"/"lite", or "none".
@@ -707,6 +739,23 @@ pub struct ToolConfig {
     pub disabled: Vec<String>,
     /// Disable all built-in tools unless `enabled` is provided.
     pub disable_base_tools: bool,
+    /// Whether MCP schemas are advertised eagerly or discovered on demand.
+    pub mcp_tools: McpToolsMode,
+    /// Eager prompt-token estimate above which Auto defers MCP schemas.
+    pub mcp_tools_token_threshold: usize,
+}
+
+impl Default for ToolConfig {
+    fn default() -> Self {
+        Self {
+            profile: String::new(),
+            enabled: Vec::new(),
+            disabled: Vec::new(),
+            disable_base_tools: false,
+            mcp_tools: McpToolsMode::default(),
+            mcp_tools_token_threshold: DEFAULT_MCP_TOOLS_TOKEN_THRESHOLD,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

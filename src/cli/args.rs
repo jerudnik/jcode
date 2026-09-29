@@ -96,6 +96,14 @@ pub(crate) struct Args {
     #[arg(long, global = true)]
     pub(crate) disable_base_tools: bool,
 
+    /// How MCP server tools reach the model: auto, eager, or deferred.
+    #[arg(long, global = true, value_name = "MODE")]
+    pub(crate) mcp_tools: Option<String>,
+
+    /// Estimated prompt tokens of the filtered eager tool surface above which auto defers.
+    #[arg(long, global = true, value_name = "TOKENS")]
+    pub(crate) mcp_tools_token_threshold: Option<usize>,
+
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
 }

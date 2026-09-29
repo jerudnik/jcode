@@ -240,6 +240,7 @@ impl App {
         self.registry
             .register("mcp".to_string(), Arc::new(mcp_tool))
             .await;
+        crate::tool::mcp::register_fixed_mcp_surface(&self.registry, &self.mcp_manager).await;
 
         let manager = self.mcp_manager.read().await;
         let server_count = manager.config().servers.len();
