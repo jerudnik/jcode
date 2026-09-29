@@ -77,6 +77,48 @@ async fn modes_and_empty_catalog_keep_exact_surfaces() {
 }
 
 #[tokio::test]
+async fn status_identities_follow_current_catalog_and_policy_not_exposure() {
+    let _lock = crate::storage::lock_test_env();
+    for mode in [
+        McpToolsMode::Deferred,
+        McpToolsMode::Auto,
+        McpToolsMode::Eager,
+    ] {
+        let mut agent = agent(mode, 0).await;
+        let long = "x".repeat(140);
+        let long_key = format!("mcp__probe__{long}");
+        for name in ["x", "y", "denied", &long] {
+            add_proxy(&agent.registry, name, 200).await;
+        }
+        policy(&mut agent, None, &["mcp__probe__denied"]);
+        agent.tool_definitions().await;
+        add_proxy(&agent.registry, "late", 200).await;
+
+        for (allowed, expected) in [
+            (None, vec!["late", "x", "y"]),
+            (
+                Some(vec!["mcp__probe__x", "mcp__probe__denied", &long_key]),
+                vec!["x"],
+            ),
+            (Some(vec![MCP_CALL_TOOL_NAME]), vec!["late", "x", "y"]),
+        ] {
+            if allowed.is_some() {
+                policy(&mut agent, allowed.as_deref(), &["mcp__probe__denied"]);
+                agent.tool_definitions().await;
+            }
+            assert_eq!(
+                agent.mcp_tool_identities().await,
+                expected
+                    .into_iter()
+                    .map(|tool| (format!("mcp__probe__{tool}"), "probe".into(), tool.into()))
+                    .collect::<Vec<_>>(),
+                "status identities must not depend on {mode:?} exposure or the locked snapshot"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn auto_defers_only_above_the_threshold() {
     let _lock = crate::storage::lock_test_env();
     let mut agent = agent(McpToolsMode::Auto, usize::MAX).await;

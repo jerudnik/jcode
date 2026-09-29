@@ -67,6 +67,10 @@ exclusions for the MCP names considered when it was built. Deferred search and
 dispatch also check the current limit for identities that arrive later. Debug tool
 introspection applies the same mode and transport filters to the current
 catalog rather than the locked snapshot.
+Deferred dispatch retains the composed-name limit so changing exposure mode
+cannot bypass a transport exclusion enforced on eager and nested calls.
+History and `mcp:servers` report registered MCP identities permitted by the
+session policy and transport limit, regardless of exposure mode.
 
 ## Permissions, discovery, and failures
 

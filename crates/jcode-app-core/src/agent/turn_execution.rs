@@ -728,16 +728,22 @@ impl Agent {
         })
     }
 
-    /// Registered MCP tools visible to this session as
-    /// `(registry key, server, tool)`, attributed by identity.
+    /// Registered MCP tools permitted by this session's policy and transport as
+    /// `(registry key, server, tool)`, independent of prompt exposure mode.
     pub async fn mcp_tool_identities(&self) -> Vec<(String, String, String)> {
-        let visible: std::collections::HashSet<String> =
-            self.tool_names().await.into_iter().collect();
+        let allowed = self.allowed_tools.as_ref();
+        let limit = self.provider.capabilities().tool_name_limit;
         self.registry
             .mcp_tool_identities()
             .await
             .into_iter()
-            .filter(|(key, _, _)| visible.contains(key))
+            .filter(|(key, _, _)| {
+                !self.disabled_tools.contains(key)
+                    && limit.accepts(key)
+                    && allowed.is_none_or(|set| {
+                        set.contains(key) || set.contains(crate::tool::MCP_CALL_TOOL_NAME)
+                    })
+            })
             .collect()
     }
 
