@@ -74,3 +74,15 @@ two agents that each individually did the right thing.
 - Isolated runs via the prebuilt binary
   `target/debug/deps/jcode_tui-6510d58bcce2117c`, which reproduces neither
   failure.
+- 2026-09-29, `automation/reconnect-queue-wake`:
+  `ambient::runner::runner_tests::live_delivery::scheduled_live_delivery_reaches_subscribed_client`
+  failed about one run in five under full-crate load, locally and on CI, with
+  the queued provider response consumed by an ambient cycle the isolated
+  server should never have started. Cause: the config cache paired a config
+  loaded while a sibling test's `EnvVarGuard`s were being dropped (ambient
+  enabled, headless) with a fingerprint taken after the hand-over, so the
+  stale config was served until the env changed again. Fixed on that branch
+  by reloading until the fingerprint is stable across a load, and the test
+  now invalidates the cache before starting its server. Recorded here because
+  it is the same shape: a red with no owner in the diff, reproducible only
+  under a full parallel run.

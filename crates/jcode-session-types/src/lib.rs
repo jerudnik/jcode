@@ -252,6 +252,15 @@ pub enum StoredDisplayRole {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredTokenUsage {
+    /// Identity at record time. Legacy records remain unknown rather than backfilled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Full prompt size resolved per request, before provider identity can change.
+    /// Older records lack this and cannot safely reconstruct mixed-provider totals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1004,6 +1013,22 @@ impl AssistantSessionMeta {
 #[cfg(test)]
 mod session_search_tests {
     use super::*;
+
+    #[test]
+    fn stored_token_usage_provider_model_default_none_for_old_records() {
+        let old = serde_json::json!({"input_tokens": 10000, "output_tokens": 100});
+        let usage: StoredTokenUsage = serde_json::from_value(old.clone()).unwrap();
+        let restored = serde_json::to_value(usage).unwrap();
+        assert_eq!(restored.get("provider"), None);
+        assert_eq!(restored.get("model"), None);
+        let mut known = old;
+        known["provider"] = "openai".into();
+        known["model"] = "gpt-5.6".into();
+        let usage: StoredTokenUsage = serde_json::from_value(known).unwrap();
+        let restored = serde_json::to_value(usage).unwrap();
+        assert_eq!(restored["provider"], "openai");
+        assert_eq!(restored["model"], "gpt-5.6");
+    }
 
     #[test]
     fn query_profile_filters_stop_words_and_requires_actionable_terms() {

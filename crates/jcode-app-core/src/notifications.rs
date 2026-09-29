@@ -278,8 +278,8 @@ async fn send_ntfy(
 /// Send a local desktop notification without blocking.
 ///
 /// Uses Notification Center via `osascript` on macOS and `notify-send` on
-/// Linux. The child process is spawned detached and never waited on; failures
-/// are ignored (a missing notifier is not an error).
+/// Linux. The child process is reaped on a background thread; failures are
+/// ignored (a missing notifier is not an error).
 pub fn send_desktop_notification(title: &str, body: &str) {
     send_desktop_notification_rich(title, None, body, None);
 }
@@ -321,25 +321,31 @@ pub fn send_desktop_notification_rich(
         if let Some(sound) = sound.filter(|s| !s.trim().is_empty()) {
             script.push_str(&format!(" sound name \"{}\"", applescript_escape(sound)));
         }
-        let _ = std::process::Command::new("osascript")
+        if let Ok(child) = std::process::Command::new("osascript")
             .arg("-e")
             .arg(script)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn();
+            .spawn()
+        {
+            crate::platform::reap_detached(child);
+        }
     }
     #[cfg(target_os = "linux")]
     {
         let _ = (subtitle, sound);
-        let _ = std::process::Command::new("notify-send")
+        if let Ok(child) = std::process::Command::new("notify-send")
             .arg("--app-name=jcode")
             .arg(title)
             .arg(body)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .spawn();
+            .spawn()
+        {
+            crate::platform::reap_detached(child);
+        }
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -649,5 +655,227 @@ mod tests {
         // Just verify it doesn't panic
         let cfg = SafetyConfig::default();
         let _dispatcher = NotificationDispatcher::from_config(cfg);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod notification_process_tests {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::process::{Child, Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const FIXTURE_ENV: &str = "JCODE_NOTIFICATION_REAP_TEST_DIR";
+
+    fn notifier_name() -> &'static str {
+        if cfg!(target_os = "macos") {
+            "osascript"
+        } else {
+            "notify-send"
+        }
+    }
+
+    fn process_exists(pid: u32) -> bool {
+        let rc = unsafe { libc::kill(pid as i32, 0) };
+        if rc == 0 {
+            return true;
+        }
+        std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+
+    fn process_state(pid: u32) -> String {
+        let output = Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output();
+        match output {
+            Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            Err(error) => format!("ps-failed:{error}"),
+        }
+    }
+
+    fn process_ppid(pid: u32) -> Option<u32> {
+        let output = Command::new("ps")
+            .args(["-o", "ppid=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+    }
+
+    #[test]
+    #[ignore = "entry point launched by the notification lifecycle tests"]
+    fn notification_probe() {
+        let dir = PathBuf::from(std::env::var_os(FIXTURE_ENV).expect("subprocess fixture"));
+        for _ in 0..5 {
+            super::send_desktop_notification("reaping title", "reaping body");
+        }
+        std::fs::write(dir.join("returned"), "").unwrap();
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).unwrap();
+    }
+
+    struct Probe {
+        child: Child,
+        dir: tempfile::TempDir,
+    }
+
+    impl Probe {
+        fn start(notifier_present: bool) -> Self {
+            let dir = tempfile::Builder::new()
+                .prefix("jcode-notification-reaping-")
+                .tempdir()
+                .unwrap();
+            let bin = dir.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            std::fs::create_dir(dir.path().join("children")).unwrap();
+            std::fs::create_dir(dir.path().join("ready")).unwrap();
+            if notifier_present {
+                let script = bin.join(notifier_name());
+                std::fs::write(
+                    &script,
+                    "#!/bin/sh\n\
+                     printf '%s\\n' \"$@\" > \"$JCODE_NOTIFICATION_REAP_TEST_DIR/children/$$\"\n\
+                     : > \"$JCODE_NOTIFICATION_REAP_TEST_DIR/ready/$$\"\n\
+                     while [ ! -e \"$JCODE_NOTIFICATION_REAP_TEST_DIR/release\" ]; do /bin/sleep 0.02; done\n",
+                )
+                .unwrap();
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let module = module_path!().split_once("::").unwrap().1;
+            let child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    &format!("{module}::notification_probe"),
+                    "--ignored",
+                    "--test-threads=1",
+                ])
+                .env("PATH", &bin)
+                .env(FIXTURE_ENV, dir.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .unwrap();
+            Self { child, dir }
+        }
+
+        fn wait_for(&mut self, description: &str, mut condition: impl FnMut(&Path) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                assert!(
+                    self.child.try_wait().unwrap().is_none(),
+                    "probe exited: {description}"
+                );
+                if condition(self.dir.path()) {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "timed out: {description}");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            let _ = std::fs::write(self.dir.path().join("release"), "");
+            if let Some(mut stdin) = self.child.stdin.take() {
+                let _ = stdin.write_all(b"done\n");
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    #[test]
+    fn notification_children_are_reaped_without_blocking() {
+        let mut probe = Probe::start(true);
+        probe.wait_for(
+            "five calls return before the notifier release gate opens",
+            |dir| dir.join("returned").exists(),
+        );
+        probe.wait_for("five exact notifier PIDs recorded", |dir| {
+            std::fs::read_dir(dir.join("ready")).unwrap().count() == 5
+        });
+        let pids: Vec<u32> = std::fs::read_dir(probe.dir.path().join("children"))
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let recorded = std::fs::read_to_string(entry.path()).unwrap();
+                if cfg!(target_os = "linux") {
+                    assert_eq!(recorded, "--app-name=jcode\nreaping title\nreaping body\n");
+                } else {
+                    assert!(
+                        recorded.contains("reaping title"),
+                        "osascript should receive the notification title, got {recorded:?}"
+                    );
+                }
+                entry.file_name().to_str().unwrap().parse().unwrap()
+            })
+            .collect();
+        for pid in &pids {
+            assert!(
+                process_exists(*pid),
+                "gated notifier {pid} must still exist"
+            );
+            assert_ne!(
+                process_state(*pid).chars().next(),
+                Some('Z'),
+                "gated notifier {pid} must still be running"
+            );
+            assert_eq!(process_ppid(*pid), Some(probe.child.id()));
+        }
+        std::fs::write(probe.dir.path().join("release"), "").unwrap();
+        probe.wait_for(
+            "all five notifier PIDs disappear while their parent stays alive",
+            |_| pids.iter().all(|pid| !process_exists(*pid)),
+        );
+    }
+
+    #[test]
+    fn notification_missing_executable_is_nonfatal() {
+        let mut probe = Probe::start(false);
+        probe.wait_for("missing notifier is best effort", |dir| {
+            dir.join("returned").exists()
+        });
+        assert_eq!(
+            std::fs::read_dir(probe.dir.path().join("children"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn notification_cancelled_children_are_reaped() {
+        let mut probe = Probe::start(true);
+        probe.wait_for("probe returned before cancellation", |dir| {
+            dir.join("returned").exists()
+        });
+        probe.wait_for("five notifier PIDs recorded", |dir| {
+            std::fs::read_dir(dir.join("ready")).unwrap().count() == 5
+        });
+        let pids: Vec<u32> = std::fs::read_dir(probe.dir.path().join("children"))
+            .unwrap()
+            .map(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        for pid in &pids {
+            let rc = unsafe { libc::kill(*pid as i32, libc::SIGTERM) };
+            assert_eq!(rc, 0, "should cancel live notifier {pid}");
+        }
+        probe.wait_for("cancelled notifier PIDs are reaped", |_| {
+            pids.iter().all(|pid| !process_exists(*pid))
+        });
     }
 }

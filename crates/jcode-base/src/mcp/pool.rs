@@ -865,6 +865,8 @@ done
             url: None,
             enabled: None,
             disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
         }
     }
 
@@ -993,6 +995,8 @@ done
             url: None,
             enabled: None,
             disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
         };
 
         pool.connect_server("owner-pid-fixture", &config)
@@ -1055,6 +1059,8 @@ done
             url: None,
             enabled: None,
             disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
         };
 
         let pool = Arc::new(SharedMcpPool::new(McpConfig::default()));
@@ -1134,6 +1140,8 @@ done
             url: None,
             enabled: None,
             disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
         };
         let mut mcp_config = McpConfig::default();
         mcp_config

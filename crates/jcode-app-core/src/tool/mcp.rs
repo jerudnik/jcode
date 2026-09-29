@@ -25,7 +25,7 @@ struct McpToolInput {
 
 pub struct McpManagementTool {
     manager: Arc<RwLock<McpManager>>,
-    registry: Option<crate::tool::Registry>,
+    registry: Option<crate::tool::WeakRegistry>,
 }
 
 impl McpManagementTool {
@@ -36,8 +36,11 @@ impl McpManagementTool {
         }
     }
 
-    pub fn with_registry(mut self, registry: crate::tool::Registry) -> Self {
-        self.registry = Some(registry);
+    /// Attach the registry the tool should mutate when servers connect or
+    /// disconnect. Holds a non-owning handle so a tool stored inside the
+    /// registry does not keep it alive.
+    pub fn with_registry(mut self, registry: &crate::tool::Registry) -> Self {
+        self.registry = Some(registry.downgrade());
         self
     }
 }
@@ -199,6 +202,21 @@ impl McpManagementTool {
             output.push('\n');
         }
 
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            let ambiguous = registry.mcp_ambiguous_keys().await;
+            if !ambiguous.is_empty() {
+                output.push_str("Refused ambiguous tool names (rename one server so `mcp__{server}__{tool}` stays unique):\n");
+                for (name, claimants) in &ambiguous {
+                    let listed: Vec<String> = claimants
+                        .iter()
+                        .map(|(server, tool)| format!("{server}/{tool}"))
+                        .collect();
+                    output.push_str(&format!("  - {}: claimed by {}\n", name, listed.join(", ")));
+                }
+                output.push('\n');
+            }
+        }
+
         if !configured.is_empty() {
             output.push_str("Configured but not connected:\n");
             for (name, enabled) in &configured {
@@ -238,6 +256,8 @@ impl McpManagementTool {
                 url: None,
                 enabled: None,
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             }
         } else {
             let manager = self.manager.read().await;
@@ -288,10 +308,10 @@ impl McpManagementTool {
                 drop(manager);
 
                 // Register the new tools in the registry
-                if let Some(ref registry) = self.registry {
+                if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
                     let mcp_tools = crate::mcp::create_mcp_tools(Arc::clone(&self.manager)).await;
                     for (name, tool) in mcp_tools {
-                        if name.starts_with(&format!("mcp__{}__", server_name)) {
+                        if tool.mcp_identity().map(|(s, _)| s) == Some(server_name.as_str()) {
                             registry.register(name, tool).await;
                         }
                     }
@@ -344,10 +364,8 @@ impl McpManagementTool {
         drop(manager);
 
         // Unregister tools for this server
-        if let Some(ref registry) = self.registry {
-            let removed = registry
-                .unregister_prefix(&format!("mcp__{}__", server_name))
-                .await;
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            let removed = registry.unregister_mcp_tools(Some(&server_name)).await;
             crate::logging::event_info(
                 "MCP_LIFECYCLE",
                 vec![
@@ -371,8 +389,8 @@ impl McpManagementTool {
 
         if config.servers.is_empty() {
             // Unregister all existing MCP tools before reporting empty
-            if let Some(ref registry) = self.registry {
-                registry.unregister_prefix("mcp__").await;
+            if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+                registry.unregister_mcp_tools(None).await;
             }
             return Ok(ToolOutput::new(
                 "No servers found in config.\n\n\
@@ -383,8 +401,8 @@ impl McpManagementTool {
         }
 
         // Unregister all existing MCP server tools before reload
-        if let Some(ref registry) = self.registry {
-            registry.unregister_prefix("mcp__").await;
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
+            registry.unregister_mcp_tools(None).await;
         }
 
         let mut manager = self.manager.write().await;
@@ -395,7 +413,7 @@ impl McpManagementTool {
         drop(manager);
 
         // Re-register tools from fresh connections
-        if let Some(ref registry) = self.registry {
+        if let Some(registry) = self.registry.as_ref().and_then(|r| r.upgrade()) {
             let mcp_tools = crate::mcp::create_mcp_tools(Arc::clone(&self.manager)).await;
             for (name, tool) in mcp_tools {
                 registry.register(name, tool).await;
@@ -457,6 +475,288 @@ impl McpManagementTool {
         Ok(ToolOutput::new(output).with_title("MCP: Reloaded"))
     }
 }
+
+/// Deferred-surface discovery tool. Lists MCP tools from the manager's
+/// searchable catalog (schema cache overlaid with live definitions) so the
+/// model can read a schema on demand instead of carrying every definition in
+/// the prompt. Executes nothing. Results are filtered to what `mcp_call` may
+/// dispatch for this session, so the listing never advertises a tool the
+/// session cannot use.
+pub struct McpSearchTool {
+    manager: Arc<RwLock<McpManager>>,
+    registry: Option<crate::tool::WeakRegistry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpSearchInput {
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    server: Option<String>,
+}
+
+impl McpSearchTool {
+    pub fn new(manager: Arc<RwLock<McpManager>>) -> Self {
+        Self {
+            manager,
+            registry: None,
+        }
+    }
+
+    pub fn with_registry(mut self, registry: &crate::tool::Registry) -> Self {
+        self.registry = Some(registry.downgrade());
+        self
+    }
+}
+
+/// Composed registry key for a `(server, tool)` identity. Never normalized;
+/// see `docs/architecture/MCP_TOOL_NAMING_POLICY.md`.
+pub fn composed_mcp_key(server: &str, tool: &str) -> String {
+    format!("mcp__{}__{}", server, tool)
+}
+
+/// Refuse a dispatch whose composed key is claimed by more than one identity.
+/// `mcp_call` addresses `(server, tool)` directly and would otherwise bypass
+/// the registry's collision refusal.
+async fn refuse_if_ambiguous(
+    registry: Option<&crate::tool::WeakRegistry>,
+    composed: &str,
+) -> Result<()> {
+    let Some(registry) = registry.and_then(|r| r.upgrade()) else {
+        return Ok(());
+    };
+    if registry.mcp_ambiguous_keys().await.contains_key(composed) {
+        return Err(anyhow::anyhow!(
+            "MCP tool '{}' is refused: its composed name is claimed by more than one \
+             server/tool pair. Rename one server to resolve the collision.",
+            composed
+        ));
+    }
+    Ok(())
+}
+
+#[async_trait]
+impl Tool for McpSearchTool {
+    fn name(&self) -> &str {
+        crate::tool::MCP_SEARCH_TOOL_NAME
+    }
+
+    fn description(&self) -> &str {
+        "Search the MCP tool catalog. Returns each matching tool's server, name, \
+         description, and input schema. Call the tool with mcp_call."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "intent": super::intent_schema_property(),
+                "query": {
+                    "type": "string",
+                    "description": "Case-insensitive substring matched against tool names and descriptions. Omit to list everything."
+                },
+                "server": {
+                    "type": "string",
+                    "description": "Restrict results to one MCP server name."
+                }
+            }
+        })
+    }
+
+    async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
+        let params: McpSearchInput = if input.is_null() {
+            McpSearchInput {
+                query: None,
+                server: None,
+            }
+        } else {
+            serde_json::from_value(input)?
+        };
+        let query = params
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(str::to_ascii_lowercase);
+        let server_filter = params.server.as_deref();
+
+        let catalog = self.manager.read().await.searchable_tools().await;
+        let ambiguous = match self.registry.as_ref().and_then(|r| r.upgrade()) {
+            Some(registry) => registry.mcp_ambiguous_keys().await,
+            None => Default::default(),
+        };
+
+        let mut results = Vec::new();
+        for (server, tool) in catalog {
+            if server_filter.is_some_and(|wanted| wanted != server) {
+                continue;
+            }
+            let composed = composed_mcp_key(&server, &tool.name);
+            if ambiguous.contains_key(&composed) {
+                continue;
+            }
+            if crate::tool::session_mcp_dispatch_is_allowed(&ctx.session_id, &composed).is_err() {
+                continue;
+            }
+            if let Some(query) = query.as_deref() {
+                let haystack = format!(
+                    "{} {} {}",
+                    tool.name,
+                    server,
+                    tool.description.as_deref().unwrap_or("")
+                )
+                .to_ascii_lowercase();
+                if !haystack.contains(query) {
+                    continue;
+                }
+            }
+            results.push(json!({
+                "name": composed,
+                "server": server,
+                "tool": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+            }));
+        }
+
+        let count = results.len();
+        let body = serde_json::to_string_pretty(&json!({
+            "count": count,
+            "tools": results,
+        }))?;
+        Ok(ToolOutput::new(body).with_title(format!("mcp_search: {} tool(s)", count)))
+    }
+}
+
+/// Deferred-surface dispatch tool. Calls `(server, tool)` through the manager
+/// after the session policy, transport name limit, and collision refusal that
+/// gate the eager `mcp__{server}__{tool}` proxies.
+pub struct McpCallTool {
+    manager: Arc<RwLock<McpManager>>,
+    registry: Option<crate::tool::WeakRegistry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpCallInput {
+    server: String,
+    tool: String,
+    #[serde(default)]
+    arguments: Option<Value>,
+}
+
+impl McpCallTool {
+    pub fn new(manager: Arc<RwLock<McpManager>>) -> Self {
+        Self {
+            manager,
+            registry: None,
+        }
+    }
+
+    pub fn with_registry(mut self, registry: &crate::tool::Registry) -> Self {
+        self.registry = Some(registry.downgrade());
+        self
+    }
+}
+
+#[async_trait]
+impl Tool for McpCallTool {
+    fn name(&self) -> &str {
+        crate::tool::MCP_CALL_TOOL_NAME
+    }
+
+    fn description(&self) -> &str {
+        "Call an MCP tool by server and tool name with a JSON arguments object. \
+         Use mcp_search first to find the tool and its input schema."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        // `arguments` is a free-form object whose shape belongs to the target
+        // tool. `additionalProperties: true` keeps provider schema
+        // normalization from stripping the payload and makes this tool
+        // ineligible for OpenAI strict mode on purpose.
+        json!({
+            "type": "object",
+            "properties": {
+                "intent": super::intent_schema_property(),
+                "server": {
+                    "type": "string",
+                    "description": "MCP server name as listed by mcp_search."
+                },
+                "tool": {
+                    "type": "string",
+                    "description": "Tool name on that server as listed by mcp_search."
+                },
+                "arguments": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Arguments matching the tool's input schema."
+                }
+            },
+            "required": ["server", "tool"]
+        })
+    }
+
+    async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
+        let params: McpCallInput = serde_json::from_value(input)?;
+        let server = params.server;
+        let tool = params.tool;
+        if server.is_empty() || tool.is_empty() {
+            return Err(anyhow::anyhow!("mcp_call requires both server and tool"));
+        }
+        let composed = composed_mcp_key(&server, &tool);
+        refuse_if_ambiguous(self.registry.as_ref(), &composed).await?;
+        crate::tool::session_mcp_dispatch_is_allowed(&ctx.session_id, &composed)?;
+
+        let arguments = match params.arguments {
+            None | Some(Value::Null) => Value::Object(serde_json::Map::new()),
+            Some(Value::Object(map)) => Value::Object(map),
+            Some(other) => {
+                return Err(anyhow::anyhow!(
+                    "mcp_call arguments must be a JSON object, got {}",
+                    other
+                ));
+            }
+        };
+
+        let manager = self.manager.read().await;
+        if !manager
+            .config()
+            .servers
+            .get(&server)
+            .is_some_and(|config| config.is_enabled())
+        {
+            return Err(anyhow::anyhow!("MCP server '{}' is not enabled", server));
+        }
+        let result = manager.call_tool(&server, &tool, arguments).await?;
+        Ok(crate::mcp::render_call_result(&server, &tool, result))
+    }
+}
+
+/// Register the deferred fixed surface next to the `mcp` management tool.
+/// Registration is unconditional; exposure filtering in the agent decides
+/// whether the pair is advertised, so an eager session pays nothing for it.
+pub async fn register_fixed_mcp_surface(
+    registry: &crate::tool::Registry,
+    manager: &Arc<RwLock<McpManager>>,
+) {
+    let search = McpSearchTool::new(Arc::clone(manager)).with_registry(registry);
+    let call = McpCallTool::new(Arc::clone(manager)).with_registry(registry);
+    registry
+        .register(
+            crate::tool::MCP_SEARCH_TOOL_NAME.to_string(),
+            Arc::new(search) as Arc<dyn Tool>,
+        )
+        .await;
+    registry
+        .register(
+            crate::tool::MCP_CALL_TOOL_NAME.to_string(),
+            Arc::new(call) as Arc<dyn Tool>,
+        )
+        .await;
+}
+
+#[cfg(test)]
+mod deferral_tests;
 
 #[cfg(test)]
 mod tests {
@@ -586,6 +886,8 @@ mod tests {
                 url: None,
                 enabled: Some(false),
                 disabled: None,
+                timeout_secs: None,
+                health_deadline_ms: None,
             },
         );
         let manager = Arc::new(RwLock::new(McpManager::with_config(config)));

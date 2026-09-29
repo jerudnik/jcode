@@ -33,6 +33,63 @@ mod headless_spawn;
 
 struct MockProvider;
 
+#[test]
+fn fleet_rollup_read_complete_and_semantics() {
+    let mut total = super::zero_token_usage_totals();
+    let mut next = serde_json::to_value(super::zero_token_usage_totals()).unwrap();
+    next["cache_read_complete"] = false.into();
+    next["cache_creation_input_tokens"] = 2_000.into();
+    super::add_token_usage_totals(&mut total, serde_json::from_value(next).unwrap());
+    assert_eq!(
+        serde_json::to_value(&total).unwrap()["cache_read_complete"],
+        false
+    );
+    super::add_token_usage_totals(&mut total, super::zero_token_usage_totals());
+    assert_eq!(
+        serde_json::to_value(&total).unwrap()["cache_read_complete"],
+        false
+    );
+    assert_eq!(total.cache_creation_input_tokens, 2_000);
+}
+
+#[test]
+fn fleet_rollup_merges_pricing_buckets_by_key_and_zips_unknown() {
+    let priced = |provider: &str, model: &str, input: u64| {
+        let mut value = serde_json::to_value(super::zero_token_usage_totals()).unwrap();
+        value["input_tokens"] = input.into();
+        value["output_tokens"] = 100.into();
+        value["messages_with_token_usage"] = 1.into();
+        value["pricing_buckets"] = serde_json::json!([{
+            "provider": provider, "model": model, "messages_with_token_usage": 1,
+            "input_tokens": input, "output_tokens": 100,
+            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+        }]);
+        serde_json::from_value(value).unwrap()
+    };
+    let mut total = super::zero_token_usage_totals();
+    super::add_token_usage_totals(&mut total, priced("OpenAI", "gpt-4.1", 10_000));
+    super::add_token_usage_totals(&mut total, priced("Anthropic", "claude-sonnet-4-6", 1_000));
+    super::add_token_usage_totals(&mut total, priced("OpenAI", "gpt-4.1", 2_000));
+    let value = serde_json::to_value(&total).unwrap();
+    let buckets = value["pricing_buckets"]
+        .as_array()
+        .expect("known fleet members retain buckets");
+    assert_eq!(buckets.len(), 2);
+    assert_eq!(buckets[0]["provider"], "Anthropic");
+    assert_eq!(buckets[1]["input_tokens"], 12_000);
+    assert_eq!(buckets[1]["messages_with_token_usage"], 2);
+    let mut legacy = serde_json::to_value(super::zero_token_usage_totals()).unwrap();
+    legacy.as_object_mut().unwrap().remove("pricing_buckets");
+    super::add_token_usage_totals(&mut total, serde_json::from_value(legacy).unwrap());
+    assert!(
+        serde_json::to_value(&total)
+            .unwrap()
+            .get("pricing_buckets")
+            .is_none()
+    );
+    assert_eq!(total.input_tokens, 13_000);
+}
+
 #[async_trait]
 impl Provider for MockProvider {
     async fn complete(
@@ -175,7 +232,12 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
     let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
         swarm_id.clone(),
         VersionedPlan {
-            items: vec![plan_item("task-verify", "running", "high", Some("rollup-worker"))],
+            items: vec![plan_item(
+                "task-verify",
+                "running",
+                "high",
+                Some("rollup-worker"),
+            )],
             version: 7,
             participants: HashSet::from(["rollup-coord".to_string(), "rollup-worker".to_string()]),
             task_progress: HashMap::new(),
@@ -213,7 +275,10 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
             assert_eq!(swarms.len(), 1);
             let entry = &swarms[0];
             assert_eq!(entry.swarm_id, swarm_id);
-            assert_eq!(entry.coordinator_session_id.as_deref(), Some("rollup-coord"));
+            assert_eq!(
+                entry.coordinator_session_id.as_deref(),
+                Some("rollup-coord")
+            );
             assert_eq!(entry.coordinator_name.as_deref(), Some("falcon"));
             assert_eq!(entry.coordinator_status.as_deref(), Some("ready"));
             assert_eq!(entry.member_count, 2);

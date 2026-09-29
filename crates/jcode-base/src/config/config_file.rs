@@ -40,6 +40,16 @@ impl Config {
         config
     }
 
+    /// Load the on-disk config for a read-modify-write operation.
+    ///
+    /// Unlike [`Self::load`], this never converts a parse error into defaults.
+    /// Saving those defaults would destroy the user's existing config. It also
+    /// deliberately skips environment overrides so transient process settings
+    /// are not baked into the file as a side effect of changing one preference.
+    fn load_for_update() -> anyhow::Result<Self> {
+        Ok(Self::load_from_file_strict()?.unwrap_or_default())
+    }
+
     /// Load config from file, with environment variable overrides.
     ///
     /// Unlike [`Self::load`], this returns TOML/read errors to callers that need
@@ -360,7 +370,7 @@ impl Config {
 
     fn patch_config_file(mut patch: impl FnMut(&mut Self) -> bool) -> anyhow::Result<Self> {
         Self::with_config_file_lock(|| {
-            let mut cfg = Self::load();
+            let mut cfg = Self::load_for_update()?;
             if patch(&mut cfg) {
                 cfg.save_unlocked()?;
             }

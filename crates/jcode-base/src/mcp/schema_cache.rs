@@ -79,6 +79,8 @@ pub fn fingerprint_config(config: &McpServerConfig) -> String {
         v.hash(&mut hasher);
         0u8.hash(&mut hasher);
     }
+    // Timing policy (`timeout_secs`, `health_deadline_ms`) is deliberately
+    // excluded: it changes no schemas, so it must not invalidate the cache.
     config.shared.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }

@@ -408,6 +408,7 @@ fn opencode_credentials_no_anthropic() {
 
 #[test]
 fn active_account_override_roundtrip() {
+    let _lock = crate::storage::lock_test_env();
     set_active_account_override(Some("test-override".to_string()));
     assert_eq!(
         get_active_account_override(),

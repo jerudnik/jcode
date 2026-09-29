@@ -202,10 +202,13 @@ pub fn dispatch_observer(event: HookEvent) {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
             match crate::platform::spawn_detached(&mut cmd) {
-                Ok(_) => crate::logging::debug(&format!(
-                    "Hook '{event_name}' dispatched to '{command_line}' (session={:?})",
-                    event.session_id
-                )),
+                Ok(child) => {
+                    crate::platform::reap_detached(child);
+                    crate::logging::debug(&format!(
+                        "Hook '{event_name}' dispatched to '{command_line}' (session={:?})",
+                        event.session_id
+                    ));
+                }
                 Err(error) => crate::logging::warn(&format!(
                     "Hook '{event_name}' command '{command_line}' failed to start: {error}"
                 )),
@@ -513,5 +516,203 @@ mod tests {
             None => crate::env::remove_var("JCODE_HOOK_TURN_END"),
         }
         assert_eq!(recorded, "turn_end|ses_obs|ok|1");
+    }
+
+    #[cfg(unix)]
+    fn wait_until(mut done: impl FnMut() -> bool, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if done() {
+                return true;
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_exists(pid: u32) -> bool {
+        let rc = unsafe { libc::kill(pid as i32, 0) };
+        if rc == 0 {
+            return true;
+        }
+        std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+
+    #[cfg(unix)]
+    fn process_state(pid: u32) -> String {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output();
+        match output {
+            Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            Err(error) => format!("ps-failed:{error}"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_ppid(pid: u32) -> Option<u32> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "ppid=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+    }
+
+    #[cfg(unix)]
+    fn wait_for_pid_file(path: &std::path::Path) -> u32 {
+        let mut pid = None;
+        wait_until(
+            || {
+                pid = std::fs::read_to_string(path)
+                    .ok()
+                    .and_then(|value| value.trim().parse().ok());
+                pid.is_some()
+            },
+            std::time::Duration::from_secs(5),
+        );
+        pid.expect("hook should record its pid")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observer_dispatch_reaps_completed_hook() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let record = temp.path().join("pid.txt");
+        let script = write_executable_script(
+            temp.path(),
+            "record-pid.sh",
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" > {}\n",
+                crate::terminal_launch::sh_escape(&record.to_string_lossy())
+            ),
+        );
+
+        let previous = std::env::var_os("JCODE_HOOK_TURN_END");
+        crate::env::set_var("JCODE_HOOK_TURN_END", script.to_string_lossy().to_string());
+        dispatch_observer(HookEvent::new("turn_end").session_id("ses_reap"));
+        let pid = wait_for_pid_file(&record);
+        match previous {
+            Some(value) => crate::env::set_var("JCODE_HOOK_TURN_END", value),
+            None => crate::env::remove_var("JCODE_HOOK_TURN_END"),
+        }
+
+        let reaped = wait_until(|| !process_exists(pid), std::time::Duration::from_secs(2));
+        assert!(
+            reaped,
+            "completed hook process {pid} was not reaped (state={})",
+            process_state(pid)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observer_dispatch_does_not_block_on_child() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let record = temp.path().join("pid.txt");
+        let release = temp.path().join("release");
+        let script = write_executable_script(
+            temp.path(),
+            "gated.sh",
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" > {}\nwhile [ ! -e {} ]; do /bin/sleep 0.02; done\n",
+                crate::terminal_launch::sh_escape(&record.to_string_lossy()),
+                crate::terminal_launch::sh_escape(&release.to_string_lossy())
+            ),
+        );
+
+        let previous = std::env::var_os("JCODE_HOOK_TURN_END");
+        crate::env::set_var("JCODE_HOOK_TURN_END", script.to_string_lossy().to_string());
+        let started = std::time::Instant::now();
+        dispatch_observer(HookEvent::new("turn_end").session_id("ses_latency"));
+        let elapsed = started.elapsed();
+        let pid = wait_for_pid_file(&record);
+        match previous {
+            Some(value) => crate::env::set_var("JCODE_HOOK_TURN_END", value),
+            None => crate::env::remove_var("JCODE_HOOK_TURN_END"),
+        }
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(500),
+            "dispatch_observer blocked on the child for {elapsed:?}"
+        );
+        assert!(
+            process_exists(pid),
+            "gated hook {pid} should still be running after the caller returns"
+        );
+        assert_ne!(
+            process_state(pid).chars().next(),
+            Some('Z'),
+            "gated hook {pid} must not be a zombie while waiting"
+        );
+        assert_eq!(
+            process_ppid(pid),
+            Some(std::process::id()),
+            "hook child must stay owned by the dispatching process"
+        );
+
+        std::fs::write(&release, "").expect("release gated hook");
+        let reaped = wait_until(|| !process_exists(pid), std::time::Duration::from_secs(2));
+        assert!(
+            reaped,
+            "gated hook process {pid} was not reaped after exit (state={})",
+            process_state(pid)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observer_dispatch_spawn_failure_is_nonfatal() {
+        let _guard = crate::storage::lock_test_env();
+        let previous = std::env::var_os("JCODE_HOOK_TURN_END");
+        crate::env::set_var(
+            "JCODE_HOOK_TURN_END",
+            "/nonexistent/jcode-hook-observer-missing",
+        );
+        dispatch_observer(HookEvent::new("turn_end").session_id("ses_missing"));
+        match previous {
+            Some(value) => crate::env::set_var("JCODE_HOOK_TURN_END", value),
+            None => crate::env::remove_var("JCODE_HOOK_TURN_END"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observer_dispatch_reaps_cancelled_child() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let record = temp.path().join("pid.txt");
+        let release = temp.path().join("release");
+        let script = write_executable_script(
+            temp.path(),
+            "cancel.sh",
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" > {}\nwhile [ ! -e {} ]; do /bin/sleep 0.02; done\n",
+                crate::terminal_launch::sh_escape(&record.to_string_lossy()),
+                crate::terminal_launch::sh_escape(&release.to_string_lossy())
+            ),
+        );
+
+        let previous = std::env::var_os("JCODE_HOOK_TURN_END");
+        crate::env::set_var("JCODE_HOOK_TURN_END", script.to_string_lossy().to_string());
+        dispatch_observer(HookEvent::new("turn_end").session_id("ses_cancel"));
+        let pid = wait_for_pid_file(&record);
+        match previous {
+            Some(value) => crate::env::set_var("JCODE_HOOK_TURN_END", value),
+            None => crate::env::remove_var("JCODE_HOOK_TURN_END"),
+        }
+
+        let rc = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        assert_eq!(rc, 0, "should be able to cancel the live hook child");
+        let reaped = wait_until(|| !process_exists(pid), std::time::Duration::from_secs(2));
+        assert!(
+            reaped,
+            "cancelled hook process {pid} was not reaped (state={})",
+            process_state(pid)
+        );
     }
 }

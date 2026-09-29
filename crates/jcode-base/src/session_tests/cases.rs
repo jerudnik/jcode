@@ -502,6 +502,9 @@ fn token_usage_totals_counts_cache_reported_inputs_only_when_cache_fields_exist(
         }],
         None,
         Some(StoredTokenUsage {
+            provider: None,
+            model: None,
+            prompt_tokens: None,
             input_tokens: 100,
             output_tokens: 10,
             cache_read_input_tokens: None,
@@ -516,6 +519,9 @@ fn token_usage_totals_counts_cache_reported_inputs_only_when_cache_fields_exist(
         }],
         None,
         Some(StoredTokenUsage {
+            provider: None,
+            model: None,
+            prompt_tokens: None,
             input_tokens: 200,
             output_tokens: 20,
             cache_read_input_tokens: Some(150),
@@ -2450,4 +2456,113 @@ fn create_populates_short_name_from_generated_id() {
         extract_session_name(&session.id),
         "short name must match the one encoded in the session id"
     );
+}
+
+#[test]
+fn cache_prompt_totals_preserve_mixed_provider_accounting_and_legacy_unknown() {
+    let mut session = Session::create_with_id("cache_prompt_totals".into(), None, None);
+    for usage in [
+        // Inclusive OpenAI input: read and write are subsets.
+        StoredTokenUsage {
+            provider: None,
+            model: None,
+            prompt_tokens: Some(10_000),
+            input_tokens: 10_000,
+            output_tokens: 100,
+            cache_read_input_tokens: Some(6_000),
+            cache_creation_input_tokens: Some(2_000),
+        },
+        // Anthropic uncached input: read and write are disjoint.
+        StoredTokenUsage {
+            provider: None,
+            model: None,
+            prompt_tokens: Some(10_000),
+            input_tokens: 1_000,
+            output_tokens: 100,
+            cache_read_input_tokens: Some(7_000),
+            cache_creation_input_tokens: Some(2_000),
+        },
+    ] {
+        let json = serde_json::to_string(&usage).unwrap();
+        let restored: StoredTokenUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.prompt_tokens, Some(10_000));
+        session.add_message_ext(Role::Assistant, vec![], None, Some(restored));
+    }
+    let totals = session.token_usage_totals();
+    assert_eq!(totals.cache_prompt_tokens, Some(20_000));
+    assert_eq!(totals.cache_reported_input_tokens, 11_000);
+    assert_eq!(totals.cache_read_input_tokens, 13_000);
+    assert_eq!(totals.cache_creation_input_tokens, 4_000);
+    let legacy: StoredTokenUsage = serde_json::from_str(r#"{"input_tokens":10000,"output_tokens":100,"cache_read_input_tokens":6000,"cache_creation_input_tokens":2000}"#).unwrap();
+    assert_eq!(legacy.prompt_tokens, None);
+    session.add_message_ext(Role::Assistant, vec![], None, Some(legacy));
+    assert_eq!(session.token_usage_totals().cache_prompt_tokens, None);
+    assert_eq!(session.token_usage_totals().cache_read_input_tokens, 19_000);
+}
+
+#[test]
+fn token_usage_totals_read_complete_false_when_record_lacks_read() {
+    for (read, write, complete) in [
+        (None, Some(2_000), false),
+        (Some(0), Some(2_000), true),
+        (None, None, true),
+    ] {
+        let mut session = Session::create_with_id("read_completeness".into(), None, None);
+        let usage: StoredTokenUsage = serde_json::from_value(serde_json::json!({
+            "input_tokens": 10_000, "output_tokens": 100, "prompt_tokens": 10_000,
+            "cache_read_input_tokens": read, "cache_creation_input_tokens": write,
+        }))
+        .unwrap();
+        session.add_message_ext(Role::Assistant, vec![], None, Some(usage));
+        assert_eq!(
+            serde_json::to_value(session.token_usage_totals()).unwrap()["cache_read_complete"],
+            complete
+        );
+        let explicit: StoredTokenUsage = serde_json::from_value(serde_json::json!({
+            "input_tokens": 10_000, "output_tokens": 100, "prompt_tokens": 10_000,
+            "cache_read_input_tokens": 0,
+        }))
+        .unwrap();
+        session.add_message_ext(Role::Assistant, vec![], None, Some(explicit));
+        assert_eq!(
+            serde_json::to_value(session.token_usage_totals()).unwrap()["cache_read_complete"],
+            complete
+        );
+    }
+}
+
+#[test]
+fn token_usage_totals_pricing_buckets_group_by_provider_model_and_poison_on_legacy() {
+    let mut session = Session::create_with_id("pricing_buckets".into(), None, None);
+    for (provider, model, input) in [
+        ("OpenAI", "gpt-4.1", 10_000),
+        ("Anthropic", "claude-sonnet-4-6", 1_000),
+        ("OpenAI", "gpt-4.1", 2_000),
+    ] {
+        let usage: StoredTokenUsage = serde_json::from_value(serde_json::json!({
+            "provider": provider, "model": model,
+            "input_tokens": input, "output_tokens": 100,
+            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+        }))
+        .unwrap();
+        session.add_message_ext(Role::Assistant, vec![], None, Some(usage));
+    }
+    let totals = serde_json::to_value(session.token_usage_totals()).unwrap();
+    let buckets = totals["pricing_buckets"]
+        .as_array()
+        .expect("identified usage produces pricing buckets");
+    assert_eq!(buckets.len(), 2);
+    assert_eq!(buckets[0]["provider"], "Anthropic");
+    assert_eq!(buckets[1]["model"], "gpt-4.1");
+    assert_eq!(buckets[1]["messages_with_token_usage"], 2);
+    assert_eq!(buckets[1]["input_tokens"], 12_000);
+    assert_eq!(buckets[1]["output_tokens"], 200);
+    let legacy: StoredTokenUsage = serde_json::from_value(serde_json::json!({
+        "input_tokens": 500, "output_tokens": 10,
+    }))
+    .unwrap();
+    session.add_message_ext(Role::Assistant, vec![], None, Some(legacy));
+    let totals = serde_json::to_value(session.token_usage_totals()).unwrap();
+    assert!(totals.get("pricing_buckets").is_none());
+    assert_eq!(totals["input_tokens"], 13_500);
 }

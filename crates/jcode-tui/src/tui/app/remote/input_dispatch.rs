@@ -53,6 +53,7 @@ pub(in crate::tui::app) async fn begin_remote_send(
         retry_attempts,
         retry_at: None,
     });
+    app.pending_remote_delivery_proven = false;
     app.autoreview_after_current_turn = !is_system;
     app.autojudge_after_current_turn = !is_system;
     remote.reset_call_output_tokens_seen();

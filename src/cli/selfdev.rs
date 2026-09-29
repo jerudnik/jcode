@@ -97,6 +97,15 @@ async fn wait_for_reloading_server() -> bool {
     }
 }
 
+fn selfdev_build_required(
+    force_build: bool,
+    no_build: bool,
+    stale: bool,
+    reload_handoff: bool,
+) -> bool {
+    force_build || (!no_build && stale && !reload_handoff)
+}
+
 pub async fn run_self_dev(
     should_build: bool,
     no_build: bool,
@@ -138,7 +147,10 @@ pub async fn run_self_dev(
         .map(|bin| !build::dev_binary_matches_source(&bin, &source))
         .unwrap_or(true);
 
-    if should_build || (!no_build && stale) {
+    // An automatic handoff already selected a build, possibly from another worktree.
+    // Do not overwrite it with the client checkout. Manual resumes still auto-build.
+    let reload_handoff = is_resume && std::env::var_os("JCODE_RESUMING").is_some();
+    if selfdev_build_required(should_build, no_build, stale, reload_handoff) {
         if stale && !should_build {
             output::stderr_info(format!(
                 "Self-dev binary is stale vs current source ({}); rebuilding...",

@@ -29,7 +29,7 @@ fn optional_token_usage_totals(totals: TokenUsageTotals) -> Option<TokenUsageTot
     (totals.messages_with_token_usage > 0).then_some(totals)
 }
 
-fn optional_total_tokens(totals: TokenUsageTotals) -> Option<(u64, u64)> {
+fn optional_total_tokens(totals: &TokenUsageTotals) -> Option<(u64, u64)> {
     (totals.messages_with_token_usage > 0).then_some((totals.input_tokens, totals.output_tokens))
 }
 
@@ -121,7 +121,10 @@ pub(super) async fn handle_get_history(
         session_activity_snapshot(client_connections, client_session_id, client_is_processing)
             .await;
 
-    if agent.try_lock().is_err() {
+    // Keep ownership from the nonblocking decision through snapshot preparation.
+    // A probe followed by a fresh lock would release and re-acquire this mutex,
+    // letting a turn that queued in between make GetHistory wait for the whole turn.
+    let Ok(agent_guard) = agent.try_lock() else {
         crate::logging::info(&format!(
             "handle_get_history: session {} busy, falling back to persisted remote-startup snapshot",
             client_session_id
@@ -145,12 +148,12 @@ pub(super) async fn handle_get_history(
             history_start.elapsed().as_millis(),
         ));
         return Ok(());
-    }
+    };
 
-    send_history(
+    send_history_with_guard(
         id,
         client_session_id,
-        agent,
+        agent_guard,
         sessions,
         client_count,
         writer,
@@ -479,8 +482,26 @@ async fn send_history_from_persisted_session(
     was_interrupted: Option<bool>,
     activity: Option<SessionActivitySnapshot>,
 ) -> Result<()> {
-    let session = crate::session::Session::load_for_remote_startup(session_id)
-        .or_else(|_| crate::session::Session::load_startup_stub(session_id))?;
+    let session = match crate::session::Session::load_for_remote_startup(session_id)
+        .or_else(|_| crate::session::Session::load_startup_stub(session_id))
+    {
+        Ok(session) => session,
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                && sessions.read().await.contains_key(session_id) =>
+        {
+            // Fresh sessions intentionally have no transcript on disk until
+            // their first visible message. Metadata prefetch (or another
+            // history request) can still briefly own their agent mutex. An
+            // empty persisted view is valid here and must not disconnect the
+            // client or wait behind a turn. Provider metadata is filled below.
+            // Do not save this synthetic snapshot or mask other I/O errors.
+            Session::create_with_id(session_id.to_string(), None, None)
+        }
+        Err(error) => return Err(error),
+    };
     let token_usage_totals = session.token_usage_totals();
     let (rendered_messages, images) = crate::session::render_messages_and_images(&session);
     // Extract the small metadata fields we need, then drop the full Session
@@ -528,7 +549,7 @@ async fn send_history_from_persisted_session(
         available_model_routes: Vec::new(),
         mcp_servers: Vec::new(),
         skills: Vec::new(),
-        total_tokens: optional_total_tokens(token_usage_totals),
+        total_tokens: optional_total_tokens(&token_usage_totals),
         token_usage_totals: optional_token_usage_totals(token_usage_totals),
         all_sessions,
         client_count: Some(current_client_count),
@@ -557,10 +578,10 @@ async fn send_history_from_persisted_session(
     clippy::too_many_arguments,
     reason = "history payload assembly includes agent state, sessions, counts, writer, activity, payload mode, and server identity"
 )]
-pub(super) async fn send_history(
+async fn send_history_with_guard(
     id: u64,
     session_id: &str,
-    agent: &Arc<Mutex<Agent>>,
+    agent_guard: tokio::sync::MutexGuard<'_, Agent>,
     sessions: &SessionAgents,
     client_count: &Arc<RwLock<usize>>,
     writer: &Arc<Mutex<WriteHalf>>,
@@ -572,7 +593,6 @@ pub(super) async fn send_history(
     include_model_catalog: bool,
 ) -> Result<()> {
     let history_start = Instant::now();
-    let agent_lock_start = Instant::now();
     let (
         messages,
         images,
@@ -585,7 +605,7 @@ pub(super) async fn send_history(
         available_models,
         available_model_routes,
         skills,
-        tool_names,
+        mcp_tool_identities,
         upstream_provider,
         resolved_credential,
         connection_type,
@@ -594,7 +614,6 @@ pub(super) async fn send_history(
         service_tier,
         compaction_mode,
         token_usage_totals,
-        agent_lock_ms,
         history_snapshot_ms,
         image_render_ms,
         tool_names_ms,
@@ -604,8 +623,6 @@ pub(super) async fn send_history(
         provider_meta_ms,
         compaction_mode_ms,
     ) = {
-        let agent_guard = agent.lock().await;
-        let agent_lock_ms = agent_lock_start.elapsed().as_millis();
         let provider = agent_guard.provider_handle();
 
         let history_snapshot_start = Instant::now();
@@ -614,7 +631,7 @@ pub(super) async fn send_history(
         let image_render_ms = 0;
 
         let tool_names_start = Instant::now();
-        let tool_names = agent_guard.tool_names().await;
+        let mcp_tool_identities = agent_guard.mcp_tool_identities().await;
         let tool_names_ms = tool_names_start.elapsed().as_millis();
 
         let (available_models, available_models_ms) = if include_model_catalog {
@@ -660,7 +677,7 @@ pub(super) async fn send_history(
             available_models,
             available_model_routes,
             skills,
-            tool_names,
+            mcp_tool_identities,
             agent_guard.last_upstream_provider(),
             agent_guard.active_resolved_credential(),
             agent_guard.last_connection_type(),
@@ -669,7 +686,6 @@ pub(super) async fn send_history(
             service_tier,
             compaction_mode,
             agent_guard.token_usage_totals(),
-            agent_lock_ms,
             history_snapshot_ms,
             image_render_ms,
             tool_names_ms,
@@ -681,17 +697,19 @@ pub(super) async fn send_history(
         )
     };
 
+    // Only snapshot preparation needs the agent. Never hold it across session
+    // metadata locks or socket backpressure.
+    drop(agent_guard);
+
     let side_panel_start = Instant::now();
     let side_panel = crate::side_panel::snapshot_for_session(session_id).unwrap_or_default();
     let side_panel_ms = side_panel_start.elapsed().as_millis();
 
+    // Attribute by identity, not by parsing the composed key: a server named
+    // `a__b` must count under `a__b`, not `a`.
     let mut mcp_map: BTreeMap<String, usize> = BTreeMap::new();
-    for name in &tool_names {
-        if let Some(rest) = name.strip_prefix("mcp__")
-            && let Some((server, _tool)) = rest.split_once("__")
-        {
-            *mcp_map.entry(server.to_string()).or_default() += 1;
-        }
+    for (_, server, _) in &mcp_tool_identities {
+        *mcp_map.entry(server.clone()).or_default() += 1;
     }
     let mcp_servers: Vec<String> = mcp_map
         .into_iter()
@@ -705,13 +723,12 @@ pub(super) async fn send_history(
         let count = *client_count.read().await;
         let sessions_snapshot_ms = sessions_snapshot_start.elapsed().as_millis();
         crate::logging::info(&format!(
-            "[TIMING] send_history prep: session={}, mode={:?}, messages={}, images={}, mcp_servers={}, agent_lock={}ms, history={}ms, images={}ms, tool_names={}ms, models={}ms, routes={}ms, skills={}ms, provider_meta={}ms, compaction={}ms, side_panel={}ms, sessions={}ms, total={}ms",
+            "[TIMING] send_history prep: session={}, mode={:?}, messages={}, images={}, mcp_servers={}, history={}ms, images={}ms, tool_names={}ms, models={}ms, routes={}ms, skills={}ms, provider_meta={}ms, compaction={}ms, side_panel={}ms, sessions={}ms, total={}ms",
             session_id,
             payload_mode,
             messages.len(),
             images.len(),
             mcp_servers.len(),
-            agent_lock_ms,
             history_snapshot_ms,
             image_render_ms,
             tool_names_ms,
@@ -741,7 +758,7 @@ pub(super) async fn send_history(
         available_model_routes,
         mcp_servers,
         skills,
-        total_tokens: optional_total_tokens(token_usage_totals),
+        total_tokens: optional_total_tokens(&token_usage_totals),
         token_usage_totals: optional_token_usage_totals(token_usage_totals),
         all_sessions,
         client_count: Some(current_client_count),

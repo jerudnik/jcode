@@ -308,3 +308,49 @@ fn route_selection_preserves_runtime_identity_from_model_route() {
     );
     assert_eq!(selection.provider_label, "NVIDIA NIM");
 }
+
+#[test]
+fn tool_name_limit_accepts_exact_boundary_and_rejects_one_over() {
+    let name = |len: usize| {
+        let mut s = String::from("mcp__my-server__do-thing");
+        while s.len() < len {
+            s.push_str("-abc_xyz");
+        }
+        s.truncate(len);
+        if s.ends_with(['-', '_']) {
+            s.pop();
+            s.push('z');
+        }
+        s
+    };
+    let probed = ToolNameLimit::PROBED_128;
+    assert!(probed.accepts(&name(60)));
+    assert!(probed.accepts(&name(64)));
+    assert!(probed.accepts(&name(65)));
+    assert!(probed.accepts(&name(128)));
+    assert!(!probed.accepts(&name(129)));
+
+    let conservative = ToolNameLimit::default();
+    assert_eq!(conservative, ToolNameLimit::CONSERVATIVE);
+    assert!(conservative.accepts(&name(64)));
+    assert!(!conservative.accepts(&name(65)));
+}
+
+#[test]
+fn tool_name_limit_rejects_characters_outside_the_transport_charset() {
+    let basic = ToolNameLimit::PROBED_128;
+    assert!(basic.accepts("mcp__bifrost-gateway__sequential_thinking-sequentialthinking"));
+    assert!(!basic.accepts("bad name!with spaces"));
+    assert!(!basic.accepts("mcp__srv__tool.name"));
+    assert!(!basic.accepts("mcp__srv__ns:tool"));
+    assert!(!basic.accepts(""));
+    assert!(!basic.accepts("mcp__srv__tööl"));
+
+    let gemini = ToolNameLimit {
+        max_len: 64,
+        allow_dot_colon: true,
+    };
+    assert!(gemini.accepts("mcp__srv__tool.name"));
+    assert!(gemini.accepts("mcp__srv__ns:tool"));
+    assert!(!gemini.accepts("mcp__srv__tool name"));
+}

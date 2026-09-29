@@ -6,11 +6,9 @@ use super::animation::{
     VIEWPORT_ANIMATION_DURATION, desktop_reduced_motion_enabled,
     desktop_reduced_motion_enabled_for_env_value,
 };
+use super::desktop_prefs::DESKTOP_STATE_ENV_LOCK as DESKTOP_PREFS_ENV_LOCK;
 use super::single_session::*;
 use super::*;
-use std::sync::Mutex;
-
-static DESKTOP_PREFS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn desktop_frame_profile_is_opt_in_and_recognizes_trace_modes() {

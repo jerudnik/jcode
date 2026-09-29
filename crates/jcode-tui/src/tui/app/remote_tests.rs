@@ -84,7 +84,11 @@ fn assistant_chrome_appears_in_rendered_status_line() {
         persona: None,
     });
 
-    let text = render_frame_text(&app, 120, 24);
+    // The chrome line also shows the real repository branch (the git-info
+    // cache is process-global and reads the checkout the tests run in), so
+    // render wide enough that a long branch name cannot truncate the
+    // validation summary off the right edge.
+    let text = render_frame_text(&app, 240, 24);
     assert!(
         text.contains("Infra"),
         "assistant profile label should render in chrome:\n{text}"
@@ -414,6 +418,98 @@ fn submit_prepared_remote_input_defers_until_history_loads() {
         app.is_processing,
         "the held prompt should be sent once history is loaded"
     );
+}
+
+fn bootstrap_history(session_id: &str) -> ServerEvent {
+    ServerEvent::History {
+        id: 1,
+        session_id: session_id.to_string(),
+        messages: vec![],
+        images: vec![],
+        provider_name: None,
+        provider_model: None,
+        subagent_model: None,
+        autoreview_enabled: None,
+        autojudge_enabled: None,
+        available_models: vec![],
+        available_model_routes: vec![],
+        mcp_servers: vec![],
+        skills: vec![],
+        total_tokens: None,
+        token_usage_totals: None,
+        all_sessions: vec![],
+        client_count: Some(1),
+        is_canary: Some(false),
+        reload_recovery: None,
+        server_version: None,
+        server_name: None,
+        server_icon: None,
+        server_has_update: Some(false),
+        was_interrupted: None,
+        connection_type: None,
+        status_detail: None,
+        upstream_provider: None,
+        resolved_credential: None,
+        reasoning_effort: None,
+        service_tier: None,
+        compaction_mode: crate::config::CompactionMode::Reactive,
+        activity: None,
+        side_panel: crate::side_panel::SidePanelSnapshot::default(),
+    }
+}
+
+#[test]
+fn first_history_snapshot_keeps_prompt_parked_before_history() {
+    // The bootstrap History snapshot runs the `session_changed` reset. A
+    // prompt parked in `pending_prompt_before_history` must survive that
+    // reset and dispatch exactly once afterwards; the deferral is the fork's
+    // contract, so nothing may be sent before this snapshot lands.
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = crate::tui::app::AppRuntimeMode::RemoteClient;
+    let rt = tokio::runtime::Runtime::new().expect("runtime");
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    let prepared = crate::tui::app::input::PreparedInput {
+        raw_input: "Start the fork immediately".to_string(),
+        expanded: "Start the fork immediately".to_string(),
+        images: vec![],
+    };
+    rt.block_on(crate::tui::app::remote::submit_prepared_remote_input(
+        &mut app,
+        &mut remote,
+        prepared,
+    ))
+    .expect("submit parks before history");
+    assert!(!app.is_processing);
+    assert!(app.current_message_id.is_none());
+    assert!(app.pending_prompt_before_history.is_some());
+
+    handle_server_event(&mut app, bootstrap_history("startup-session"), &mut remote);
+    assert!(remote.has_loaded_history());
+    assert_eq!(app.remote_session_id.as_deref(), Some("startup-session"));
+    assert!(
+        app.pending_prompt_before_history.is_some(),
+        "bootstrap History must not drop the parked prompt"
+    );
+
+    rt.block_on(process_remote_followups(&mut app, &mut remote));
+    assert!(app.pending_prompt_before_history.is_none());
+    assert!(app.is_processing);
+    assert!(app.current_message_id.is_some());
+    assert!(app.display_messages().iter().any(|message| {
+        message.role == "user" && message.content == "Start the fork immediately"
+    }));
+
+    // A real session switch still resets processing state.
+    handle_server_event(
+        &mut app,
+        bootstrap_history("different-session"),
+        &mut remote,
+    );
+    assert!(!app.is_processing);
+    assert!(matches!(app.status, crate::tui::ProcessingStatus::Idle));
+    assert!(app.rate_limit_pending_message.is_none());
 }
 
 #[test]

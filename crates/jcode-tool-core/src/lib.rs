@@ -82,6 +82,14 @@ pub trait Tool: Send + Sync {
     /// Execute the tool with the given input.
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput>;
 
+    /// For proxies to an MCP server tool, the `(server, raw tool name)` pair
+    /// this proxy dispatches to. Registries use it to add and remove a
+    /// server's tools by identity instead of by registry-key prefix, which
+    /// over-matches when a server name itself contains `__`.
+    fn mcp_identity(&self) -> Option<(&str, &str)> {
+        None
+    }
+
     /// Convert to API tool definition.
     fn to_definition(&self) -> ToolDefinition {
         ToolDefinition {
