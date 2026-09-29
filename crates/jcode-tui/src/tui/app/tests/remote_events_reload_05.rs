@@ -36,6 +36,12 @@ fn test_busy_automatic_continuation_waits_for_running_turn_without_retrying() {
         ))
         .unwrap();
         let rejected_id = app.current_message_id.unwrap();
+        // Ack confirms receipt, not acceptance: the server sends it before
+        // checking whether a turn is already running.
+        app.handle_server_event(
+            crate::protocol::ServerEvent::Ack { id: rejected_id },
+            &mut remote,
+        );
         app.handle_server_event(
             crate::protocol::ServerEvent::Error {
                 id: rejected_id,
@@ -160,6 +166,73 @@ fn test_disconnect_does_not_requeue_auto_retry_continuation() {
 
     assert!(app.queued_messages().is_empty());
     assert!(app.hidden_queued_system_messages.is_empty());
+    assert!(
+        app.rate_limit_reset.is_none(),
+        "disconnect must not arm a replay timer"
+    );
+    assert!(app.rate_limit_pending_message.is_none());
+}
+
+#[test]
+fn test_disconnect_does_not_replay_streaming_continuation_after_reattach() {
+    for auto_retry in [false, true] {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.auto_poke_incomplete_todos = false;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        remote.mark_history_loaded();
+        let id = rt
+            .block_on(remote::begin_remote_send(
+                &mut app,
+                &mut remote,
+                "queued follow-up".to_string(),
+                vec![],
+                true,
+                Some("hidden reminder".to_string()),
+                auto_retry,
+                0,
+            ))
+            .unwrap();
+        app.handle_server_event(crate::protocol::ServerEvent::Ack { id }, &mut remote);
+        app.handle_server_event(
+            crate::protocol::ServerEvent::ReasoningDelta {
+                text: "Working on the follow-up".to_string(),
+            },
+            &mut remote,
+        );
+
+        remote::handle_disconnect(&mut app, &mut remote::RemoteRunState::default(), None);
+        assert!(
+            app.queued_messages().is_empty(),
+            "accepted continuation must not be queued again"
+        );
+        assert!(app.hidden_queued_system_messages.is_empty());
+        assert!(app.rate_limit_reset.is_none());
+        assert!(app.rate_limit_pending_message.is_none());
+
+        let mut reattached = crate::tui::backend::RemoteConnection::dummy();
+        reattached.mark_history_loaded();
+        app.handle_server_event(
+            crate::protocol::ServerEvent::TextDelta {
+                text: "Follow-up complete".to_string(),
+            },
+            &mut reattached,
+        );
+        app.handle_server_event(crate::protocol::ServerEvent::MessageEnd, &mut reattached);
+        let ops = app.stream_buffer.flush();
+        app.apply_stream_ops(ops);
+        app.handle_server_event(crate::protocol::ServerEvent::Done { id }, &mut reattached);
+        rt.block_on(remote::process_remote_followups(&mut app, &mut reattached));
+        rt.block_on(remote::handle_tick(&mut app, &mut reattached));
+        assert!(
+            !app.is_processing,
+            "no second turn may start after the resumed completion"
+        );
+        assert!(app.current_message_id.is_none());
+        assert!(app.rate_limit_pending_message.is_none());
+    }
 }
 
 #[test]
@@ -170,9 +243,14 @@ fn test_disconnect_recovers_inflight_queued_continuation_to_queue() {
 
     // A queued follow-up was dequeued and handed to begin_remote_send: it now
     // lives only in rate_limit_pending_message with the queued-continuation
-    // shape (is_system, no auto-retry, no scheduled reset).
+    // shape (is_system, no auto-retry, no scheduled reset). The connection
+    // drops before the server streams anything back, so delivery is unknown
+    // (issue #391: a reload handoff racing the turn-end dispatch). Once turn
+    // content has streamed, delivery is proven and the continuation is not
+    // requeued; see test_disconnect_does_not_replay_streaming_continuation_
+    // after_reattach.
     app.is_processing = true;
-    app.status = ProcessingStatus::Streaming;
+    app.status = ProcessingStatus::Sending;
     app.current_message_id = Some(12);
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "queued follow-up in flight".to_string(),

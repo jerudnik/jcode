@@ -29,8 +29,8 @@ mod swarm_status_core;
 mod workspace;
 
 use queue_recovery::{
-    recover_local_interleave_to_queue, recover_stranded_soft_interrupts,
-    recover_undelivered_queued_continuation,
+    recover_disconnected_queued_continuation, recover_local_interleave_to_queue,
+    recover_stranded_soft_interrupts, recover_undelivered_queued_continuation,
 };
 // Re-export for sibling modules and tests that access reconnect state and helpers
 // through `super::remote::*` without reaching into private submodules directly.
@@ -878,7 +878,7 @@ pub(super) fn handle_disconnect(
         // the user's queued message when a reload/disconnect races the
         // turn-end dispatch (issue #391); put it back on the queue instead so
         // it is re-sent once the turn is proven idle after reconnect.
-        if !recover_undelivered_queued_continuation(app, "disconnect") {
+        if !recover_disconnected_queued_continuation(app) {
             app.clear_pending_remote_retry();
         }
     }

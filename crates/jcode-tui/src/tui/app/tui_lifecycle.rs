@@ -165,6 +165,11 @@ impl App {
         reason: &str,
         max_attempts: u8,
     ) -> bool {
+        if self.pending_remote_delivery_is_proven() {
+            // The server already streamed this turn; resending would run it
+            // twice. Reattach adopts the running turn instead.
+            return false;
+        }
         let Some(pending) = self.rate_limit_pending_message.as_mut() else {
             return false;
         };
@@ -270,9 +275,24 @@ impl App {
         true
     }
 
+    /// Whether the server has demonstrably accepted the in-flight send. `Ack`
+    /// is not proof (a busy rejection can follow it); streamed turn content is,
+    /// and so is a processing status that only stream content can produce.
+    pub(super) fn pending_remote_delivery_is_proven(&self) -> bool {
+        self.pending_remote_delivery_proven
+            || (self.current_message_id.is_some()
+                && matches!(
+                    self.status,
+                    ProcessingStatus::Thinking(_)
+                        | ProcessingStatus::Streaming
+                        | ProcessingStatus::RunningTool(_)
+                ))
+    }
+
     pub(super) fn clear_pending_remote_retry(&mut self) {
         self.rate_limit_pending_message = None;
         self.rate_limit_reset = None;
+        self.pending_remote_delivery_proven = false;
     }
 
     pub(super) fn reset_remote_rate_limit_processing_state(
