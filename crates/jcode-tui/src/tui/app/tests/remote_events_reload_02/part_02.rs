@@ -259,9 +259,13 @@ fn test_incremental_display_message_counts_match_full_recompute() {
 
 #[test]
 fn test_handle_remote_disconnect_retryable_pending_schedules_retry() {
+    // The send was dispatched but nothing has streamed back, so delivery is
+    // unknown and an automatic continuation may be resent. Once turn content
+    // has streamed, delivery is proven and the disconnect must not arm a
+    // retry (test_disconnect_does_not_requeue_auto_retry_continuation).
     let mut app = create_test_app();
     app.is_processing = true;
-    app.status = ProcessingStatus::Streaming;
+    app.status = ProcessingStatus::Sending;
     app.current_message_id = Some(7);
     app.rate_limit_pending_message = Some(PendingRemoteMessage {
         content: "retry me".to_string(),

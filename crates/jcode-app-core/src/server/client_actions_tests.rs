@@ -492,7 +492,18 @@ async fn notify_session_runs_scheduled_task_immediately_for_idle_live_session() 
 #[tokio::test]
 #[allow(deprecated)]
 async fn notify_session_queues_soft_interrupt_when_live_session_is_busy() {
-    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    check_busy_notification_delivery(false).await;
+}
+
+#[tokio::test]
+async fn notify_session_does_not_repeat_an_already_consumed_interrupt() {
+    check_busy_notification_delivery(true).await;
+}
+
+async fn check_busy_notification_delivery(consumed_by_turn: bool) {
+    let streaming = StreamingMockProvider::default();
+    streaming.queue_response(vec![StreamEvent::MessageEnd { stop_reason: None }]);
+    let provider: Arc<dyn Provider> = Arc::new(streaming);
     let registry = Registry::new(provider.clone()).await;
     let agent = Arc::new(Mutex::new(Agent::new(provider, registry)));
     let session_id = agent.lock().await.session_id().to_string();
@@ -552,7 +563,14 @@ async fn notify_session_queues_soft_interrupt_when_live_session_is_busy() {
     )])));
     let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
 
-    let _busy_guard = agent.lock().await;
+    let busy_guard = agent.lock().await;
+    // The session is seeded with a context message that also carries the User
+    // role; count deliveries relative to it.
+    let baseline_user_messages = busy_guard
+        .messages()
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .count();
 
     let (swarms_by_id, event_history, event_counter, swarm_event_tx) = empty_swarm_status_state();
     handle_notify_session(
@@ -605,6 +623,44 @@ async fn notify_session_queues_soft_interrupt_when_live_session_is_busy() {
         client_events
             .iter()
             .any(|event| matches!(event, ServerEvent::Done { id } if *id == 88))
+    );
+    if consumed_by_turn {
+        queue.lock().unwrap().clear();
+    }
+    drop(busy_guard);
+
+    if consumed_by_turn {
+        assert!(
+            timeout(Duration::from_millis(500), member_event_rx.recv())
+                .await
+                .is_err()
+        );
+    } else {
+        timeout(Duration::from_secs(2), async {
+            loop {
+                match member_event_rx.recv().await.expect("live attachment") {
+                    ServerEvent::Done { id: 0 } => break,
+                    ServerEvent::Error { message, .. } => {
+                        panic!("notification turn failed: {message}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("queued notification must run after the transient lock is released");
+    }
+    assert!(queue.lock().unwrap().is_empty());
+    let agent = agent.lock().await;
+    assert_eq!(
+        agent
+            .messages()
+            .iter()
+            .filter(|message| message.role == Role::User)
+            .count()
+            - baseline_user_messages,
+        usize::from(!consumed_by_turn),
+        "a parked notification is delivered once, or not at all if already consumed"
     );
 }
 

@@ -1,3 +1,4 @@
+use super::queue_recovery::recover_rejected_queued_continuation;
 use super::*;
 use crate::tool::selfdev::ReloadContext;
 use crate::tui::TuiState;
@@ -456,6 +457,26 @@ pub(in crate::tui::app) fn handle_server_event(
     }
 
     let had_remote_resume_activity = app.remote_resume_activity.is_some();
+
+    // Turn content for the in-flight send proves the server accepted it. From
+    // here a disconnect must adopt the running turn on reattach, never resend.
+    if app.current_message_id.is_some()
+        && app.rate_limit_pending_message.is_some()
+        && matches!(
+            &event,
+            ServerEvent::TextDelta { .. }
+                | ServerEvent::TextReplace { .. }
+                | ServerEvent::ReasoningDelta { .. }
+                | ServerEvent::ReasoningDone { .. }
+                | ServerEvent::ToolStart { .. }
+                | ServerEvent::ToolInput { .. }
+                | ServerEvent::ToolExec { .. }
+                | ServerEvent::ToolDone { .. }
+                | ServerEvent::MessageEnd
+        )
+    {
+        app.pending_remote_delivery_proven = true;
+    }
 
     // Background work or another client can start a turn. Adopt unexpected live
     // events so status updates and terminal events settle it normally.
@@ -1096,7 +1117,7 @@ pub(in crate::tui::app) fn handle_server_event(
             // Reconnect can report idle before the server's turn-end dispatch. Requeue
             // the rejected follow-up and adopt the still-running turn to avoid data loss.
             if message == "Already processing a message"
-                && recover_undelivered_queued_continuation(app, "server busy rejection")
+                && recover_rejected_queued_continuation(app)
             {
                 app.is_processing = true;
                 app.status = ProcessingStatus::Thinking(Instant::now());

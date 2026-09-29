@@ -540,7 +540,13 @@ fn test_comm_spawn_decodes_without_model_or_effort() -> Result<()> {
     // Older clients omit the model/effort fields entirely.
     let json = r#"{"type":"comm_spawn","id":60,"session_id":"sess_coord"}"#;
     let decoded = parse_request_json(json)?;
-    let Request::CommSpawn { model, effort, label, .. } = decoded else {
+    let Request::CommSpawn {
+        model,
+        effort,
+        label,
+        ..
+    } = decoded
+    else {
         return Err(anyhow!("expected CommSpawn"));
     };
     assert_eq!(model, None);
@@ -582,6 +588,26 @@ fn test_comm_list_swarms_roundtrip() -> Result<()> {
         return Err(anyhow!("expected CommListSwarms"));
     };
     assert_eq!(session_id, "sess_coord");
+    Ok(())
+}
+
+#[test]
+fn targeted_notification_does_not_require_subscription() -> Result<()> {
+    // Scheduled delivery opens a one-shot connection whose first (and only)
+    // request is NotifySession. It must parse as a lightweight control request
+    // so the server does not treat the connection as a subscribe handshake.
+    let request = Request::NotifySession {
+        id: 92,
+        session_id: "existing-session".to_string(),
+        message: "scheduled reminder".to_string(),
+    };
+    let decoded = parse_request_json(&serde_json::to_string(&request)?)?;
+    assert_eq!(decoded.id(), 92);
+    assert!(decoded.is_lightweight_control_request());
+    assert!(
+        matches!(decoded, Request::NotifySession { session_id, message, .. }
+        if session_id == "existing-session" && message == "scheduled reminder")
+    );
     Ok(())
 }
 

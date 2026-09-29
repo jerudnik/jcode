@@ -2,7 +2,9 @@ mod message_intake;
 #[path = "client_lifecycle_turn_processing.rs"]
 mod turn_processing;
 
-pub(crate) use turn_processing::process_message_streaming_mpsc;
+pub(crate) use turn_processing::{
+    process_locked_message_streaming_mpsc, process_message_streaming_mpsc,
+};
 
 use super::client_actions::{
     AgentTaskContext, NotifySessionContext, handle_agent_task, handle_compact, handle_input_shell,

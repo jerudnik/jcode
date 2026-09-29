@@ -29,8 +29,8 @@ mod swarm_status_core;
 mod workspace;
 
 use queue_recovery::{
-    recover_local_interleave_to_queue, recover_stranded_soft_interrupts,
-    recover_undelivered_queued_continuation,
+    recover_disconnected_queued_continuation, recover_local_interleave_to_queue,
+    recover_stranded_soft_interrupts, recover_undelivered_queued_continuation,
 };
 // Re-export for sibling modules and tests that access reconnect state and helpers
 // through `super::remote::*` without reaching into private submodules directly.
@@ -870,15 +870,24 @@ pub(super) fn handle_disconnect(
     ));
     state.last_disconnect_reason = Some(detail.clone());
 
-    let scheduled_retry =
-        app.schedule_pending_remote_retry(&format!("⚡ Connection lost ({detail})."));
+    // Only a disconnect keeps the turn alive server-side; reattach adopts it,
+    // so a payload the server has already streamed must be neither resent nor
+    // requeued. Stalls and terminal errors end the turn and keep their retry.
+    let delivery_proven = app.pending_remote_delivery_is_proven();
+    if delivery_proven {
+        crate::logging::info(
+            "handle_disconnect: in-flight send already streamed; skipping retry and requeue so reattach adopts the running turn",
+        );
+    }
+    let scheduled_retry = !delivery_proven
+        && app.schedule_pending_remote_retry(&format!("⚡ Connection lost ({detail})."));
     if !scheduled_retry {
         // A queued follow-up that was already dispatched (dequeued into an
         // in-flight send) has no auto-retry path. Dropping it here would lose
         // the user's queued message when a reload/disconnect races the
         // turn-end dispatch (issue #391); put it back on the queue instead so
         // it is re-sent once the turn is proven idle after reconnect.
-        if !recover_undelivered_queued_continuation(app, "disconnect") {
+        if !recover_disconnected_queued_continuation(app) {
             app.clear_pending_remote_retry();
         }
     }
@@ -1099,6 +1108,11 @@ pub(super) async fn process_remote_followups(app: &mut App, remote: &mut RemoteC
     }
 
     let synthetic_startup_dispatch = app.is_processing
+        // Only a locally staged send is synthetic. A resumed/external turn
+        // has no request id either, and its resume marker is cleared as soon
+        // as live stream events arrive. Never demote that running turn just
+        // because a follow-up is queued.
+        && matches!(app.status, ProcessingStatus::Sending)
         && app.current_message_id.is_none()
         && app.remote_resume_activity.is_none()
         && (app.submit_input_on_startup
