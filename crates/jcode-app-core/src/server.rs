@@ -549,6 +549,9 @@ mod socket_tests;
 mod startup_tests;
 
 #[cfg(test)]
+mod owned_mcp_lifetime_tests;
+
+#[cfg(test)]
 mod queue_tests;
 
 #[cfg(test)]

@@ -221,11 +221,14 @@ pub(crate) async fn run_subagent_worker(
 
 pub(crate) struct SubagentTool {
     provider: Arc<dyn Provider>,
-    registry: Registry,
+    /// Non-owning: this tool lives inside the registry it forks workers from,
+    /// so a strong `Registry` here is a cycle that keeps every tool in the map
+    /// (and any owned MCP children behind them) alive after the agent drops.
+    registry: super::WeakRegistry,
 }
 
 impl SubagentTool {
-    pub(crate) fn new(provider: Arc<dyn Provider>, registry: Registry) -> Self {
+    pub(crate) fn new(provider: Arc<dyn Provider>, registry: super::WeakRegistry) -> Self {
         Self { provider, registry }
     }
 }
@@ -266,9 +269,13 @@ impl Tool for SubagentTool {
             ctx.working_dir.clone(),
             self.provider.as_ref(),
         );
+        let registry = self
+            .registry
+            .upgrade()
+            .context("subagent: parent tool registry has been dropped")?;
         let output = run_subagent_worker(
             self.provider.fork(),
-            self.registry.clone(),
+            registry,
             parent,
             &input.description,
             &input.subagent_type,

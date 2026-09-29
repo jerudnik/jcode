@@ -444,7 +444,7 @@ impl Registry {
         Self::insert_tool(
             &mut tools_map,
             "subagent",
-            subagent::SubagentTool::new(provider, registry.clone()),
+            subagent::SubagentTool::new(provider, registry.downgrade()),
         );
         // Sponsored discovery is on by default (opt-out); when disabled the
         // tool is never registered and no discovery endpoint is ever

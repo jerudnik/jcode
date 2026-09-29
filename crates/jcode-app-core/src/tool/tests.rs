@@ -102,6 +102,35 @@ async fn real_mcp_registration_does_not_retain_registry_tool_map() {
     );
 }
 
+/// The full session registry, not `Registry::empty()`: `Registry::new`
+/// registers built-in tools such as `subagent` that fork workers from the
+/// registry they live in. Any of them holding a strong `Registry` is a cycle
+/// through the tool map, and the daemon's owned MCP children (which the map
+/// reaches through the MCP tools' manager) then outlive their session.
+#[tokio::test]
+async fn full_registry_tool_map_is_released_when_registry_drops() {
+    let _env_lock = crate::storage::lock_test_env();
+    let home = tempfile::tempdir().expect("create isolated JCODE_HOME");
+    let _home_guard = TestHomeGuard::new(home.path());
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let tools = Arc::downgrade(&registry.tools);
+    assert!(
+        registry
+            .tool_names()
+            .await
+            .iter()
+            .any(|name| name == "subagent")
+    );
+
+    drop(registry);
+
+    assert!(
+        tools.upgrade().is_none(),
+        "a built-in tool strongly retains the registry tool map that owns it"
+    );
+}
+
 #[tokio::test]
 async fn mcp_management_upgrades_registry_through_surviving_clone() {
     use crate::mcp::{McpConfig, McpManager, McpToolDef, create_mcp_tools_from_cached};
