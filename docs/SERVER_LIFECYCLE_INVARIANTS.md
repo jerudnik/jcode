@@ -65,5 +65,13 @@ that abandonment is not detected faster when no client remains connected.
 | `MAX_TOTAL_SESSIONS = 1500` | Daemon/process | `crates/jcode-app-core/src/server/headless.rs` | Backstops runaway headless session creation. |
 | `MAX_SWARM_MEMBERS = 1000` | Swarm membership | `crates/jcode-swarm-core/src/lib.rs` | Caps live members inside one swarm. |
 
+Owned (`shared: false`) MCP children die with the session that spawned them:
+dropping the session's `Agent` drops its tool registry, whose MCP tools hold
+the `McpManager` that owns the `McpClient`, and `McpClient::drop` sends
+`shutdown` and reaps the child. That chain only works if no tool stored in a
+registry holds a strong `Registry` (the map would then reference itself);
+tools that need the registry hold `WeakRegistry` (`crates/jcode-app-core/src/tool/mod.rs`).
+Regression: `crates/jcode-app-core/src/server/owned_mcp_lifetime_tests.rs`.
+
 `MAX_SWARM_MEMBERS` belongs to swarm membership, not daemon/process lifecycle.
 Do not treat it as a replacement for the daemon-level process and session caps.

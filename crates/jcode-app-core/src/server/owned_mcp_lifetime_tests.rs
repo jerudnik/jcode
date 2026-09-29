@@ -98,7 +98,6 @@ struct Harness {
     _runtime: ServerRuntime,
     _accept_main: tokio::task::JoinHandle<()>,
     _accept_debug: tokio::task::JoinHandle<()>,
-    main_socket: PathBuf,
     debug_socket: PathBuf,
     pid_file: PathBuf,
     project_dir: PathBuf,
@@ -151,7 +150,6 @@ async fn start_daemon_with_owned_server() -> Harness {
         _runtime: runtime,
         _accept_main: accept_main,
         _accept_debug: accept_debug,
-        main_socket,
         debug_socket,
         pid_file,
         project_dir,
@@ -195,16 +193,24 @@ impl Harness {
                 _ => {}
             }
         };
+        // The server truncates the pid file before writing it, so wait for a
+        // parseable pid rather than for the file to exist.
         let pid_file = self.pid_file.clone();
+        let read_pid = move || {
+            std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|text| text.trim().parse::<u32>().ok())
+        };
+        let mut pid = None;
         assert!(
-            wait_until(Duration::from_secs(10), || pid_file.exists()).await,
+            wait_until(Duration::from_secs(10), || {
+                pid = read_pid();
+                pid.is_some()
+            })
+            .await,
             "owned server must be spawned for the new session"
         );
-        let pid: u32 = std::fs::read_to_string(&self.pid_file)
-            .unwrap()
-            .trim()
-            .parse()
-            .expect("pid file");
+        let pid = pid.expect("pid file");
         assert!(
             pid_is_live(pid),
             "owned child should be alive after connect"
