@@ -894,6 +894,9 @@ pub(super) async fn handle_transfer(
 }
 
 #[cfg(test)]
+// The suite exercises the deprecated `SwarmMember::status` mirror alongside
+// the lifecycle API for compatibility coverage.
+#[allow(deprecated)]
 #[path = "client_actions_tests.rs"]
 mod tests;
 

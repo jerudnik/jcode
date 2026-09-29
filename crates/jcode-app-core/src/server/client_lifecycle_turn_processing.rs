@@ -13,6 +13,10 @@ use tokio::sync::{Mutex, mpsc};
 
 use super::message_intake::ProcessingMessage;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "turn start threads the intake message, session state, agent, both event channels, rate-limit slot and swarm refs through one call"
+)]
 pub(super) async fn start_processing_message_with_rate_limit_state(
     message: ProcessingMessage,
     client_session_id: &str,

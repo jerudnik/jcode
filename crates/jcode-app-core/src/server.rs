@@ -2410,4 +2410,7 @@ impl Server {
 pub use self::client_api::Client;
 
 #[cfg(test)]
+// The suite exercises the deprecated `SwarmMember::status` mirror alongside
+// the lifecycle API for compatibility coverage.
+#[allow(deprecated)]
 mod tests;
