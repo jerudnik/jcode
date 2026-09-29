@@ -15,6 +15,11 @@ fn scheduled_live_delivery_reaches_subscribed_client() {
     let _runtime_dir = EnvVarGuard::set("JCODE_RUNTIME_DIR", temp.path());
     let socket = temp.path().join("schedule.sock");
     let _socket = EnvVarGuard::set("JCODE_SOCKET", &socket);
+    // The isolated server reads `ambient.enabled` once when its loop starts.
+    // Reload here so it cannot inherit a config a sibling test loaded with
+    // ambient enabled; an ambient cycle would consume the single queued
+    // response before the scheduled turn does.
+    crate::config::invalidate_config_cache();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -26,7 +31,7 @@ fn scheduled_live_delivery_reaches_subscribed_client() {
                 StreamEvent::TextDelta("Scheduled live output.".to_string()),
                 StreamEvent::MessageEnd { stop_reason: None },
             ]);
-            let provider: Arc<dyn Provider> = Arc::new(streaming);
+            let provider: Arc<dyn Provider> = Arc::new(streaming.clone());
             let server = Server::new_with_paths(
                 provider.clone(),
                 socket.clone(),
@@ -96,7 +101,8 @@ fn scheduled_live_delivery_reaches_subscribed_client() {
             .expect("scheduled output and Done must reach the original attachment");
             assert!(
                 saw_text,
-                "live attachment must receive the scheduled response"
+                "live attachment must receive the scheduled response; provider calls so far: {:?}",
+                streaming.recorded_calls()
             );
             let error = runner
                 .notify_live_session("missing-scheduled-target", "not delivered")
