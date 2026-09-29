@@ -30,6 +30,7 @@ fn cache_hit_ratio_uses_effective_prompt_for_split_providers() {
     // Mirrors a real Anthropic log line where read >> input and the old code
     // clamped the ratio to 100%.
     let cache = CacheHitInfo {
+        read_known: true,
         reported_input_tokens: 2449,
         prompt_tokens: Some(22632),
         read_tokens: 19499,
@@ -62,6 +63,7 @@ fn occasional_status_tip_only_shows_during_part_of_cycle() {
 fn kv_cache_widget_shows_session_hit_ratio() {
     let data = InfoWidgetData {
         cache_hit_info: Some(CacheHitInfo {
+            read_known: true,
             reported_input_tokens: 20_000,
             prompt_tokens: Some(38_000),
             last_prompt_tokens: Some(10_000),
@@ -1731,6 +1733,7 @@ fn compact_page_height_estimate_matches_rendered_lines() {
             ..Default::default()
         }),
         cache_hit_info: Some(CacheHitInfo {
+            read_known: true,
             reported_input_tokens: 1_000,
             prompt_tokens: Some(1_000),
             read_tokens: 800,

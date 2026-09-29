@@ -1125,8 +1125,10 @@ fn push_cache_baseline(lines: &mut Vec<String>, label: &str, baseline: Option<&K
     }
 }
 
+pub(super) const INCOMPLETE_CACHE_READ_RATIO: &str = "unknown (read accounting incomplete)";
+
 fn format_cache_stats(app: &App) -> String {
-    let remote_usage = app.remote_token_usage_totals;
+    let remote_usage = app.remote_token_usage_totals.as_ref();
     let remote_cache_reported = remote_usage
         .map(|usage| usage.cache_reported_input_tokens)
         .unwrap_or(0);
@@ -1152,10 +1154,16 @@ fn format_cache_stats(app: &App) -> String {
             .map(|prompt| format!("{}%", cache_ratio_pct(tokens, prompt)))
             .unwrap_or_else(|| "unknown (prompt accounting unavailable)".to_string())
     };
-    let read_pct = format_pct(read, effective_reported);
+    let read_complete = app.token_accounting.cache_read_accounting_complete
+        && remote_usage.is_none_or(|usage| usage.cache_read_complete);
+    let read_pct = if read_complete {
+        format_pct(read, effective_reported)
+    } else {
+        INCOMPLETE_CACHE_READ_RATIO.to_string()
+    };
     let write_pct = format_pct(write, effective_reported);
-    let optimal_pct =
-        (optimal > 0 && remote_cache_read == 0).then(|| cache_ratio_pct(read, optimal));
+    let optimal_pct = (read_complete && optimal > 0 && remote_cache_read == 0)
+        .then(|| cache_ratio_pct(read, optimal));
     let cache_totals_source = match (
         remote_usage.is_some(),
         app.token_accounting.total_cache_prompt_tokens > 0,
@@ -1195,7 +1203,13 @@ fn format_cache_stats(app: &App) -> String {
         0
     };
     let prompt_including_live = effective_reported.map(|prompt| prompt.saturating_add(live_prompt));
-    let read_pct_including_live = format_pct(read_including_live, prompt_including_live);
+    let read_pct_including_live = if read_complete
+        && (!live_cache_telemetry || app.streaming.streaming_cache_read_tokens.is_some())
+    {
+        format_pct(read_including_live, prompt_including_live)
+    } else {
+        INCOMPLETE_CACHE_READ_RATIO.to_string()
+    };
     let write_pct_including_live = format_pct(write_including_live, prompt_including_live);
     let ttl = if crate::provider::anthropic::is_cache_ttl_1h() {
         "1 hour"

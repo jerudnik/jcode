@@ -84,6 +84,46 @@ fn test_active_overscroll_keeps_redrawing_at_deep_idle() {
 }
 
 #[test]
+fn test_cache_retention_estimate_rendering_never_claims_cold() {
+    for (is_estimate, is_cold, expected) in [
+        (true, true, Some(input_ui::CACHE_RETENTION_UNCERTAIN)),
+        (true, false, None),
+        (false, true, Some(input_ui::CACHE_COLD)),
+    ] {
+        let state = TestState {
+            display_messages: vec![DisplayMessage::system("seed".to_string())],
+            cache_ttl_status: Some(crate::tui::CacheTtlInfo {
+                is_estimate,
+                is_cold,
+                remaining_secs: if is_cold { 0 } else { 30 },
+                ttl_secs: 300,
+                cold_for_secs: 90,
+                cached_tokens: None,
+            }),
+            ..Default::default()
+        };
+        let spans = input_ui::build_notification_spans(&state);
+        if let Some(expected) = expected {
+            assert!(
+                spans.iter().any(|span| span.content == expected),
+                "{spans:?}"
+            );
+        } else {
+            assert!(
+                spans.iter().any(|span| span.content.contains("~30s")),
+                "{spans:?}"
+            );
+        }
+        assert_eq!(
+            spans
+                .iter()
+                .any(|span| span.content == input_ui::CACHE_COLD),
+            !is_estimate
+        );
+    }
+}
+
+#[test]
 fn test_cold_cache_warning_keeps_redrawing_at_deep_idle() {
     // Regression: the notification line renders a `🧊 cache cold` warning once
     // the prompt cache TTL expires, but the cache only goes cold long after the
@@ -106,6 +146,7 @@ fn test_cold_cache_warning_keeps_redrawing_at_deep_idle() {
         display_messages: vec![DisplayMessage::system("seed".to_string())],
         time_since_activity: Some(deep_idle),
         cache_ttl_status: Some(crate::tui::CacheTtlInfo {
+            is_estimate: false,
             remaining_secs: 0,
             ttl_secs: 300,
             is_cold: true,
@@ -129,6 +170,7 @@ fn test_cold_cache_warning_keeps_redrawing_at_deep_idle() {
         display_messages: vec![DisplayMessage::system("seed".to_string())],
         time_since_activity: Some(deep_idle),
         cache_ttl_status: Some(crate::tui::CacheTtlInfo {
+            is_estimate: false,
             remaining_secs: 30,
             ttl_secs: 300,
             is_cold: false,
@@ -148,6 +190,7 @@ fn test_cold_cache_warning_keeps_redrawing_at_deep_idle() {
         display_messages: vec![DisplayMessage::system("seed".to_string())],
         time_since_activity: Some(deep_idle),
         cache_ttl_status: Some(crate::tui::CacheTtlInfo {
+            is_estimate: false,
             remaining_secs: 300,
             ttl_secs: 3600,
             is_cold: false,
@@ -166,6 +209,7 @@ fn test_cold_cache_warning_keeps_redrawing_at_deep_idle() {
         display_messages: vec![DisplayMessage::system("seed".to_string())],
         time_since_activity: Some(deep_idle),
         cache_ttl_status: Some(crate::tui::CacheTtlInfo {
+            is_estimate: false,
             remaining_secs: 200,
             ttl_secs: 300,
             is_cold: false,

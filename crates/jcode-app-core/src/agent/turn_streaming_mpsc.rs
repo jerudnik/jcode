@@ -1162,11 +1162,14 @@ impl Agent {
             let assistant_message_id = if !content_blocks.is_empty() {
                 crate::telemetry::record_assistant_response();
                 let token_usage = Some(crate::session::StoredTokenUsage {
-                    prompt_tokens: Some(self.effective_context_tokens_from_usage(
+                    provider: Some(self.provider.name().to_string()),
+                    model: Some(self.provider.model()),
+                    prompt_tokens: crate::compaction::accounted_prompt_tokens_from_usage(
+                        self.provider.name(),
                         self.last_usage.input_tokens,
                         self.last_usage.cache_read_input_tokens,
                         self.last_usage.cache_creation_input_tokens,
-                    )),
+                    ),
                     input_tokens: self.last_usage.input_tokens,
                     output_tokens: self.last_usage.output_tokens,
                     cache_read_input_tokens: self.last_usage.cache_read_input_tokens,

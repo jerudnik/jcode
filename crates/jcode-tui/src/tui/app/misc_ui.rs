@@ -1,4 +1,5 @@
 use super::*;
+use crate::compaction::{CacheAccountingMode, cache_accounting_mode};
 
 /// Resolved per-million-token pricing for the active model, used to turn a
 /// single API call's token usage into a dollar cost. Shared by the local
@@ -12,11 +13,12 @@ pub(crate) struct ResolvedTokenPricing {
     pub completion_price: f32,
     /// Cache-read price in $/1M tokens when known; falls back to `prompt_price`.
     pub cache_read_price: Option<f32>,
-    /// Whether the active model is Anthropic/Claude (drives split-accounting and
-    /// the cache-write premium).
+    /// Whether the provider is Anthropic/Claude (selects its cache-write premium).
     pub is_anthropic: bool,
     /// OpenAI reports both reads and writes as subsets of input_tokens.
     pub is_openai: bool,
+    /// Relationship between input and cache counters, independent of rate premiums.
+    pub accounting_mode: CacheAccountingMode,
     /// OpenAI documents the 1.25x cache-write rate for GPT-5.6 and later
     /// (the prompt_cache_options era); earlier models have no write charge.
     pub openai_cache_write_premium: bool,
@@ -40,8 +42,13 @@ impl ResolvedTokenPricing {
         cache_read_tokens: u64,
         cache_creation_tokens: u64,
     ) -> f32 {
-        let split_accounting = self.is_anthropic
-            || (!self.is_openai && (cache_creation_tokens > 0 || cache_read_tokens > input_tokens));
+        let split_accounting = match self.accounting_mode {
+            CacheAccountingMode::Split => true,
+            CacheAccountingMode::Subset => false,
+            CacheAccountingMode::Unknown => {
+                cache_creation_tokens > 0 || cache_read_tokens > input_tokens
+            }
+        };
 
         let fresh_input_tokens = if split_accounting {
             input_tokens
@@ -230,6 +237,7 @@ impl App {
             cache_read_price,
             is_anthropic,
             is_openai,
+            accounting_mode: cache_accounting_mode(&provider_name),
             openai_cache_write_premium: is_openai
                 && crate::provider::openai::uses_prompt_cache_options(&model),
         };
@@ -329,20 +337,82 @@ impl App {
         &mut self,
         totals: &crate::protocol::TokenUsageTotals,
     ) {
-        if totals.input_tokens == 0 && totals.output_tokens == 0 {
+        if totals.pricing_buckets.is_none() && totals.input_tokens == 0 && totals.output_tokens == 0
+        {
             return;
         }
         let Some(pricing) = self.resolve_remote_cost_pricing() else {
             return;
         };
-        let cost = pricing.cost_for_usage(
-            totals.input_tokens,
-            totals.output_tokens,
-            totals.cache_read_input_tokens,
-            totals.cache_creation_input_tokens,
-        );
+        // Billing mode, rates, service tier and cache TTL use today's settings.
+        // Historical credential/tier/TTL choices were not persisted.
+        let cost: f32 = if let Some(buckets) = &totals.pricing_buckets {
+            buckets
+                .iter()
+                .map(|bucket| {
+                    self.pricing_for_provider_model(&bucket.provider, &bucket.model)
+                        .cost_for_usage(
+                            bucket.input_tokens,
+                            bucket.output_tokens,
+                            bucket.cache_read_input_tokens,
+                            bucket.cache_creation_input_tokens,
+                        )
+                })
+                .sum()
+        } else {
+            pricing.cost_for_usage(
+                totals.input_tokens,
+                totals.output_tokens,
+                totals.cache_read_input_tokens,
+                totals.cache_creation_input_tokens,
+            )
+        };
         if cost.is_finite() {
             self.cost.total_cost = cost;
+        }
+    }
+
+    /// Historical lookup must not overwrite the active model's pricing memo.
+    fn pricing_for_provider_model(&self, provider: &str, model: &str) -> ResolvedTokenPricing {
+        let provider = provider.to_lowercase();
+        let is_anthropic = provider.contains("anthropic") || provider.contains("claude");
+        let is_openai = provider.contains("openai");
+        let source_key = if is_anthropic {
+            "claude:api-key".to_string()
+        } else if is_openai {
+            "openai:api-key".to_string()
+        } else {
+            crate::provider_activity::source_key_for_provider_label(&provider, None)
+        };
+        let estimate = crate::provider::pricing::metered_pricing_for_source_with_tier(
+            &source_key,
+            model,
+            self.active_service_tier_for_pricing().as_deref(),
+        );
+        let per_mtok = |micros: Option<u64>| micros.map(|m| m as f32 / 1_000_000.0);
+        ResolvedTokenPricing {
+            prompt_price: per_mtok(
+                estimate
+                    .as_ref()
+                    .and_then(|p| p.input_price_per_mtok_micros),
+            )
+            .unwrap_or(15.0),
+            completion_price: per_mtok(
+                estimate
+                    .as_ref()
+                    .and_then(|p| p.output_price_per_mtok_micros),
+            )
+            .unwrap_or(60.0),
+            cache_read_price: per_mtok(
+                estimate
+                    .as_ref()
+                    .and_then(|p| p.cache_read_price_per_mtok_micros),
+            ),
+            is_anthropic,
+            is_openai,
+            accounting_mode: cache_accounting_mode(&provider),
+            openai_cache_write_premium: is_openai
+                && crate::provider::openai::uses_prompt_cache_options(model),
         }
     }
 
@@ -412,6 +482,7 @@ impl App {
             cache_read_price: self.cost.cached_cache_read_price,
             is_anthropic,
             is_openai,
+            accounting_mode: cache_accounting_mode(&provider_name),
             openai_cache_write_premium: is_openai
                 && crate::provider::openai::uses_prompt_cache_options(&model),
         })
@@ -598,7 +669,7 @@ impl App {
 
 #[cfg(test)]
 mod cache_cost_tests {
-    use super::ResolvedTokenPricing;
+    use super::{CacheAccountingMode, ResolvedTokenPricing};
 
     #[test]
     fn openai_cache_writes_replace_uncached_input_cost() {
@@ -608,6 +679,7 @@ mod cache_cost_tests {
             cache_read_price: Some(1.0),
             is_anthropic: false,
             is_openai: true,
+            accounting_mode: CacheAccountingMode::Subset,
             openai_cache_write_premium: true,
         };
         // 10K total = 2K ordinary + 6K cache reads + 2K cache writes.
@@ -627,6 +699,7 @@ mod cache_cost_tests {
             cache_read_price: Some(1.0),
             is_anthropic: false,
             is_openai: true,
+            accounting_mode: CacheAccountingMode::Subset,
             openai_cache_write_premium: false,
         };
         let cost = pricing.cost_for_usage(10_000, 100, 6_000, 2_000);

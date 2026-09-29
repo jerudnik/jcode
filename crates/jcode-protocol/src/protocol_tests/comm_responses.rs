@@ -59,7 +59,10 @@ fn test_swarm_plan_event_roundtrip_with_summary() -> Result<()> {
     let summary = summary.ok_or_else(|| anyhow!("expected plan summary"))?;
     assert_eq!(summary.ready_ids, vec!["task-1"]);
     assert_eq!(summary.next_ready_ids, vec!["task-1"]);
-    assert_eq!(summary.phases_by_id.get("task-1").map(String::as_str), Some("verify"));
+    assert_eq!(
+        summary.phases_by_id.get("task-1").map(String::as_str),
+        Some("verify")
+    );
     Ok(())
 }
 
@@ -177,8 +180,14 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
                 swarm_id: Some("swarm_123".to_string()),
                 assigned_instance_id: Some("task-1".to_string()),
             }],
-            members_by_status: BTreeMap::from([("running".to_string(), 1), ("ready".to_string(), 1)]),
-            members_by_type: BTreeMap::from([("verify".to_string(), 1), ("untyped".to_string(), 1)]),
+            members_by_status: BTreeMap::from([
+                ("running".to_string(), 1),
+                ("ready".to_string(), 1),
+            ]),
+            members_by_type: BTreeMap::from([
+                ("verify".to_string(), 1),
+                ("untyped".to_string(), 1),
+            ]),
             plan: PlanGraphStatus {
                 swarm_id: Some("swarm_123".to_string()),
                 version: 3,
@@ -208,6 +217,7 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
                 cache_reported_input_tokens: 10,
                 cache_read_input_tokens: 7,
                 cache_creation_input_tokens: 3,
+                ..Default::default()
             }),
             last_activity_age_secs: Some(4),
             control_log_offset: Some(99),

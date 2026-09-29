@@ -20,6 +20,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 #[path = "agent_tests/active_pid.rs"]
 mod active_pid;
+#[path = "agent_tests/cache_accounting.rs"]
+mod cache_accounting;
 #[path = "agent_tests/hidden_reminder.rs"]
 mod hidden_reminder;
 #[path = "agent_tests/interrupt.rs"]

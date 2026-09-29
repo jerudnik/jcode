@@ -386,6 +386,8 @@ pub struct UsageInfo {
 /// Session-level KV cache telemetry for providers that report cache usage.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CacheHitInfo {
+    /// Every contributing cache report included a read count, including explicit zero.
+    pub read_known: bool,
     /// Sum of per-request full prompt sizes, never inferred from aggregate counters.
     pub prompt_tokens: Option<u64>,
     pub last_prompt_tokens: Option<u64>,
@@ -439,6 +441,9 @@ pub struct CacheMissAttribution {
 impl CacheHitInfo {
     /// Fraction of the session's prompt tokens that were served from cache.
     pub fn hit_ratio(&self) -> Option<f32> {
+        if !self.read_known {
+            return None;
+        }
         let denominator = self.prompt_tokens?;
         if denominator == 0 {
             None
@@ -450,7 +455,7 @@ impl CacheHitInfo {
     /// Fraction of the previously-cacheable prompt that was actually reused
     /// (read_tokens vs. the prior request's full prompt).
     pub fn optimal_ratio(&self) -> Option<f32> {
-        if self.optimal_input_tokens == 0 {
+        if !self.read_known || self.optimal_input_tokens == 0 {
             None
         } else {
             Some((self.read_tokens as f32 / self.optimal_input_tokens as f32).clamp(0.0, 1.0))
@@ -1729,6 +1734,12 @@ fn render_kv_cache_widget(data: &InfoWidgetData, _inner: Rect) -> Vec<Line<'stat
 }
 
 fn render_kv_cache_summary_line(cache: &CacheHitInfo) -> Line<'static> {
+    if !cache.read_known {
+        return Line::from(Span::styled(
+            "KV cache: unknown",
+            Style::default().fg(rgb(140, 140, 150)),
+        ));
+    }
     let Some(lifetime_ratio) = cache.hit_ratio() else {
         return Line::default();
     };

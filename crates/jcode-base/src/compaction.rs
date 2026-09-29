@@ -27,12 +27,13 @@ use std::time::Instant;
 use tokio::task::JoinHandle;
 
 pub use jcode_compaction_core::{
-    CHARS_PER_TOKEN, COMPACTION_THRESHOLD, CRITICAL_THRESHOLD, CompactionAction, CompactionEvent,
-    CompactionStats, DEFAULT_TOKEN_BUDGET, EMBED_MAX_CHARS_PER_MSG, EMBEDDING_HISTORY_WINDOW,
-    EMERGENCY_IMAGE_MAX_CHARS, EMERGENCY_TOOL_RESULT_MAX_CHARS, MANUAL_COMPACT_MIN_THRESHOLD,
-    MIN_TURNS_TO_KEEP, PAYLOAD_IMAGE_CHAR_BUDGET, RECENT_TURNS_TO_KEEP,
-    SEMANTIC_EMBED_CACHE_CAPACITY, SUMMARY_PROMPT, SYSTEM_OVERHEAD_TOKENS, Summary,
-    TOKEN_HISTORY_WINDOW, build_compaction_prompt, build_emergency_summary_text,
+    CHARS_PER_TOKEN, COMPACTION_THRESHOLD, CRITICAL_THRESHOLD, CacheAccountingMode,
+    CompactionAction, CompactionEvent, CompactionStats, DEFAULT_TOKEN_BUDGET,
+    EMBED_MAX_CHARS_PER_MSG, EMBEDDING_HISTORY_WINDOW, EMERGENCY_IMAGE_MAX_CHARS,
+    EMERGENCY_TOOL_RESULT_MAX_CHARS, MANUAL_COMPACT_MIN_THRESHOLD, MIN_TURNS_TO_KEEP,
+    PAYLOAD_IMAGE_CHAR_BUDGET, RECENT_TURNS_TO_KEEP, SEMANTIC_EMBED_CACHE_CAPACITY, SUMMARY_PROMPT,
+    SYSTEM_OVERHEAD_TOKENS, Summary, TOKEN_HISTORY_WINDOW, accounted_prompt_tokens_from_usage,
+    build_compaction_prompt, build_emergency_summary_text, cache_accounting_mode,
     compacted_summary_text_block, content_char_count, effective_context_tokens_from_usage,
     emergency_strip_large_images, emergency_truncate_large_payloads, estimate_compaction_tokens,
     is_request_payload_too_large_error, mean_embedding, message_char_count, safe_compaction_cutoff,
