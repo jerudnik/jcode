@@ -1438,6 +1438,12 @@ pub struct App {
     rate_limit_reset: Option<Instant>,
     // Message being sent when rate limit hit (to auto-retry in remote mode)
     rate_limit_pending_message: Option<PendingRemoteMessage>,
+    /// Set once the server has streamed turn content for the in-flight
+    /// `rate_limit_pending_message`. `Ack` only confirms receipt (a busy
+    /// rejection can still follow it); the first stream event proves the
+    /// server accepted the send and is running it, so a later disconnect must
+    /// not resend or requeue that payload.
+    pending_remote_delivery_proven: bool,
     // Consecutive turn errors that classify as credential/auth failures.
     // Reset on turn success or auth change; drives the credential-failure
     // circuit breaker that halts automatic resends (see

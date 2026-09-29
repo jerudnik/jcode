@@ -224,9 +224,15 @@ impl App {
         // tick resend requires `rate_limit_reset`), so persist it back into
         // the queued/hidden lists instead; the restored queue re-sends it once
         // the turn is proven idle (issue #391).
+        //
+        // Every caller is a client-only handoff: the server keeps running the
+        // turn and the restarted client reattaches to it. Once the server has
+        // streamed content for this send, persisting it would run the same
+        // continuation a second time after the adopted turn completes.
         let inflight_continuation = self.rate_limit_pending_message.as_ref().filter(|pending| {
             pending.is_system
                 && self.rate_limit_reset.is_none()
+                && !self.pending_remote_delivery_is_proven()
                 && (!pending.content.trim().is_empty() || pending.system_reminder.is_some())
         });
         if self.input.is_empty()
@@ -276,21 +282,25 @@ impl App {
                         }
                     })
                 };
-            let rate_limit_pending_message =
-                if resume_prompt.is_some() || inflight_continuation.is_some() {
-                    None
-                } else {
-                    self.rate_limit_pending_message.as_ref().map(|pending| {
-                        serde_json::json!({
-                            "content": pending.content,
-                            "images": pending.images,
-                            "is_system": pending.is_system,
-                            "system_reminder": pending.system_reminder,
-                            "auto_retry": pending.auto_retry,
-                            "retry_attempts": pending.retry_attempts,
-                        })
+            // A streamed in-flight send is adopted on reattach; persisting it
+            // in any shape would resend it.
+            let rate_limit_pending_message = if resume_prompt.is_some()
+                || inflight_continuation.is_some()
+                || self.pending_remote_delivery_is_proven()
+            {
+                None
+            } else {
+                self.rate_limit_pending_message.as_ref().map(|pending| {
+                    serde_json::json!({
+                        "content": pending.content,
+                        "images": pending.images,
+                        "is_system": pending.is_system,
+                        "system_reminder": pending.system_reminder,
+                        "auto_retry": pending.auto_retry,
+                        "retry_attempts": pending.retry_attempts,
                     })
-                };
+                })
+            };
             let mut queued_messages = self.queued_messages.clone();
             let mut hidden_queued_system_messages = self.hidden_queued_system_messages.clone();
             if let Some(pending) = inflight_continuation {

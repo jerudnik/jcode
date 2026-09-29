@@ -295,7 +295,7 @@ pub fn config() -> &'static Config {
             return cache.config;
         }
 
-        let fingerprint = ConfigCacheFingerprint::current();
+        let mut fingerprint = ConfigCacheFingerprint::current();
         cache.last_checked = now;
         if cache.force_reload || cache.fingerprint != fingerprint {
             reload_reason = Some(describe_config_reload(
@@ -303,13 +303,29 @@ pub fn config() -> &'static Config {
                 &cache.fingerprint,
                 &fingerprint,
             ));
-            cache.config = leak_config(Config::load());
+            // Load until the fingerprint is stable across a load. The stored
+            // fingerprint must describe the environment the stored config was
+            // read from; otherwise a config loaded while another thread was
+            // changing env vars (test `EnvVarGuard`s hand over this way) gets
+            // paired with the post-change fingerprint and is served as current
+            // until the env changes again. Loading applies env overrides that
+            // can themselves set env vars (e.g. copilot_premium propagates
+            // config -> JCODE_COPILOT_PREMIUM), so one extra pass is the
+            // normal cost of such a config and the bound keeps a busy
+            // environment from looping.
+            let mut config = leak_config(Config::load());
+            let mut after = ConfigCacheFingerprint::current();
+            for _ in 0..2 {
+                if after == fingerprint {
+                    break;
+                }
+                fingerprint = after;
+                config = leak_config(Config::load());
+                after = ConfigCacheFingerprint::current();
+            }
+            cache.config = config;
             CONFIG_CACHE_GENERATION.fetch_add(1, Ordering::Release);
-            // Loading applies env overrides that can themselves set env vars
-            // (e.g. copilot_premium propagates config -> JCODE_COPILOT_PREMIUM).
-            // Re-fingerprint after the load so those self-inflicted env changes
-            // don't trigger a guaranteed second reload on the next check.
-            cache.fingerprint = ConfigCacheFingerprint::current();
+            cache.fingerprint = after;
             cache.force_reload = false;
         }
         cache.config
