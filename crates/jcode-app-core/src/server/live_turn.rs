@@ -143,9 +143,10 @@ pub(super) async fn spawn_tracked_live_turn(
             .is_ok()
             .then(|| agent.latest_assistant_text_after(start_message_index))
             .flatten();
-        // Release the reservation before the status fanout so a follow-up wake
-        // can start as soon as the turn itself is over.
-        drop(agent);
+        // Hold the reservation through terminal publication. Each turn fans
+        // out on its own task, so releasing before `ready` and `Done { id: 0 }`
+        // are published lets a follow-up wake start streaming ahead of this
+        // turn's Done, and attached clients then settle the wrong turn.
         match result {
             Ok(()) => {
                 update_member_status_with_report(
@@ -163,6 +164,7 @@ pub(super) async fn spawn_tracked_live_turn(
                 )
                 .await;
                 let _ = event_tx.send(ServerEvent::Done { id: 0 });
+                drop(agent);
             }
             Err(error) => {
                 crate::logging::error(&format!(
@@ -185,6 +187,7 @@ pub(super) async fn spawn_tracked_live_turn(
                     message: crate::util::format_error_chain(&error),
                     retry_after_secs: None,
                 });
+                drop(agent);
             }
         }
     });

@@ -548,6 +548,63 @@ async fn concurrent_wakes_start_exactly_one_live_turn() {
 }
 
 #[tokio::test]
+async fn wake_reservation_covers_terminal_publication() {
+    let provider = Arc::new(StreamingMockProvider::default());
+    provider.queue_response(vec![StreamEvent::MessageEnd { stop_reason: None }]);
+    let agent = test_agent(provider).await;
+    let session_id = agent.lock().await.session_id().to_string();
+    let sessions = Arc::new(RwLock::new(HashMap::from([(
+        session_id.clone(),
+        agent.clone(),
+    )])));
+    let (member_tx, mut member_rx) = mpsc::unbounded_channel();
+    let member = attached_swarm_member(&session_id, member_tx);
+    let members = Arc::new(RwLock::new(HashMap::from([(session_id.clone(), member)])));
+    let (swarms, history, counter, events) = empty_swarm_status_state();
+    assert!(
+        super::live_turn::run_live_turn_if_idle(
+            &session_id,
+            "complete this wake",
+            None,
+            &sessions,
+            super::live_turn::LiveTurnSwarmContext::new(
+                &members, &swarms, &history, &counter, &events
+            ),
+        )
+        .await
+    );
+
+    // Both lifecycle publication and stream fanout need a writer. Holding a
+    // reader lets the provider finish but keeps its completion unpublished.
+    let publication_blocker = members.read().await;
+    assert!(
+        timeout(Duration::from_millis(250), agent.lock())
+            .await
+            .is_err(),
+        "the next turn must not acquire the agent before terminal publication"
+    );
+    drop(publication_blocker);
+
+    let _next_reservation = timeout(Duration::from_secs(2), agent.lock())
+        .await
+        .expect("completion must release the reservation");
+    let published: Vec<_> = std::iter::from_fn(|| member_rx.try_recv().ok()).collect();
+    assert_eq!(
+        published
+            .iter()
+            .filter(|event| matches!(event, ServerEvent::Done { id: 0 }))
+            .count(),
+        1,
+        "Done must already be in the attachment's FIFO when the next turn can start"
+    );
+    assert!(
+        !published
+            .iter()
+            .any(|event| matches!(event, ServerEvent::Error { .. }))
+    );
+}
+
+#[tokio::test]
 async fn wake_turn_tracks_member_status_and_emits_terminal_done() {
     let provider = Arc::new(StreamingMockProvider::default());
     provider.queue_response(vec![
