@@ -15,8 +15,8 @@
 
 use super::client_lifecycle::process_locked_message_streaming_mpsc;
 use super::{
-    SwarmEvent, SwarmMember, session_event_fanout_sender, truncate_detail, update_member_status,
-    update_member_status_with_report,
+    SwarmEvent, SwarmMember, session_event_fanout_sender_with_relay, truncate_detail,
+    update_member_status, update_member_status_with_report,
 };
 use crate::agent::Agent;
 use crate::protocol::ServerEvent;
@@ -127,7 +127,8 @@ pub(super) async fn spawn_tracked_live_turn(
     )
     .await;
 
-    let event_tx = session_event_fanout_sender(session_id.to_string(), Arc::clone(&swarm.members));
+    let (event_tx, fanout_relay) =
+        session_event_fanout_sender_with_relay(session_id.to_string(), Arc::clone(&swarm.members));
     let session_id = session_id.to_string();
     tokio::spawn(async move {
         let start_message_index = agent.message_count();
@@ -144,9 +145,11 @@ pub(super) async fn spawn_tracked_live_turn(
             .then(|| agent.latest_assistant_text_after(start_message_index))
             .flatten();
         // Hold the reservation through terminal publication. Each turn fans
-        // out on its own task, so releasing before `ready` and `Done { id: 0 }`
-        // are published lets a follow-up wake start streaming ahead of this
-        // turn's Done, and attached clients then settle the wrong turn.
+        // out on its own relay task, so releasing before `ready` and
+        // `Done { id: 0 }` have reached the attachment FIFOs lets a follow-up
+        // wake publish ahead of this turn's Done, and attached clients then
+        // settle the wrong turn. Sending only enqueues on the relay; the
+        // guard is released after the relay has drained and exited.
         match result {
             Ok(()) => {
                 update_member_status_with_report(
@@ -164,6 +167,8 @@ pub(super) async fn spawn_tracked_live_turn(
                 )
                 .await;
                 let _ = event_tx.send(ServerEvent::Done { id: 0 });
+                drop(event_tx);
+                let _ = fanout_relay.await;
                 drop(agent);
             }
             Err(error) => {
@@ -187,6 +192,8 @@ pub(super) async fn spawn_tracked_live_turn(
                     message: crate::util::format_error_chain(&error),
                     retry_after_secs: None,
                 });
+                drop(event_tx);
+                let _ = fanout_relay.await;
                 drop(agent);
             }
         }

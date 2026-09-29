@@ -547,6 +547,53 @@ async fn concurrent_wakes_start_exactly_one_live_turn() {
     );
 }
 
+/// The reservation release in spawn_tracked_live_turn relies on this contract:
+/// once every sender is dropped and the relay handle has resolved, every event
+/// that was sent, including the last one, is already in each attachment FIFO.
+/// A member-map write lock stalls the relay mid-drain to force the lag that a
+/// bare `send()` would hide.
+#[tokio::test]
+async fn fanout_relay_handle_resolves_only_after_every_event_is_in_the_fifo() {
+    let (member_tx, mut member_rx) = mpsc::unbounded_channel();
+    let member = attached_swarm_member("relay-session", member_tx);
+    let members = Arc::new(RwLock::new(HashMap::from([(
+        "relay-session".to_string(),
+        member,
+    )])));
+    let (event_tx, relay) = super::state::session_event_fanout_sender_with_relay(
+        "relay-session".to_string(),
+        Arc::clone(&members),
+    );
+
+    let stall = members.write().await;
+    event_tx
+        .send(ServerEvent::TextDelta {
+            text: "last delta".to_string(),
+        })
+        .unwrap();
+    event_tx.send(ServerEvent::Done { id: 0 }).unwrap();
+    drop(event_tx);
+    // Nothing can have been fanned out while the map is write-locked, and the
+    // relay must not report completion either.
+    tokio::task::yield_now().await;
+    assert!(member_rx.try_recv().is_err());
+    assert!(!relay.is_finished());
+    drop(stall);
+
+    timeout(Duration::from_secs(2), relay)
+        .await
+        .expect("relay drains once the map is free")
+        .expect("relay task completes");
+    let published: Vec<_> = std::iter::from_fn(|| member_rx.try_recv().ok()).collect();
+    assert!(
+        matches!(
+            published.as_slice(),
+            [ServerEvent::TextDelta { .. }, ServerEvent::Done { id: 0 }]
+        ),
+        "both events, in order, must be in the FIFO before the handle resolves: {published:?}"
+    );
+}
+
 #[tokio::test]
 async fn wake_reservation_covers_terminal_publication() {
     let provider = Arc::new(StreamingMockProvider::default());
