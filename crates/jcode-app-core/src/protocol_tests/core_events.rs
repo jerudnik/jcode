@@ -141,7 +141,8 @@ fn test_generated_image_event_roundtrip() -> Result<()> {
         metadata_path,
         output_format,
         revised_prompt,
-    } = decoded else {
+    } = decoded
+    else {
         return Err(anyhow!("wrong event type"));
     };
     assert_eq!(id, "ig_123");
@@ -226,6 +227,7 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
             cache_reported_input_tokens: 100,
             cache_read_input_tokens: 80,
             cache_creation_input_tokens: 10,
+            ..Default::default()
         }),
         all_sessions: Vec::new(),
         client_count: None,

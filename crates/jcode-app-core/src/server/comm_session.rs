@@ -1245,6 +1245,8 @@ pub(super) async fn handle_comm_list_models(
 
 fn zero_token_usage_totals() -> TokenUsageTotals {
     TokenUsageTotals {
+        pricing_buckets: Some(Vec::new()),
+        cache_read_complete: true,
         cache_prompt_tokens: Some(0),
         messages_with_token_usage: 0,
         input_tokens: 0,
@@ -1256,6 +1258,36 @@ fn zero_token_usage_totals() -> TokenUsageTotals {
 }
 
 fn add_token_usage_totals(total: &mut TokenUsageTotals, next: TokenUsageTotals) {
+    total.pricing_buckets =
+        total
+            .pricing_buckets
+            .take()
+            .zip(next.pricing_buckets)
+            .map(|(current, next)| {
+                let mut merged = std::collections::BTreeMap::new();
+                for bucket in current.into_iter().chain(next) {
+                    let entry = merged
+                        .entry((bucket.provider.clone(), bucket.model.clone()))
+                        .or_insert_with(|| crate::protocol::PricingBucketTotals {
+                            provider: bucket.provider,
+                            model: bucket.model,
+                            ..Default::default()
+                        });
+                    entry.messages_with_token_usage = entry
+                        .messages_with_token_usage
+                        .saturating_add(bucket.messages_with_token_usage);
+                    entry.input_tokens = entry.input_tokens.saturating_add(bucket.input_tokens);
+                    entry.output_tokens = entry.output_tokens.saturating_add(bucket.output_tokens);
+                    entry.cache_read_input_tokens = entry
+                        .cache_read_input_tokens
+                        .saturating_add(bucket.cache_read_input_tokens);
+                    entry.cache_creation_input_tokens = entry
+                        .cache_creation_input_tokens
+                        .saturating_add(bucket.cache_creation_input_tokens);
+                }
+                merged.into_values().collect()
+            });
+    total.cache_read_complete &= next.cache_read_complete;
     // Zip semantics, as in Session::token_usage_totals: one member without
     // per-request prompt accounting makes the fleet prompt total unknown.
     total.cache_prompt_tokens = total
@@ -1831,5 +1863,8 @@ async fn ensure_spawn_coordinator_swarm(
 }
 
 #[cfg(test)]
+// The suite exercises the deprecated `SwarmMember::status` mirror alongside
+// the lifecycle API for compatibility coverage.
+#[allow(deprecated)]
 #[path = "comm_session_tests.rs"]
 mod comm_session_tests;

@@ -747,6 +747,8 @@ pub(in crate::tui::app) fn handle_server_event(
                 let has_cache_telemetry = app.streaming.streaming_cache_read_tokens.is_some()
                     || app.streaming.streaming_cache_creation_tokens.is_some();
                 if has_cache_telemetry {
+                    app.token_accounting.cache_read_accounting_complete &=
+                        app.streaming.streaming_cache_read_tokens.is_some();
                     let prompt = crate::tui::info_widget::effective_prompt_tokens(
                         &app.kv_cache_provider_name(),
                         input,
@@ -1470,6 +1472,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.kv_cache.current_api_usage_recorded = false;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
                 app.token_accounting.total_cache_prompt_tokens = 0;
+                app.token_accounting.cache_read_accounting_complete = true;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
@@ -1566,26 +1569,26 @@ pub(in crate::tui::app) fn handle_server_event(
             app.remote_server_icon = server_icon.clone();
             app.remote_server_has_update = server_has_update;
             let history_total_tokens = total_tokens.or_else(|| {
-                token_usage_totals.map(|totals| (totals.input_tokens, totals.output_tokens))
+                token_usage_totals
+                    .as_ref()
+                    .map(|totals| (totals.input_tokens, totals.output_tokens))
             });
             if session_changed || history_total_tokens.is_some() {
                 app.remote_total_tokens = history_total_tokens;
             }
-            if session_changed || token_usage_totals.is_some() {
-                app.remote_token_usage_totals = token_usage_totals;
-            }
-            if let Some(totals) = token_usage_totals {
+            if let Some(totals) = token_usage_totals.as_ref() {
                 app.token_accounting.total_input_tokens = 0;
                 app.token_accounting.total_output_tokens = 0;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
                 app.token_accounting.total_cache_prompt_tokens = 0;
+                app.token_accounting.cache_read_accounting_complete = true;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
                 // Price restored token totals once so resumed cost is not `$0`.
-                app.seed_cost_from_history_totals(&totals);
+                app.seed_cost_from_history_totals(totals);
             }
-            if let Some(totals) = token_usage_totals {
+            if let Some(totals) = token_usage_totals.as_ref() {
                 crate::logging::info(&format!(
                     "Remote history token totals: session={} messages_with_usage={} input={} output={} cache_reported={} cache_read={} cache_write={}",
                     session_id,
@@ -1596,6 +1599,9 @@ pub(in crate::tui::app) fn handle_server_event(
                     totals.cache_read_input_tokens,
                     totals.cache_creation_input_tokens
                 ));
+            }
+            if session_changed || token_usage_totals.is_some() {
+                app.remote_token_usage_totals = token_usage_totals;
             }
             app.workspace_client
                 .sync_after_history(&session_id, &app.remote_sessions);

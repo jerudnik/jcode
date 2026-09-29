@@ -640,6 +640,8 @@ pub struct CacheTtlInfo {
     pub ttl_secs: u64,
     /// Whether the cache is expired (cold)
     pub is_cold: bool,
+    /// Retention is an estimate, not proof that the provider kept or evicted the cache.
+    pub is_estimate: bool,
     /// How long ago the cache went cold, in seconds (0 while warm)
     pub cold_for_secs: u64,
     /// Estimated cached tokens (from last response's input tokens)
@@ -774,7 +776,9 @@ fn min_cacheable_input_tokens(provider: &str, upstream_provider: Option<&str>) -
 }
 
 fn cache_expected_warm(cache_ttl: Option<&CacheTtlInfo>) -> bool {
-    cache_ttl.map(|info| !info.is_cold).unwrap_or(false)
+    cache_ttl
+        .map(|info| !info.is_estimate && !info.is_cold)
+        .unwrap_or(false)
 }
 
 /// Detect a KV/prompt-cache problem that is reliable enough to surface in the UI.
@@ -1927,6 +1931,7 @@ mod tests {
             remaining_secs: 240,
             ttl_secs: 300,
             is_cold: false,
+            is_estimate: false,
             cold_for_secs: 0,
             cached_tokens: Some(12_000),
         }
@@ -1937,6 +1942,7 @@ mod tests {
             remaining_secs: 0,
             ttl_secs: 300,
             is_cold: true,
+            is_estimate: false,
             cold_for_secs: 90,
             cached_tokens: Some(12_000),
         }

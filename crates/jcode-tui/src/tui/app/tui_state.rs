@@ -1516,7 +1516,7 @@ impl crate::tui::TuiState for App {
             None
         };
 
-        let history_cache = self.remote_token_usage_totals;
+        let history_cache = self.remote_token_usage_totals.as_ref();
         let history_prompt = history_cache.map_or(Some(0), |usage| usage.cache_prompt_tokens);
         let history_read = history_cache.map_or(0, |usage| usage.cache_read_input_tokens);
         let history_write = history_cache.map_or(0, |usage| usage.cache_creation_input_tokens);
@@ -1524,6 +1524,8 @@ impl crate::tui::TuiState for App {
         let cache_hit_info = (self.token_accounting.total_cache_prompt_tokens > 0
             || history_cache.is_some())
         .then(|| crate::tui::info_widget::CacheHitInfo {
+            read_known: self.token_accounting.cache_read_accounting_complete
+                && history_cache.is_none_or(|usage| usage.cache_read_complete),
             prompt_tokens: history_prompt.map(|prompt| {
                 prompt.saturating_add(self.token_accounting.total_cache_prompt_tokens)
             }),
@@ -1979,23 +1981,23 @@ impl crate::tui::TuiState for App {
     }
 
     fn cache_ttl_status(&self) -> Option<crate::tui::CacheTtlInfo> {
-        let last_completed = self.last_api_completed?;
-        let provider = self.provider_name();
-        let model = self.provider_model();
-        let last_provider = self.last_api_completed_provider.as_deref()?;
-        let last_model = self.last_api_completed_model.as_deref()?;
-        if last_provider != provider || last_model != model {
+        let baseline = self.kv_cache.kv_cache_baseline.as_ref()?;
+        if baseline.session_id != self.kv_cache_session_id()
+            || baseline.provider != self.kv_cache_provider_name()
+            || baseline.model != self.kv_cache_provider_model()
+        {
             return None;
         }
-        let ttl_secs = crate::tui::cache_ttl_for_provider_model(provider, Some(&model))?;
-        let elapsed = last_completed.elapsed().as_secs();
+        let ttl_secs = baseline.cache_ttl_secs?;
+        let elapsed = baseline.completed_at.elapsed().as_secs();
         let remaining = ttl_secs.saturating_sub(elapsed);
         Some(crate::tui::CacheTtlInfo {
             remaining_secs: remaining,
             ttl_secs,
             is_cold: remaining == 0,
             cold_for_secs: elapsed.saturating_sub(ttl_secs),
-            cached_tokens: self.last_turn_input_tokens,
+            cached_tokens: Some(baseline.input_tokens),
+            is_estimate: crate::provider::cache_ttl_is_estimate(&baseline.provider),
         })
     }
 }
