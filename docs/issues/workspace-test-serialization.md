@@ -74,3 +74,9 @@ two agents that each individually did the right thing.
 - Isolated runs via the prebuilt binary
   `target/debug/deps/jcode_tui-6510d58bcce2117c`, which reproduces neither
   failure.
+- 2026-09-29, `automation/reconnect-queue-wake` at 5e36335d7:
+  `ambient::runner::runner_tests::live_delivery::scheduled_live_delivery_reaches_subscribed_client`
+  failed once in a full `jcode-app-core --lib` run (1346 passed) on the
+  remote builder, then passed 3/3 isolated and 1/1 in an immediate full
+  rerun. The test spawns a real server and waits on a live turn under a 15 s
+  timeout, so it is load-sensitive in the same way as the two render tests.
