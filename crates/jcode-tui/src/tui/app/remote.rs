@@ -870,8 +870,17 @@ pub(super) fn handle_disconnect(
     ));
     state.last_disconnect_reason = Some(detail.clone());
 
-    let scheduled_retry =
-        app.schedule_pending_remote_retry(&format!("⚡ Connection lost ({detail})."));
+    // Only a disconnect keeps the turn alive server-side; reattach adopts it,
+    // so a payload the server has already streamed must be neither resent nor
+    // requeued. Stalls and terminal errors end the turn and keep their retry.
+    let delivery_proven = app.pending_remote_delivery_is_proven();
+    if delivery_proven {
+        crate::logging::info(
+            "handle_disconnect: in-flight send already streamed; skipping retry and requeue so reattach adopts the running turn",
+        );
+    }
+    let scheduled_retry = !delivery_proven
+        && app.schedule_pending_remote_retry(&format!("⚡ Connection lost ({detail})."));
     if !scheduled_retry {
         // A queued follow-up that was already dispatched (dequeued into an
         // in-flight send) has no auto-retry path. Dropping it here would lose

@@ -136,9 +136,6 @@ pub(super) fn recover_undelivered_queued_continuation(app: &mut App, reason: &st
 /// must not be requeued; otherwise it runs again after the resumed Done.
 pub(super) fn recover_disconnected_queued_continuation(app: &mut App) -> bool {
     if app.pending_remote_delivery_is_proven() {
-        crate::logging::info(
-            "Disconnect after streamed content: not requeueing the in-flight continuation; reattach adopts the running turn",
-        );
         return false;
     }
     recover_queued_continuation(app, "disconnect", Recovery::Undelivered)

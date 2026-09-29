@@ -305,6 +305,37 @@ fn test_disconnect_still_clears_pending_for_non_queued_shapes() {
 }
 
 #[test]
+fn test_save_input_for_reload_skips_streamed_continuation() {
+    // A client-only reload leaves the server running the turn; the restarted
+    // client reattaches to it. A continuation the server has already streamed
+    // must therefore not be persisted back onto the queue, or it runs twice.
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
+    let mut app = create_test_app();
+    let session_id = format!("test-streamed-reload-{}", std::process::id());
+    app.queued_messages.push("still queued".to_string());
+    app.is_processing = true;
+    app.status = ProcessingStatus::Streaming;
+    app.current_message_id = Some(12);
+    app.rate_limit_pending_message = Some(PendingRemoteMessage {
+        content: "already streaming".to_string(),
+        images: vec![],
+        is_system: true,
+        system_reminder: Some("hidden reminder".to_string()),
+        auto_retry: false,
+        retry_attempts: 0,
+        retry_at: None,
+    });
+    app.rate_limit_reset = None;
+
+    app.save_input_for_reload(&session_id);
+
+    let restored = App::restore_input_for_reload(&session_id).expect("reload state should exist");
+    assert_eq!(restored.queued_messages, vec!["still queued"]);
+    assert!(restored.hidden_queued_system_messages.is_empty());
+    assert!(restored.rate_limit_pending_message.is_none());
+}
+
+#[test]
 fn test_save_input_for_reload_persists_inflight_queued_continuation() {
     let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();

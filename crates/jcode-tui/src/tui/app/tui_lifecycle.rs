@@ -165,11 +165,6 @@ impl App {
         reason: &str,
         max_attempts: u8,
     ) -> bool {
-        if self.pending_remote_delivery_is_proven() {
-            // The server already streamed this turn; resending would run it
-            // twice. Reattach adopts the running turn instead.
-            return false;
-        }
         let Some(pending) = self.rate_limit_pending_message.as_mut() else {
             return false;
         };
