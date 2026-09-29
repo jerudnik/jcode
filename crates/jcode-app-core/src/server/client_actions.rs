@@ -152,7 +152,7 @@ pub(super) async fn handle_notify_session(
     let queued_interrupt = if ran_immediately {
         false
     } else {
-        queue_soft_interrupt_for_session(
+        let queued = queue_soft_interrupt_for_session(
             &session_id,
             message.clone(),
             false,
@@ -160,7 +160,34 @@ pub(super) async fn handle_notify_session(
             ctx.soft_interrupt_queues,
             ctx.sessions,
         )
-        .await
+        .await;
+        // A parked notification is only drained by a mid-turn injection point.
+        // If the agent was merely transiently locked, or the running turn is
+        // already past its last injection, nothing would ever deliver it, so
+        // watch for idleness and run it as a wake turn then (same as Wake).
+        if queued
+            && let Some(queue) = ctx
+                .soft_interrupt_queues
+                .read()
+                .await
+                .get(&session_id)
+                .cloned()
+        {
+            super::live_turn::nudge_parked_interrupts_when_idle(
+                session_id.clone(),
+                queue,
+                Arc::clone(ctx.sessions),
+                super::live_turn::LiveTurnSwarmContext::new(
+                    ctx.swarm_members,
+                    ctx.swarms_by_id,
+                    ctx.event_history,
+                    ctx.event_counter,
+                    ctx.swarm_event_tx,
+                )
+                .with_delivery(ctx.sessions, ctx.soft_interrupt_queues),
+            );
+        }
+        queued
     };
 
     if ran_immediately || notified || queued_interrupt {
