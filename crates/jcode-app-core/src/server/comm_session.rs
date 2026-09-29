@@ -1863,5 +1863,8 @@ async fn ensure_spawn_coordinator_swarm(
 }
 
 #[cfg(test)]
+// The suite exercises the deprecated `SwarmMember::status` mirror alongside
+// the lifecycle API for compatibility coverage.
+#[allow(deprecated)]
 #[path = "comm_session_tests.rs"]
 mod comm_session_tests;
