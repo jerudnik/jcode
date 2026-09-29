@@ -1273,6 +1273,7 @@ fn format_swarm_fleet_renders_live_rollup() {
             cache_reported_input_tokens: 0,
             cache_read_input_tokens: 0,
             cache_creation_input_tokens: 0,
+            ..Default::default()
         }),
         last_activity_age_secs: Some(7),
         control_log_offset: Some(12),

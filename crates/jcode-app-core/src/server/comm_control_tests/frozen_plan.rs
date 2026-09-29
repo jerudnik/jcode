@@ -61,9 +61,12 @@ async fn frozen_plan_rejects_expand_and_inject() {
     .await;
     while fx.client_rx.try_recv().is_ok() {}
 
+    // A plain seed is growth and stays rejected. An explicit replacement with
+    // nothing in flight is the sanctioned recovery path from a paused graph
+    // and is covered by dag_replacement.rs, so it is not part of this count.
     fx.seed_replacing(
         "light",
-        true,
+        false,
         vec![node_spec("replacement", "explore", &[])],
     )
     .await;
