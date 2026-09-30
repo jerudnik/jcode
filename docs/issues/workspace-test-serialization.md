@@ -86,3 +86,11 @@ two agents that each individually did the right thing.
   now invalidates the cache before starting its server. Recorded here because
   it is the same shape: a red with no owner in the diff, reproducible only
   under a full parallel run.
+- 2026-09-30, `main` at c1f72654d and a branch on it:
+  `cli::provider_init::tests::test_init_provider_jcode_delegates_runtime_profile_to_wrapper`
+  (`jcode` crate) fails about one run in four in a full `-p jcode --lib`
+  run on either tip (`JCODE_OPENROUTER_MODEL` reads back `None` after
+  `init_provider`), and passes isolated and under `-- cli::` filters. The
+  test holds `lock_test_env` and sets env vars in-process, so a sibling in
+  the same binary that touches process env without the lease is the likely
+  interferer. Not attributed to any branch; not yet traced.
