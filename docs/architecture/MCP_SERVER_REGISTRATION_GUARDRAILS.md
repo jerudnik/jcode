@@ -119,7 +119,9 @@ working directory. Owned servers (`shared: false`) run in the session working
 directory, so workspace-stateful servers such as Serena must use `shared: false`.
 
 `shared:false` means a per-session owned process. Use it only for state-carrying
-servers that must not be shared across sessions.
+servers that must not be shared across sessions. The daemon's shared pool
+never spawns such a server: its bulk connect skips them, and sessions only
+acquire pool handles for shared names.
 
 `shared:false` on a high-fanout server multiplies processes by session count. It
 is appropriate for isolated state, not for common stateless tools or bridge
