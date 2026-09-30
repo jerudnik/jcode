@@ -921,6 +921,8 @@ done
             url: None,
             enabled: None,
             disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
         }
     }
 
