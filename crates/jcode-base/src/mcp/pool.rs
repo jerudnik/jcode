@@ -214,6 +214,14 @@ impl SharedMcpPool {
             if !server_config.is_enabled() {
                 continue;
             }
+            // Owned (`shared: false`) servers belong to sessions, which spawn
+            // them in their own working directory. The pool must not start a
+            // daemon-wide copy: no session ever acquires it (handles are
+            // filtered to shared names), so it is a permanently idle child
+            // that the pool then keeps reconnecting.
+            if !server_config.shared {
+                continue;
+            }
             let name = name.clone();
             let server_config = server_config.clone();
             connect_futures.push(async move {
@@ -910,6 +918,30 @@ done
             timeout_secs: None,
             health_deadline_ms: None,
         }
+    }
+
+    /// Owned (`shared: false`) servers are per-session children; the pool's
+    /// bulk connect must leave them alone or the daemon holds an idle copy
+    /// no session ever acquires.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pool_connect_all_skips_owned_servers() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fixture = write_pool_fixture(temp.path(), "owned-skip-mcp.sh");
+        let mut config = McpConfig::default();
+        config
+            .servers
+            .insert("pooled".to_string(), fixture_config(&fixture));
+        let mut owned = fixture_config(&fixture);
+        owned.shared = false;
+        config.servers.insert("owned".to_string(), owned);
+
+        let pool = SharedMcpPool::new(config);
+        let (successes, failures) = pool.connect_all().await;
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(successes, 1, "only the shared server is pooled");
+        assert_eq!(pool.connected_servers().await, vec!["pooled".to_string()]);
+        pool.disconnect_all().await;
     }
 
     /// F12 gates 1-3: at the pooled-children cap a NEW spawn is refused with

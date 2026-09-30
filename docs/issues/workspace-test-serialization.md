@@ -94,3 +94,10 @@ two agents that each individually did the right thing.
   test holds `lock_test_env` and sets env vars in-process, so a sibling in
   the same binary that touches process env without the lease is the likely
   interferer. Not attributed to any branch; not yet traced.
+- 2026-09-30, `automation/pool-skips-owned` at 4b134abfc (touches only
+  `mcp/pool.rs`): `tui::app::remote::tests::r09_gate4_last_send_ok_tracks_the_socket_not_a_hardcoded_value`
+  failed once in a full `just pre-pr` run (the dropped-peer half reported a
+  successful send), then passed 3/3 isolated and 3/3 in full `jcode-tui --lib`
+  runs. A write to a Unix socket whose peer has just closed can still be
+  accepted by the kernel before EOF is observed, so the negative half is
+  timing-sensitive under load. Not traced further.
