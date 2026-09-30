@@ -81,6 +81,8 @@ the `McpManager` that owns the `McpClient`, and `McpClient::drop` sends
 registry holds a strong `Registry` (the map would then reference itself);
 tools that need the registry hold `WeakRegistry` (`crates/jcode-app-core/src/tool/mod.rs`).
 Regression: `crates/jcode-app-core/src/server/owned_mcp_lifetime_tests.rs`.
+On the daemon path an owned server whose schema is cached is not spawned
+until a tool on it is first called (`McpManager::connect_all_deferring_cached_owned`).
 
 `MAX_SWARM_MEMBERS` belongs to swarm membership, not daemon/process lifecycle.
 Do not treat it as a replacement for the daemon-level process and session caps.

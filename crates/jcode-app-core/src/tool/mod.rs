@@ -1236,12 +1236,18 @@ impl Registry {
                 }
             }
 
-            // Spawn connection and tool registration in background
+            // Spawn connection and tool registration in background. Owned
+            // servers whose schema was advertised from the cache above are
+            // not spawned here: the proxies connect on the first real call,
+            // so a session that never uses the server never pays for a child.
             let registry = self.clone();
             tokio::spawn(async move {
                 let (successes, failures) = {
                     let manager = mcp_manager.write().await;
-                    manager.connect_all().await.unwrap_or((0, Vec::new()))
+                    manager
+                        .connect_all_deferring_cached_owned(&schema_cache)
+                        .await
+                        .unwrap_or((0, Vec::new()))
                 };
 
                 if successes > 0 {
@@ -1325,7 +1331,19 @@ impl Registry {
                     }
                 }
 
-                // Notify client of MCP status
+                // Notify client of MCP status. Deferred owned servers have no
+                // live tools yet but their cached proxies are registered, so
+                // report the cached count rather than dropping them.
+                {
+                    let manager = mcp_manager.read().await;
+                    for server in manager.unconnected_owned_servers().await {
+                        if let Some(cfg) = manager.config().servers.get(&server)
+                            && let Some(cached) = schema_cache.tools_for(&server, cfg)
+                        {
+                            server_counts.entry(server).or_insert(cached.len());
+                        }
+                    }
+                }
                 if let Some(tx) = event_tx {
                     let servers: Vec<String> = server_counts
                         .into_iter()
