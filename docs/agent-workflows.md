@@ -14,7 +14,7 @@ Use `git remote -v`, script help, flake inspection, and workflow inspection to d
 ## Search and edit
 
 - Start with `agentgrep` for text, paths, outlines, and relationships.
-- Use Serena for language-aware symbol lookup, references, renames, and symbol-level edits.
+- Use Serena for language-aware symbol lookup, references, renames, and symbol-level edits. Symbol lookup and references are trustworthy; diagnostics describe the checkout this Serena was started in, which is your worktree only when your session started there.
 - Batch independent reads and checks.
 - Prefer structured edit tools over shell rewrites. Never replace a whole file when a narrow edit will preserve concurrent work.
 - Keep shell commands non-interactive and bounded.

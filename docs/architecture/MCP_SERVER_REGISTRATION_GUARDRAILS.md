@@ -103,6 +103,7 @@ backstops for runaway process or session growth:
 | Cap | Scope | File |
 |---|---|---|
 | `MAX_OWNED_MCP_CHILDREN = 64` | Owned, non-shared MCP children process-wide | `crates/jcode-base/src/mcp/client.rs` |
+| `MAX_POOLED_MCP_CHILDREN = 32` | Shared MCP children process-wide (`JCODE_MCP_MAX_CHILDREN`) | `crates/jcode-base/src/mcp/pool.rs` |
 | `MAX_TESTERS = 8` | Live tester daemons spawned by one daemon | `crates/jcode-app-core/src/server/debug_testers.rs` |
 | `MAX_TESTER_DEPTH = 1` / `JCODE_TESTER_DEPTH` | Tester daemons must not spawn further testers | `crates/jcode-app-core/src/server/debug_testers.rs` |
 | `MAX_TOTAL_SESSIONS = 1500` | Live sessions in one daemon | `crates/jcode-app-core/src/server/headless.rs` |
@@ -113,7 +114,9 @@ The lifecycle side of this contract is in
 ## `shared` semantics
 
 `shared:true` is the default. Shared servers are pooled and deduped, so one
-server process is reused per configured name.
+server process is reused per configured name. Shared servers inherit the daemon
+working directory. Owned servers (`shared: false`) run in the session working
+directory, so workspace-stateful servers such as Serena must use `shared: false`.
 
 `shared:false` means a per-session owned process. Use it only for state-carrying
 servers that must not be shared across sessions.
