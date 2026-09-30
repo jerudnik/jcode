@@ -278,6 +278,12 @@ fi
 
 target_dir_value="target"
 expect_target_dir=0
+# `--target <triple>` moves the artifact under target/<triple>/<mode>/; without
+# tracking it the sync-back looks in target/<mode>/ and quietly skips, and a
+# CI-mirror step that runs ./target/<triple>/release/jcode then fails in any
+# checkout without a stale local binary.
+target_triple_value=""
+expect_target_triple=0
 scan_target_dir_args() {
     local arg
     for arg in "$@"; do
@@ -286,10 +292,17 @@ scan_target_dir_args() {
             expect_target_dir=0
             continue
         fi
+        if [[ "$expect_target_triple" -eq 1 ]]; then
+            target_triple_value="$arg"
+            expect_target_triple=0
+            continue
+        fi
         case "$arg" in
             --) return 0 ;;
             --target-dir) expect_target_dir=1 ;;
             --target-dir=*) target_dir_value="${arg#--target-dir=}" ;;
+            --target) expect_target_triple=1 ;;
+            --target=*) target_triple_value="${arg#--target=}" ;;
         esac
     done
 }
@@ -300,10 +313,14 @@ if [[ "${#POSITIONAL[@]}" -gt 0 ]]; then
     scan_target_dir_args "${POSITIONAL[@]}"
 fi
 
-BINARY_PATH="${target_dir_value%/}/${build_mode}/${artifact_name}"
+artifact_subdir="${build_mode}"
+if [[ -n "$target_triple_value" ]]; then
+    artifact_subdir="${target_triple_value}/${build_mode}"
+fi
+BINARY_PATH="${target_dir_value%/}/${artifact_subdir}/${artifact_name}"
 if [[ "$target_dir_value" == /* ]]; then
     REMOTE_BINARY_PATH="$BINARY_PATH"
-    LOCAL_BINARY_PATH="$LOCAL_DIR/target/${build_mode}/${artifact_name}"
+    LOCAL_BINARY_PATH="$LOCAL_DIR/target/${artifact_subdir}/${artifact_name}"
 elif [[ "/$target_dir_value/" == *"/../"* ]]; then
     printf 'error: relative --target-dir must not contain .. path components: %s\n' "$target_dir_value" >&2
     exit 2

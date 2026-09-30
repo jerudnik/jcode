@@ -22,7 +22,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
-const CONFIG_CACHE_CHECK_INTERVAL: Duration = if cfg!(test) {
+// Test binaries of downstream crates link this crate without `cfg(test)`,
+// so `test-support` must disable the throttle too: a test that swaps
+// `JCODE_HOME` and then constructs a provider would otherwise read the
+// previous test's config for up to 500 ms.
+const CONFIG_CACHE_CHECK_INTERVAL: Duration = if cfg!(any(test, feature = "test-support")) {
     Duration::ZERO
 } else {
     Duration::from_millis(500)
