@@ -86,6 +86,11 @@ the ambient-roots check, therefore run both locally and in hosted CI.
 
 - Python-based recipes need Python 3.11+; `pre-pr` pins Python (and vale)
   through `nix shell`, so a stale system interpreter cannot false-fail it.
+- Preflight scopes its blocking rustfmt and clippy gates to files this branch
+  changed relative to the remote `main` it discovers from Git (the remote that
+  local `main` tracks, then any remote with a `main`). Set `PREFLIGHT_BASE` to
+  compare against something else; a stale local `main` is used only when no
+  remote `main` exists.
 - The recipe runs preflight with `--no-branch-handoff`: the branch-handoff
   gate inventories every local branch and would block PR creation on other
   sessions' in-progress work. Run plain `scripts/preflight.sh` when you want
@@ -111,6 +116,8 @@ This repository defaults to the TUI target. In a self-development session:
 3. Use `selfdev build-reload` when the successful build should replace the running binary immediately.
 4. Continue automatically after reload.
 5. Confirm the running revision or behavior. Use `debug_socket` testers and frames for TUI changes.
+
+Automatic client handoffs reuse the selected build without rebuilding a different checkout. Fresh launches and manual resumes still rebuild stale source unless `--no-build` is set. Explicit `--build` requests take precedence.
 
 Outside a self-development session, the tool exposes the `enter`, `setup`, `reload`, `status`, and `find-config` on-ramp actions but not build actions. Use direct local Cargo builds only when `selfdev` is unavailable or the documented fallback is required. Desktop builds and desktop UI debugging are reserved for desktop-specific tasks.
 

@@ -54,6 +54,7 @@ include!("tests/smoothness_benchmark.rs");
 include!("tests/hotkey_feedback_e2e.rs");
 include!("tests/todo_card.rs");
 include!("tests/clear_context_usage.rs");
+include!("tests/cache_retention.rs");
 
 #[test]
 fn assistant_status_command_shows_metadata_and_recovery() {
@@ -210,9 +211,14 @@ fn kv_cache_signature_ignores_non_transmitted_message_metadata() {
 fn cold_cache_warning_is_persisted_when_starting_next_request() {
     let mut app = create_test_app();
     crate::provider::anthropic::set_cache_ttl_1h(true);
+    app.is_remote = true;
+    app.runtime_mode = AppRuntimeMode::RemoteClient;
+    app.remote_provider_name = Some("anthropic".to_string());
+    app.remote_provider_model = Some("claude-opus-4-6".to_string());
     app.display_messages.push(DisplayMessage::user("first"));
     let session_id = app.kv_cache_session_id();
     app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
         session_id,
         input_tokens: 911_873,
         completed_at: Instant::now() - Duration::from_secs(3723),
@@ -248,9 +254,14 @@ fn cold_cache_warning_fires_on_idle_tick_before_next_message() {
     // for the next request to start.
     let mut app = create_test_app();
     crate::provider::anthropic::set_cache_ttl_1h(true);
+    app.is_remote = true;
+    app.runtime_mode = AppRuntimeMode::RemoteClient;
+    app.remote_provider_name = Some("anthropic".to_string());
+    app.remote_provider_model = Some("claude-opus-4-6".to_string());
     app.display_messages.push(DisplayMessage::user("first"));
     let session_id = app.kv_cache_session_id();
     app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
         session_id,
         input_tokens: 42_000,
         completed_at: Instant::now() - Duration::from_secs(3700),
@@ -307,9 +318,14 @@ fn cold_cache_warning_fires_on_idle_tick_before_next_message() {
 fn idle_cold_cache_warning_waits_for_ttl_and_rearms_after_new_cache_write() {
     let mut app = create_test_app();
     crate::provider::anthropic::set_cache_ttl_1h(true);
+    app.is_remote = true;
+    app.runtime_mode = AppRuntimeMode::RemoteClient;
+    app.remote_provider_name = Some("anthropic".to_string());
+    app.remote_provider_model = Some("claude-opus-4-6".to_string());
     app.display_messages.push(DisplayMessage::user("first"));
     let session_id = app.kv_cache_session_id();
     app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
         session_id: session_id.clone(),
         input_tokens: 42_000,
         completed_at: Instant::now() - Duration::from_secs(60),
@@ -373,6 +389,7 @@ fn harness_caused_kv_cache_miss_pushes_in_chat_alarm() {
         let provider = app.kv_cache_provider_name();
         let model = app.kv_cache_provider_model();
         app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+            cache_ttl_secs: Some(3600),
             session_id,
             input_tokens: 50_000,
             completed_at: Instant::now(),
@@ -427,6 +444,7 @@ fn documented_invalidation_downgrades_kv_cache_alarm_to_attribution() {
         let provider = app.kv_cache_provider_name();
         let model = app.kv_cache_provider_model();
         app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+            cache_ttl_secs: Some(3600),
             session_id,
             input_tokens: 50_000,
             completed_at: Instant::now(),
@@ -509,6 +527,7 @@ fn legitimate_model_switch_miss_does_not_push_in_chat_alarm() {
     let baseline_signature = App::kv_cache_request_signature(&messages, &[], "system", "");
     let session_id = app.kv_cache_session_id();
     app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
         session_id,
         input_tokens: 50_000,
         completed_at: Instant::now(),
@@ -551,6 +570,7 @@ fn kv_cache_baseline_from_other_session_is_ignored() {
         .collect();
     let big_signature = App::kv_cache_request_signature(&big_history, &[], "system", "");
     app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
         session_id: Some("session_big".to_string()),
         input_tokens: 200_000,
         completed_at: Instant::now(),
@@ -598,6 +618,7 @@ fn kv_cache_baseline_same_session_still_compares() {
     ];
     let baseline_signature = App::kv_cache_request_signature(&history, &[], "system", "");
     app.kv_cache.kv_cache_baseline = Some(KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
         session_id: Some("session_same".to_string()),
         input_tokens: 1_000,
         completed_at: Instant::now(),
@@ -723,12 +744,14 @@ fn cache_stats_uses_remote_history_token_usage_totals() {
     app.is_remote = true;
     app.remote_total_tokens = Some((1_250_000, 200_000));
     app.remote_token_usage_totals = Some(crate::protocol::TokenUsageTotals {
+        cache_prompt_tokens: Some(1_000_000),
         messages_with_token_usage: 3,
         input_tokens: 1_250_000,
         output_tokens: 200_000,
         cache_reported_input_tokens: 1_000_000,
         cache_read_input_tokens: 600_000,
         cache_creation_input_tokens: 50_000,
+        ..Default::default()
     });
 
     assert!(super::state_ui::handle_info_command(
@@ -1567,4 +1590,52 @@ fn oversized_pasted_submit_is_rejected_and_preserves_input() {
             .any(|message| message.role == "system"
                 && message.content.contains("Message is too large to send"))
     );
+}
+
+include!("tests/cache_prompt_accounting.rs");
+
+#[test]
+fn cache_miss_requires_explicit_read_telemetry_even_with_writes() {
+    let mut app = create_test_app();
+    app.is_remote = true;
+    app.runtime_mode = AppRuntimeMode::RemoteClient;
+    app.remote_provider_name = Some("openai-api".into());
+    app.remote_provider_model = Some("gpt-6-astra".into());
+    let messages = [Message::user("first")];
+    let baseline = KvCacheBaseline {
+        cache_ttl_secs: Some(3600),
+        session_id: app.kv_cache_session_id(),
+        input_tokens: 42_000,
+        completed_at: Instant::now(),
+        provider: "openai-api".into(),
+        model: "gpt-6-astra".into(),
+        upstream_provider: None,
+        signature: Some(App::kv_cache_request_signature(
+            &messages,
+            &[],
+            "before",
+            "",
+        )),
+    };
+    for writes in [None, Some(2_000)] {
+        app.kv_cache.kv_cache_baseline = Some(baseline.clone());
+        app.begin_kv_cache_request(&messages, &[], "changed system", "");
+        app.streaming.streaming_input_tokens = 42_000;
+        app.streaming.streaming_cache_read_tokens = None;
+        app.streaming.streaming_cache_creation_tokens = writes;
+        assert!(app.record_completed_stream_cache_usage());
+        assert!(app.kv_cache.kv_cache_miss_samples.is_empty());
+        assert!(
+            !app.display_messages
+                .iter()
+                .any(|m| m.content.contains("KV cache miss"))
+        );
+    }
+    // An explicitly reported zero remains meaningful and is not suppressed.
+    app.kv_cache.kv_cache_baseline = Some(baseline);
+    app.begin_kv_cache_request(&messages, &[], "changed system", "");
+    app.streaming.streaming_input_tokens = 42_000;
+    app.streaming.streaming_cache_read_tokens = Some(0);
+    assert!(app.record_completed_stream_cache_usage());
+    assert_eq!(app.kv_cache.kv_cache_miss_samples.len(), 1);
 }

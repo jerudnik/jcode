@@ -14,6 +14,20 @@ fn selfdev_clone_source_is_the_hard_fork() {
     assert_eq!(JCODE_REPO_URL, "https://github.com/jerudnik/jcode.git");
 }
 
+#[test]
+fn selfdev_build_policy_preserves_reload_handoff() {
+    assert!(!super::selfdev_build_required(false, false, true, true));
+    assert!(super::selfdev_build_required(true, false, true, true));
+}
+
+#[test]
+fn selfdev_build_policy_preserves_fresh_launch_options() {
+    assert!(super::selfdev_build_required(false, false, true, false));
+    assert!(!super::selfdev_build_required(false, false, false, false));
+    assert!(!super::selfdev_build_required(false, true, true, false));
+    assert!(super::selfdev_build_required(true, true, true, false));
+}
+
 struct EnvVarGuard {
     vars: Vec<(&'static str, Option<OsString>)>,
 }

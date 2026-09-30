@@ -87,10 +87,15 @@ fn test_notify_auth_changed_typed_auth_payload_roundtrip() -> Result<()> {
     assert_eq!(provider.as_deref(), Some("cerebras"));
     let auth = auth.expect("typed auth payload should roundtrip");
     assert_eq!(auth.provider.as_str(), "cerebras");
-    assert_eq!(auth.credential_source, Some(AuthCredentialSource::ApiKeyFile));
+    assert_eq!(
+        auth.credential_source,
+        Some(AuthCredentialSource::ApiKeyFile)
+    );
     assert_eq!(auth.auth_method, Some(AuthMethod::RemoteTuiPasteApiKey));
     assert_eq!(
-        auth.expected_runtime.as_ref().map(RuntimeProviderKey::as_str),
+        auth.expected_runtime
+            .as_ref()
+            .map(RuntimeProviderKey::as_str),
         Some("openai-compatible")
     );
     assert_eq!(
@@ -376,12 +381,14 @@ fn test_history_event_roundtrip_preserves_side_panel_snapshot() -> Result<()> {
         skills: Vec::new(),
         total_tokens: Some((123, 45)),
         token_usage_totals: Some(TokenUsageTotals {
+            cache_prompt_tokens: Some(130),
             messages_with_token_usage: 2,
             input_tokens: 123,
             output_tokens: 45,
             cache_reported_input_tokens: 100,
             cache_read_input_tokens: 80,
             cache_creation_input_tokens: 10,
+            ..Default::default()
         }),
         all_sessions: Vec::new(),
         client_count: None,
@@ -556,5 +563,71 @@ fn test_error_event_retry_after_back_compat_default() -> Result<()> {
     assert_eq!(id, 7);
     assert_eq!(message, "oops");
     assert_eq!(retry_after_secs, None);
+    Ok(())
+}
+
+/// Old servers and old session files never wrote `cache_prompt_tokens`. The
+/// field must read back as None (unknown), and None must not be written, so
+/// old and new peers exchange History payloads unchanged.
+#[test]
+fn test_token_usage_totals_cache_prompt_is_optional_on_the_wire() -> Result<()> {
+    let legacy = r#"{"messages_with_token_usage":2,"input_tokens":123,"output_tokens":45,"cache_reported_input_tokens":100,"cache_read_input_tokens":80,"cache_creation_input_tokens":10}"#;
+    let totals: TokenUsageTotals = serde_json::from_str(legacy)?;
+    assert_eq!(totals.cache_prompt_tokens, None);
+    assert_eq!(totals.input_tokens, 123);
+    let json = serde_json::to_string(&totals)?;
+    assert!(!json.contains("cache_prompt_tokens"), "{json}");
+
+    let known = TokenUsageTotals {
+        cache_prompt_tokens: Some(130),
+        ..totals
+    };
+    let json = serde_json::to_string(&known)?;
+    assert!(json.contains("\"cache_prompt_tokens\":130"), "{json}");
+    let restored: TokenUsageTotals = serde_json::from_str(&json)?;
+    assert_eq!(restored.cache_prompt_tokens, Some(130));
+    assert_eq!(restored.cache_read_input_tokens, 80);
+    Ok(())
+}
+
+#[test]
+fn test_token_usage_totals_pricing_buckets_optional_on_the_wire() -> Result<()> {
+    let mut value = serde_json::to_value(TokenUsageTotals::default())?;
+    assert!(value.get("pricing_buckets").is_none());
+    value["pricing_buckets"] = serde_json::json!([{
+        "provider": "OpenAI", "model": "gpt-4.1", "messages_with_token_usage": 1,
+        "input_tokens": 10_000, "output_tokens": 100,
+        "cache_read_input_tokens": 6_000, "cache_creation_input_tokens": 2_000,
+    }]);
+    let decoded: TokenUsageTotals = serde_json::from_value(value)?;
+    let restored = serde_json::to_value(decoded)?;
+    assert_eq!(restored["pricing_buckets"][0]["model"], "gpt-4.1");
+    assert_eq!(
+        restored["pricing_buckets"][0]["cache_read_input_tokens"],
+        6_000
+    );
+    Ok(())
+}
+
+#[test]
+fn test_token_usage_totals_read_complete_defaults_true_on_old_wire() -> Result<()> {
+    let legacy = serde_json::json!({
+        "messages_with_token_usage": 1,
+        "input_tokens": 10000,
+        "output_tokens": 100,
+        "cache_reported_input_tokens": 10000,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 2000
+    });
+    let decoded: TokenUsageTotals = serde_json::from_value(legacy.clone())?;
+    assert_eq!(serde_json::to_value(decoded)?["cache_read_complete"], true);
+    let mut incomplete = legacy;
+    incomplete["cache_read_complete"] = false.into();
+    let decoded: TokenUsageTotals = serde_json::from_value(incomplete)?;
+    assert_eq!(serde_json::to_value(decoded)?["cache_read_complete"], false);
+    assert_eq!(
+        serde_json::to_value(TokenUsageTotals::default())?["cache_read_complete"],
+        true
+    );
     Ok(())
 }

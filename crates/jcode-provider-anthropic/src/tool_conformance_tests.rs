@@ -29,10 +29,6 @@ static KNOWN_DRIFT: LazyLock<Vec<Drift>> = LazyLock::new(|| {
             "Agent",
             "capability hidden: backing schema property model is not advertised",
         ),
-        semantic(
-            "Bash",
-            "capability hidden: backing schema properties notify and wake are not advertised",
-        ),
         semantic("Glob", "Glob deserializes with mode=grep; expected find"),
         ignored("Grep", "-A"),
         ignored("Grep", "-B"),
@@ -174,10 +170,7 @@ fn tool_cases() -> [ToolCase; 9] {
             backing: "bash",
             mirror: MirrorKind::Bash,
             variants: BASH_REQUIREMENTS,
-            hidden_capability_note: Some((
-                &["notify", "wake"],
-                "capability hidden: backing schema properties notify and wake are not advertised",
-            )),
+            hidden_capability_note: None,
             expected_mode: None,
         },
         ToolCase {
@@ -742,6 +735,37 @@ fn semantic(tool: &'static str, note: &str) -> Drift {
     Drift {
         tool,
         kind: DriftKind::SemanticMismatch(note.to_string()),
+    }
+}
+
+#[tokio::test]
+async fn oauth_bash_forwards_execution_contract() {
+    let registry = Registry::new(Arc::new(MockProvider)).await;
+    let definition = registry
+        .definitions(None)
+        .await
+        .into_iter()
+        .find(|tool| tool.name == "bash")
+        .expect("Bash must be registered");
+
+    for (is_oauth, expected_name) in [(true, "Bash"), (false, "bash")] {
+        let formatted = format_tools(std::slice::from_ref(&definition), is_oauth, false);
+        assert_eq!(formatted.len(), 1);
+        let tool = &formatted[0];
+        assert_eq!(tool.name, expected_name);
+        assert_eq!(
+            property_names(&tool.input_schema),
+            property_names(&definition.input_schema)
+        );
+        assert_eq!(tool.input_schema["required"], json!(["command"]));
+        for field in ["intent", "timeout", "run_in_background", "notify", "wake"] {
+            assert_eq!(
+                tool.input_schema["properties"][field],
+                definition.input_schema["properties"][field],
+                "execution field {field} drifted in OAuth={is_oauth}"
+            );
+        }
+        assert_eq!(tool.description, definition.description);
     }
 }
 

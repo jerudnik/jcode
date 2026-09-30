@@ -230,6 +230,7 @@ impl Provider for OpenAIProvider {
                     let saw_output = attempt_guard.finish().await;
 
                     match continuation_result {
+                        PersistentWsResult::TerminalError => return,
                         PersistentWsResult::Success => {
                             log_openai_stream_lifecycle(
                                 jcode_base::logging::LogLevel::Info,
@@ -286,16 +287,6 @@ impl Provider for OpenAIProvider {
                                     }))
                                     .await;
                             }
-                            let mut guard = persistent_ws.lock().await;
-                            *guard = None;
-                            log_openai_stream_lifecycle(
-                                jcode_base::logging::LogLevel::Warn,
-                                "persistent_state_reset",
-                                vec![
-                                    ("model", model_for_transport.clone()),
-                                    ("reason", "persistent_reuse_failed".to_string()),
-                                ],
-                            );
                         }
                     }
                 }
@@ -450,6 +441,7 @@ impl Provider for OpenAIProvider {
                     let saw_output = attempt_guard.finish().await;
 
                     match result {
+                        Err(OpenAIStreamFailure::TerminalError) => return,
                         Ok(()) => {
                             log_openai_stream_lifecycle(
                                 jcode_base::logging::LogLevel::Info,
@@ -656,8 +648,32 @@ impl Provider for OpenAIProvider {
     }
 
     fn capabilities(&self) -> jcode_provider_core::ProviderCapabilities {
+        // The ChatGPT-backed Codex Responses endpoint was probed at 128
+        // accepted / 129 rejected (Codex PR #39594 raised its own limit to
+        // match). The platform key route keeps the documented 64 until it is
+        // probed. While a credential refresh holds the write lock, reuse the
+        // last derived limit so the advertised tool set cannot flip between
+        // turns; before any read, stay conservative.
+        use std::sync::atomic::Ordering;
+        let tool_name_limit = match self.credentials.try_read() {
+            Ok(credentials) => {
+                let limit = if Self::is_chatgpt_mode(&credentials) {
+                    jcode_provider_core::ToolNameLimit::PROBED_128
+                } else {
+                    jcode_provider_core::ToolNameLimit::CONSERVATIVE
+                };
+                self.last_tool_name_max_len
+                    .store(limit.max_len, Ordering::Relaxed);
+                limit
+            }
+            Err(_) => match self.last_tool_name_max_len.load(Ordering::Relaxed) {
+                0 => jcode_provider_core::ToolNameLimit::CONSERVATIVE,
+                max_len => jcode_provider_core::ToolNameLimit::with_max_len(max_len),
+            },
+        };
         jcode_provider_core::ProviderCapabilities {
             reasoning_context_replay: true,
+            tool_name_limit,
         }
     }
 
@@ -1018,6 +1034,7 @@ impl Provider for OpenAIProvider {
         Arc::new(OpenAIProvider {
             client: self.client.clone(),
             credentials: Arc::clone(&self.credentials),
+            last_tool_name_max_len: Arc::clone(&self.last_tool_name_max_len),
             credential_mode: Arc::clone(&self.credential_mode),
             model: Arc::new(RwLock::new(model)),
             prompt_cache_key: self.prompt_cache_key.clone(),

@@ -1159,3 +1159,72 @@ fn signal_stage_detail_surfaces_signal_failure() {
         "a failed signal must not read as a delivered one: {detail}"
     );
 }
+
+/// `jcode run` must load project-local MCP config from the process working
+/// directory, like an interactive session opened there, and the cold-cache
+/// wait must count those servers so a first-time project server is present
+/// in the single turn's tool snapshot.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_command_registers_project_local_mcp_servers_from_cwd() {
+    let _env_lock = crate::storage::lock_test_env();
+    let original_cwd = std::env::current_dir().expect("current cwd");
+    let previous_home = std::env::var_os("JCODE_HOME");
+    let previous_wait = std::env::var_os("JCODE_RUN_MCP_WAIT_MS");
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    crate::env::set_var("JCODE_HOME", home.path());
+    crate::env::set_var("JCODE_RUN_MCP_WAIT_MS", "8000");
+    std::fs::create_dir_all(project.path().join(".jcode")).expect("project .jcode dir");
+    let stub = r#"
+while IFS= read -r line; do
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*)
+      result='{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"project-local","version":"1"}}' ;;
+    *'"tools/list"'*)
+      result='{"tools":[{"name":"read","inputSchema":{"type":"object"}}]}' ;;
+    *'"ping"'*) result='{}' ;;
+    *) continue ;;
+  esac
+  printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" "$result"
+done
+"#;
+    let config = serde_json::json!({
+        "mcpServers": {
+            "project-local": {"command": "sh", "args": ["-c", stub], "shared": false}
+        }
+    });
+    std::fs::write(
+        project.path().join(".jcode").join("mcp.json"),
+        serde_json::to_string(&config).expect("serialize"),
+    )
+    .expect("write project MCP config");
+    std::env::set_current_dir(project.path()).expect("set project cwd");
+
+    let provider: Arc<dyn Provider> = Arc::new(TestProvider);
+    let registry = Registry::new(provider).await;
+    let names = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        register_run_command_mcp_tools(&registry).await;
+        registry.tool_names().await
+    })
+    .await;
+    // Tear down before asserting so the stub process does not outlive the test.
+    registry.unregister_mcp_tools(None).await;
+
+    std::env::set_current_dir(original_cwd).expect("restore cwd");
+    match previous_home {
+        Some(value) => crate::env::set_var("JCODE_HOME", value),
+        None => crate::env::remove_var("JCODE_HOME"),
+    }
+    match previous_wait {
+        Some(value) => crate::env::set_var("JCODE_RUN_MCP_WAIT_MS", value),
+        None => crate::env::remove_var("JCODE_RUN_MCP_WAIT_MS"),
+    }
+
+    let names = names.expect("MCP registration finished within the budget");
+    assert!(
+        names.iter().any(|name| name == "mcp__project-local__read"),
+        "project-local MCP tool missing from headless run registry: {names:?}"
+    );
+}

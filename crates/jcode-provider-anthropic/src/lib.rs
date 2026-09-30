@@ -1,11 +1,8 @@
 use jcode_message_types::{ContentBlock, Message, Role, ToolDefinition, sanitize_tool_id};
 use jcode_provider_core::anthropic_map_tool_name_for_oauth as map_tool_name_for_oauth;
+use jcode_provider_core::claude_cli_identity::ClaudeCliIdentity;
 use serde::Serialize;
 use serde_json::{Value, json};
-
-/// Claude Code billing attribution text observed in the official CLI's system
-/// prompt blocks.
-pub const OAUTH_BILLING_HEADER: &str = "cc_version=2.1.123; cc_entrypoint=sdk-cli; cch=33f85;";
 
 const CLAUDE_CODE_IDENTITY: &str = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 
@@ -363,16 +360,6 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
                 },
             ),
             (
-                &["bash"],
-                ApiTool {
-                    name: "Bash".to_string(),
-                    description: "Executes a given bash command and returns its output."
-                        .to_string(),
-                    input_schema: json!({"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"},"run_in_background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}),
-                    cache_control: None,
-                },
-            ),
-            (
                 &["edit"],
                 ApiTool {
                     name: "Edit".to_string(),
@@ -447,8 +434,10 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
             .collect();
 
         // Forward every other registered tool, remapping its name to the
-        // OAuth-accepted form. This restores websearch/webfetch/browser/
-        // codesearch/memory/swarm/multiedit/open/etc. for subscription users,
+        // OAuth-accepted form. Bash also uses its registered schema so timeout
+        // units and execution options cannot drift. This restores
+        // websearch/webfetch/browser/codesearch/memory/swarm/multiedit/open/etc.
+        // for subscription users,
         // matching the documented "remap names, keep the full toolset" behavior
         // and the (deprecated) Claude CLI transport.
         for tool in tools {
@@ -576,22 +565,26 @@ pub struct ApiSystemBlock {
     pub cache_control: Option<CacheControlParam>,
 }
 
-pub fn build_system_param(system: &str, is_oauth: bool, cache_ttl_1h: bool) -> Option<ApiSystem> {
-    build_system_param_split(system, "", is_oauth, cache_ttl_1h)
+pub fn build_system_param(
+    system: &str,
+    oauth_identity: Option<&ClaudeCliIdentity>,
+    cache_ttl_1h: bool,
+) -> Option<ApiSystem> {
+    build_system_param_split(system, "", oauth_identity, cache_ttl_1h)
 }
 
 /// Build system param with split static/dynamic content for better caching
 pub fn build_system_param_split(
     static_part: &str,
     dynamic_part: &str,
-    is_oauth: bool,
+    oauth_identity: Option<&ClaudeCliIdentity>,
     cache_ttl_1h: bool,
 ) -> Option<ApiSystem> {
-    if is_oauth {
+    if let Some(identity) = oauth_identity {
         let mut blocks = Vec::new();
         blocks.push(ApiSystemBlock {
             block_type: "text",
-            text: format!("x-anthropic-billing-header: {}", OAUTH_BILLING_HEADER),
+            text: format!("x-anthropic-billing-header: {}", identity.billing_header),
             cache_control: None,
         });
         blocks.push(ApiSystemBlock {

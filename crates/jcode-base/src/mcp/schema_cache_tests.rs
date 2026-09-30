@@ -15,6 +15,8 @@ fn cfg(command: &str, args: &[&str]) -> McpServerConfig {
         url: None,
         enabled: None,
         disabled: None,
+        timeout_secs: None,
+        health_deadline_ms: None,
     }
 }
 
@@ -67,6 +69,18 @@ fn fingerprint_env_order_independent() {
     let mut c = cfg("node", &["s.js"]);
     c.env.insert("A".into(), "different".into());
     assert_ne!(fingerprint_config(&a), fingerprint_config(&c));
+}
+
+#[test]
+fn timeout_policy_does_not_change_schema_fingerprint() {
+    let config = cfg("node", &["server.js"]);
+    let mut value = serde_json::to_value(&config).unwrap();
+    for (key, setting) in [("timeout_secs", 120), ("health_deadline_ms", 60000)] {
+        value[key] = json!(setting);
+        let changed: McpServerConfig = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(fingerprint_config(&config), fingerprint_config(&changed));
+    }
+    assert_eq!(CACHE_VERSION, 1);
 }
 
 #[test]

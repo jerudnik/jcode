@@ -12,16 +12,27 @@ use std::time::Duration;
 
 use crate::storage::EnvVarGuard;
 
+#[path = "runner_live_delivery_tests.rs"]
+mod live_delivery;
+
 struct TestProvider;
 
 #[derive(Clone, Default)]
 struct StreamingTestProvider {
     responses: Arc<StdMutex<VecDeque<Vec<StreamEvent>>>>,
+    /// One entry per `complete` call: the trailing user text that triggered
+    /// it. Tests that queue exactly one response read this to name whoever
+    /// consumed it when the expected turn comes back empty.
+    calls: Arc<StdMutex<Vec<String>>>,
 }
 
 impl StreamingTestProvider {
     fn queue_response(&self, events: Vec<StreamEvent>) {
         self.responses.lock().unwrap().push_back(events);
+    }
+
+    fn recorded_calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
     }
 }
 
@@ -52,11 +63,30 @@ impl Provider for TestProvider {
 impl Provider for StreamingTestProvider {
     async fn complete(
         &self,
-        _messages: &[Message],
+        messages: &[Message],
         _tools: &[ToolDefinition],
         _system: &str,
         _resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
+        let trailing_user = messages
+            .iter()
+            .rev()
+            .find(|message| message.role == Role::User)
+            .map(|message| {
+                message
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        crate::message::ContentBlock::Text { text, .. } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>()
+                    .chars()
+                    .take(120)
+                    .collect()
+            })
+            .unwrap_or_else(|| "<no user message>".to_string());
+        self.calls.lock().unwrap().push(trailing_user);
         let events = self
             .responses
             .lock()

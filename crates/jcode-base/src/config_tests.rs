@@ -1328,3 +1328,185 @@ fn populate_context_limits_from_config_seeds_qualified_runtime_model_shapes() {
         "profile-qualified slash-path spec must resolve the configured context_window"
     );
 }
+
+// Port of upstream c0071abd7 (issue #1056): read-modify-write settings updates
+// must refuse to run over a malformed existing config file instead of silently
+// saving defaults over it, while legitimate missing-file and valid-file writes
+// keep working.
+
+#[test]
+fn settings_update_refuses_to_overwrite_malformed_config() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let path = Config::path().expect("config path");
+        // `auth = "invalid-auth-mode"` is an unrecognized NamedProviderAuth
+        // value, so this is valid TOML that still fails Config deserialization.
+        let original = "[providers.broken]\nauth = \"invalid-auth-mode\"\n";
+        std::fs::write(&path, original).expect("write malformed config");
+
+        let error = Config::set_openai_reasoning_effort(Some("high"))
+            .expect_err("a malformed config must block the settings update");
+
+        assert!(
+            error.to_string().contains("Failed to parse config file"),
+            "error must name the config parse problem: {error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("reread malformed config"),
+            original,
+            "the malformed config file must be preserved byte-for-byte"
+        );
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn settings_update_creates_config_when_file_is_missing() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let path = Config::path().expect("config path");
+        assert!(!path.exists(), "precondition: no config file yet");
+
+        Config::set_openai_reasoning_effort(Some("medium")).expect("missing config still updates");
+
+        let content = std::fs::read_to_string(&path).expect("config file created");
+        let parsed: Config = toml::from_str(&content).expect("created config parses");
+        assert_eq!(
+            parsed.provider.openai_reasoning_effort.as_deref(),
+            Some("medium")
+        );
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn settings_update_preserves_unrelated_config_content() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let path = Config::path().expect("config path");
+        std::fs::write(
+            &path,
+            r#"
+[provider]
+openai_reasoning_effort = "low"
+
+[providers.gateway]
+type = "openai-compatible"
+base_url = "https://gateway.example/v1"
+auth = "bearer"
+api_key_env = "GATEWAY_API_KEY"
+
+[[providers.gateway.models]]
+id = "gateway-model"
+"#,
+        )
+        .expect("write valid config");
+
+        Config::set_openai_reasoning_effort(Some("high")).expect("valid config still updates");
+
+        let saved = std::fs::read_to_string(&path).expect("reread updated config");
+        let parsed: Config = toml::from_str(&saved).expect("updated config parses");
+        assert_eq!(
+            parsed.provider.openai_reasoning_effort.as_deref(),
+            Some("high")
+        );
+        let gateway = parsed
+            .providers
+            .get("gateway")
+            .expect("gateway profile kept");
+        assert_eq!(gateway.base_url, "https://gateway.example/v1");
+        assert_eq!(gateway.models.len(), 1, "gateway models kept");
+        assert_eq!(gateway.models[0].id, "gateway-model");
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn mcp_tools_mode_defaults_to_auto_with_8000_threshold() {
+    let cfg = ToolConfig::default();
+    assert_eq!(cfg.mcp_tools, super::McpToolsMode::Auto);
+    assert_eq!(cfg.mcp_tools_token_threshold, 8000);
+
+    let parsed: Config = toml::from_str("[tools]\nprofile = \"full\"\n").expect("parse");
+    assert_eq!(parsed.tools.mcp_tools, super::McpToolsMode::Auto);
+    assert_eq!(parsed.tools.mcp_tools_token_threshold, 8000);
+}
+
+#[test]
+fn mcp_tools_mode_round_trips_through_toml_and_parse() {
+    use super::McpToolsMode;
+    for (raw, expected) in [
+        ("auto", McpToolsMode::Auto),
+        ("eager", McpToolsMode::Eager),
+        ("deferred", McpToolsMode::Deferred),
+    ] {
+        let cfg: Config = toml::from_str(&format!(
+            "[tools]\nmcp_tools = \"{raw}\"\nmcp_tools_token_threshold = 1234\n"
+        ))
+        .expect("mode should parse");
+        assert_eq!(cfg.tools.mcp_tools, expected, "{raw}");
+        assert_eq!(cfg.tools.mcp_tools_token_threshold, 1234);
+        assert_eq!(McpToolsMode::parse(raw), Some(expected));
+        assert_eq!(expected.as_str(), raw);
+        let serialized = toml::to_string(&cfg.tools).expect("serialize");
+        let round_trip: ToolConfig = toml::from_str(&serialized).expect("deserialize");
+        assert_eq!(round_trip.mcp_tools, expected);
+    }
+}
+
+#[test]
+fn mcp_tools_mode_parser_normalizes_known_values_and_rejects_unknown_values() {
+    use super::McpToolsMode;
+    assert_eq!(
+        McpToolsMode::parse(" Deferred "),
+        Some(McpToolsMode::Deferred)
+    );
+    assert_eq!(McpToolsMode::parse("nope"), None);
+    assert!(toml::from_str::<Config>("[tools]\nmcp_tools = \"nope\"\n").is_err());
+}
+
+#[test]
+fn mcp_tools_environment_overrides_apply_and_fall_back_on_invalid_values() {
+    use super::McpToolsMode;
+    let _guard = crate::storage::lock_test_env();
+    let _mode = crate::storage::EnvVarGuard::set("JCODE_MCP_TOOLS", "deferred");
+    let _threshold = crate::storage::EnvVarGuard::set("JCODE_MCP_TOOLS_TOKEN_THRESHOLD", "42");
+    let mut cfg = Config::default();
+    cfg.apply_env_overrides();
+    assert_eq!(cfg.tools.mcp_tools, McpToolsMode::Deferred);
+    assert_eq!(cfg.tools.mcp_tools_token_threshold, 42);
+
+    crate::env::set_var("JCODE_MCP_TOOLS", "bogus");
+    crate::env::set_var("JCODE_MCP_TOOLS_TOKEN_THRESHOLD", "-1");
+    let mut cfg: Config =
+        toml::from_str("[tools]\nmcp_tools = \"eager\"\nmcp_tools_token_threshold = 5\n")
+            .expect("parse");
+    cfg.apply_env_overrides();
+    assert_eq!(
+        cfg.tools.mcp_tools,
+        McpToolsMode::Auto,
+        "invalid env mode falls back to the default, not the file value"
+    );
+    assert_eq!(cfg.tools.mcp_tools_token_threshold, 8000);
+}

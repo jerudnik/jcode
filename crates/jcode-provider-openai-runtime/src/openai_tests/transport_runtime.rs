@@ -532,10 +532,12 @@ async fn persistent_ws_does_not_reuse_response_cancelled_before_completion() {
     let persistent_ws = Arc::new(Mutex::new(Some(PersistentWsState {
         ws_stream: client_ws,
         last_response_id: "resp_previous".to_string(),
+        model: "gpt-5.6-sol".to_string(),
         connected_at: Instant::now(),
         last_activity_at: Instant::now(),
         message_count: 1,
         last_input_item_count: 1,
+        last_input: vec![serde_json::json!({"type":"message","role":"user","content":"first"})],
     })));
     let (tx, rx) = mpsc::channel(1);
     drop(rx); // Mirrors a soft interrupt cancelling the active stream consumer.
