@@ -59,6 +59,9 @@ while IFS= read -r line; do
     *'"tools/list"'*)
       echo '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"tools":[{{"name":"ping","description":"fake","inputSchema":{{"type":"object"}}}}]}}}}'
       ;;
+    *'"tools/call"'*)
+      echo '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"content":[{{"type":"text","text":"card created"}}],"isError":false}}}}'
+      ;;
     *'"shutdown"'*)
       exit 0
       ;;
@@ -103,7 +106,10 @@ struct Harness {
     project_dir: PathBuf,
 }
 
-async fn start_daemon_with_owned_server() -> Harness {
+/// `cached_schema`: pre-seed the on-disk schema cache for the owned server,
+/// as a previous daemon run would have, so the registry can advertise its
+/// tools without spawning it.
+async fn start_daemon_with_owned_server(cached_schema: bool) -> Harness {
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path().join("home");
     let project_dir = temp.path().join("project");
@@ -131,6 +137,24 @@ async fn start_daemon_with_owned_server() -> Harness {
         crate::storage::EnvVarGuard::set("JCODE_DEBUG_CONTROL", "1"),
     ];
     crate::config::invalidate_config_cache();
+    if cached_schema {
+        let config = crate::mcp::McpConfig::load_for_dir(Some(&project_dir));
+        let owned = config
+            .servers
+            .get("owned")
+            .expect("owned server configured");
+        let mut cache = crate::mcp::McpSchemaCache::load();
+        cache.update(
+            "owned",
+            owned,
+            vec![crate::mcp::McpToolDef {
+                name: "ping".to_string(),
+                description: Some("fake".to_string()),
+                input_schema: serde_json::json!({"type": "object"}),
+            }],
+        );
+        cache.save();
+    }
 
     let main_socket = temp.path().join("jcode.sock");
     let debug_socket = temp.path().join("jcode-debug.sock");
@@ -157,8 +181,8 @@ async fn start_daemon_with_owned_server() -> Harness {
 }
 
 impl Harness {
-    /// Create a headless session and wait for its owned child to start.
-    async fn create_headless_session(&self) -> (Client, String, u32) {
+    /// Create a headless session; returns the debug client and session id.
+    async fn create_headless_session(&self) -> (Client, String) {
         let mut debug = Client::connect_debug_with_path(self.debug_socket.clone())
             .await
             .expect("debug connect");
@@ -170,8 +194,7 @@ impl Harness {
             .await
             .expect("send create_session");
         let session_id = loop {
-            let event = debug.read_event().await.expect("debug event");
-            match event {
+            match debug.read_event().await.expect("debug event") {
                 ServerEvent::DebugResponse {
                     id: got,
                     ok,
@@ -193,29 +216,60 @@ impl Harness {
                 _ => {}
             }
         };
-        // The server truncates the pid file before writing it, so wait for a
-        // parseable pid rather than for the file to exist.
-        let pid_file = self.pid_file.clone();
-        let read_pid = move || {
-            std::fs::read_to_string(&pid_file)
-                .ok()
-                .and_then(|text| text.trim().parse::<u32>().ok())
-        };
+        (debug, session_id)
+    }
+
+    fn read_child_pid(&self) -> Option<u32> {
+        // The server truncates the pid file before writing it, so a reader
+        // can see an empty file; treat that as "not yet".
+        std::fs::read_to_string(&self.pid_file)
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok())
+    }
+
+    /// Wait for the owned child to be spawned and alive.
+    async fn wait_for_child(&self, within: Duration) -> u32 {
         let mut pid = None;
         assert!(
-            wait_until(Duration::from_secs(10), || {
-                pid = read_pid();
+            wait_until(within, || {
+                pid = self.read_child_pid();
                 pid.is_some()
             })
             .await,
-            "owned server must be spawned for the new session"
+            "owned server must be spawned"
         );
         let pid = pid.expect("pid file");
         assert!(
             pid_is_live(pid),
             "owned child should be alive after connect"
         );
-        (debug, session_id, pid)
+        pid
+    }
+
+    /// Run a debug command against `session_id` and return its output.
+    async fn debug_on_session(&self, debug: &mut Client, session_id: &str, cmd: &str) -> String {
+        let id = debug
+            .debug_command(cmd, Some(session_id))
+            .await
+            .expect("send debug command");
+        loop {
+            match debug.read_event().await.expect("debug event") {
+                ServerEvent::DebugResponse {
+                    id: got,
+                    ok,
+                    output,
+                } if got == id => {
+                    assert!(ok, "{cmd} failed: {output}");
+                    return output;
+                }
+                ServerEvent::Error {
+                    id: got, message, ..
+                } if got == id => {
+                    panic!("{cmd} error: {message}");
+                }
+                _ => {}
+            }
+        }
     }
 
     /// End the session the way the daemon does for a headless worker that is
@@ -253,13 +307,61 @@ async fn owned_child_exits_when_headless_session_is_stopped() {
     // Single-threaded on purpose: the daemon's tasks take test-env read
     // leases, which are admitted only on the thread holding the write lease.
     let _guard = crate::storage::lock_test_env();
-    let harness = start_daemon_with_owned_server().await;
-    let (mut debug, session_id, pid) = harness.create_headless_session().await;
+    let harness = start_daemon_with_owned_server(false).await;
+    let (mut debug, session_id) = harness.create_headless_session().await;
+    let pid = harness.wait_for_child(Duration::from_secs(10)).await;
 
     harness.destroy_session(&mut debug, &session_id).await;
 
     assert!(
         wait_until(Duration::from_secs(5), || !pid_is_live(pid)).await,
         "owned MCP child {pid} must exit after its session is stopped"
+    );
+}
+
+/// With a cached schema, a new session advertises the owned server's tools
+/// without spawning it; the child appears only when a tool is first called.
+#[cfg(unix)]
+#[tokio::test]
+async fn owned_child_is_spawned_on_first_call_when_schema_is_cached() {
+    let _guard = crate::storage::lock_test_env();
+    let harness = start_daemon_with_owned_server(true).await;
+    let (mut debug, session_id) = harness.create_headless_session().await;
+
+    // Under the default `auto` exposure the full tool set exceeds the
+    // deferral threshold, so the agent sees `mcp_search`/`mcp_call` rather
+    // than `mcp__owned__ping`; the registry still holds the cached proxy
+    // and either route dispatches through the same manager.
+    let tools = harness
+        .debug_on_session(&mut debug, &session_id, "tools")
+        .await;
+    assert!(
+        tools.contains("mcp_call") || tools.contains("mcp__owned__ping"),
+        "cached owned tools must be reachable without a live child: {tools}"
+    );
+    // Give the background connect task time to spawn if it were going to.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        harness.read_child_pid().is_none(),
+        "owned server with a cached schema must not be spawned at session start"
+    );
+
+    let output = harness
+        .debug_on_session(
+            &mut debug,
+            &session_id,
+            r#"tool:mcp_call {"server":"owned","tool":"ping","arguments":{}}"#,
+        )
+        .await;
+    assert!(
+        output.contains("card created"),
+        "first call must dispatch: {output}"
+    );
+    let pid = harness.wait_for_child(Duration::from_secs(5)).await;
+
+    harness.destroy_session(&mut debug, &session_id).await;
+    assert!(
+        wait_until(Duration::from_secs(5), || !pid_is_live(pid)).await,
+        "lazily spawned child {pid} must still exit with its session"
     );
 }

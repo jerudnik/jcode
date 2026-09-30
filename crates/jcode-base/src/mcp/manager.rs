@@ -173,11 +173,67 @@ impl McpManager {
 
     /// Connect to all configured servers.
     /// Shared servers go to the pool, non-shared are spawned per-session.
+    pub async fn connect_all(&self) -> Result<(usize, Vec<(String, String)>)> {
+        self.connect_all_with(|_, _| true).await
+    }
+
+    /// Connect to all shared servers, but spawn an owned (`shared: false`)
+    /// server only when its tool schema is not in the on-disk cache.
+    ///
+    /// Owned servers are one child per session, so on a daemon that spawns
+    /// many short-lived sessions (swarm workers) eager connect multiplies
+    /// language servers and the like that most sessions never call. A cached
+    /// schema is enough to advertise the tools; [`Self::call_tool`] connects
+    /// on the first real dispatch. A server with no cached schema (cold
+    /// start, reconfigured) still connects eagerly so its schema gets cached.
+    pub async fn connect_all_deferring_cached_owned(
+        &self,
+        cache: &super::schema_cache::McpSchemaCache,
+    ) -> Result<(usize, Vec<(String, String)>)> {
+        let mut deferred = Vec::new();
+        let result = self
+            .connect_all_with(|name, config| {
+                if config.shared || cache.tools_for(name, config).is_none() {
+                    true
+                } else {
+                    deferred.push(name.to_string());
+                    false
+                }
+            })
+            .await;
+        if !deferred.is_empty() {
+            crate::logging::info(&format!(
+                "MCP: deferred owned server(s) {:?} until first tool call (cached schema)",
+                deferred
+            ));
+        }
+        result
+    }
+
+    /// Names of enabled owned servers that are configured but not connected.
+    /// These are the servers a deferring connect left for connect-on-first-call.
+    pub async fn unconnected_owned_servers(&self) -> Vec<String> {
+        let clients = self.owned_clients.read().await;
+        self.config
+            .servers
+            .iter()
+            .filter(|(name, config)| {
+                config.is_enabled()
+                    && !(config.shared && self.pool.is_some())
+                    && !clients.contains_key(*name)
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     #[expect(
         clippy::collapsible_if,
         reason = "MCP connect flow keeps shared-pool and owned-server paths explicit"
     )]
-    pub async fn connect_all(&self) -> Result<(usize, Vec<(String, String)>)> {
+    async fn connect_all_with(
+        &self,
+        mut spawn_owned: impl FnMut(&str, &McpServerConfig) -> bool,
+    ) -> Result<(usize, Vec<(String, String)>)> {
         let mut total_successes = 0;
         let mut total_failures = Vec::new();
 
@@ -190,6 +246,10 @@ impl McpManager {
             .iter()
             .filter(|(_, config)| config.is_enabled())
             .partition(|(_, config)| config.shared && self.pool.is_some());
+        let owned_servers: Vec<_> = owned_servers
+            .into_iter()
+            .filter(|(name, config)| spawn_owned(name, config))
+            .collect();
 
         // Connect shared servers via pool
         if let Some(pool) = &self.pool {
@@ -995,6 +1055,85 @@ mod tests {
         assert!(manager.config().servers.contains_key("off"));
     }
 
+    fn owned_server_config(command: String) -> McpServerConfig {
+        McpServerConfig {
+            command,
+            args: vec![],
+            env: HashMap::new(),
+            shared: false,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+            timeout_secs: None,
+            health_deadline_ms: None,
+        }
+    }
+
+    /// Deferring connect spawns an owned server only when its schema is not
+    /// cached; a deferred server still serves its first call by connecting
+    /// then (connect-on-first-call), and a cache miss keeps eager connect.
+    #[tokio::test]
+    async fn deferring_connect_spawns_owned_servers_only_without_cached_schema() {
+        let _env_guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let server_path = super::provenance_integration_tests::write_fake_mcp_server(temp.path());
+        let command = server_path.to_string_lossy().to_string();
+
+        let mut config = McpConfig::default();
+        config
+            .servers
+            .insert("cached".to_string(), owned_server_config(command.clone()));
+        config
+            .servers
+            .insert("cold".to_string(), owned_server_config(command));
+
+        let mut cache = super::super::schema_cache::McpSchemaCache::default();
+        cache.update(
+            "cached",
+            config.servers.get("cached").unwrap(),
+            vec![McpToolDef {
+                name: "create_card".to_string(),
+                description: Some("fake card".to_string()),
+                input_schema: serde_json::json!({"type": "object"}),
+            }],
+        );
+
+        let manager = McpManager::with_config(config);
+        let (successes, failures) = manager
+            .connect_all_deferring_cached_owned(&cache)
+            .await
+            .expect("deferring connect");
+        assert!(failures.is_empty(), "{failures:?}");
+        assert_eq!(
+            successes, 1,
+            "only the uncached owned server connects eagerly"
+        );
+        assert_eq!(manager.connected_servers().await, vec!["cold".to_string()]);
+        assert_eq!(
+            manager.unconnected_owned_servers().await,
+            vec!["cached".to_string()]
+        );
+
+        let result = manager
+            .call_tool("cached", "create_card", serde_json::json!({}))
+            .await
+            .expect("deferred server connects on first call");
+        assert!(!result.is_error);
+        let mut connected = manager.connected_servers().await;
+        connected.sort();
+        assert_eq!(connected, vec!["cached".to_string(), "cold".to_string()]);
+        assert!(manager.unconnected_owned_servers().await.is_empty());
+
+        // Plain connect_all is unchanged: everything eager.
+        let eager = McpManager::with_config(manager.config().clone());
+        let (successes, _) = eager.connect_all().await.expect("connect_all");
+        assert_eq!(successes, 2);
+        eager.disconnect_all().await;
+        manager.disconnect_all().await;
+    }
+
     #[tokio::test]
     async fn connect_on_first_call_fails_cleanly_for_broken_server() {
         // A configured server whose command exits immediately and never speaks
@@ -1173,7 +1312,7 @@ mod provenance_integration_tests {
     }
 
     /// Write a minimal stdio MCP server with canned JSON-RPC replies.
-    fn write_fake_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
+    pub(super) fn write_fake_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
         let path = dir.join("fake-mcp-server.sh");
         let script = r##"#!/bin/bash
 while IFS= read -r line; do
