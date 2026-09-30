@@ -75,7 +75,7 @@ lint-docs:
 # product-impacting adds the CI full-test mirror (~5-20 min, cache-dependent).
 # If the fleet builder is not this host's platform, run the mirror leg as
 # `JCODE_REMOTE_CARGO=0 scripts/ci_local.sh` (the e2e leg needs a LOCAL
-# release binary; a same-platform remote --target build syncs it back).
+# release binary; remote --target builds skip binary sync-back).
 pre-pr:
     #!/usr/bin/env bash
     set -euo pipefail
