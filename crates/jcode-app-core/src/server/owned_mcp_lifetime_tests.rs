@@ -339,8 +339,12 @@ async fn owned_child_is_spawned_on_first_call_when_schema_is_cached() {
         tools.contains("mcp_call") || tools.contains("mcp__owned__ping"),
         "cached owned tools must be reachable without a live child: {tools}"
     );
-    // Give the background connect task time to spawn if it were going to.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // The background connect task starts as soon as the registry finishes
+    // advertising; an eager spawn writes the pid file within milliseconds
+    // (the fake server does so before reading stdin). Waiting well past
+    // that, and only then asserting, makes a late eager spawn fail this
+    // test rather than slip past it.
+    tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(
         harness.read_child_pid().is_none(),
         "owned server with a cached schema must not be spawned at session start"

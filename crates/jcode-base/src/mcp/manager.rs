@@ -302,6 +302,7 @@ impl McpManager {
                         {
                             Ok(mut client) => {
                                 client.attach_child_permit(permit);
+                                Self::record_owned_schema(&name, &config, &client);
                                 Ok(client)
                             }
                             Err(e) => Err(e),
@@ -379,12 +380,34 @@ impl McpManager {
             .await
             .with_context(|| format!("Failed to connect to MCP server '{}'", name))?;
         client.attach_child_permit(permit);
+        Self::record_owned_schema(name, config, &client);
 
         self.owned_clients
             .write()
             .await
             .insert(name.to_string(), client);
         Ok(())
+    }
+
+    /// Reconcile one owned server's live schema into the on-disk cache after
+    /// a successful connect. Deferred owned servers (spawned on first call
+    /// rather than at session start) never reach the post-connect
+    /// reconciliation that runs over `all_tools()` at registry init, so this
+    /// is what keeps their cached entry from freezing at the schema of the
+    /// first connect ever. Best effort: a cache write must never fail a
+    /// connect.
+    fn record_owned_schema(name: &str, config: &McpServerConfig, client: &McpClient) {
+        let tools = client.tools();
+        if tools.is_empty() {
+            return;
+        }
+        let mut cache = super::schema_cache::McpSchemaCache::load();
+        if cache.update(name, config, tools) {
+            cache.save();
+            crate::logging::info(&format!(
+                "MCP: refreshed cached tool schema for owned server '{name}' after connect"
+            ));
+        }
     }
 
     /// Disconnect from a server
@@ -1089,16 +1112,19 @@ mod tests {
             .servers
             .insert("cold".to_string(), owned_server_config(command));
 
+        // The cached entry is deliberately stale (a tool the live server does
+        // not have) so the refresh after connect-on-first-call is observable.
         let mut cache = super::super::schema_cache::McpSchemaCache::default();
         cache.update(
             "cached",
             config.servers.get("cached").unwrap(),
             vec![McpToolDef {
-                name: "create_card".to_string(),
-                description: Some("fake card".to_string()),
+                name: "old_tool".to_string(),
+                description: Some("stale".to_string()),
                 input_schema: serde_json::json!({"type": "object"}),
             }],
         );
+        cache.save();
 
         let manager = McpManager::with_config(config);
         let (successes, failures) = manager
@@ -1125,6 +1151,20 @@ mod tests {
         connected.sort();
         assert_eq!(connected, vec!["cached".to_string(), "cold".to_string()]);
         assert!(manager.unconnected_owned_servers().await.is_empty());
+
+        // Both connects refreshed the on-disk cache with the live schema, so
+        // the next session advertises the current tools, not the stale entry.
+        let on_disk = super::super::schema_cache::McpSchemaCache::load();
+        for server in ["cached", "cold"] {
+            let cfg = manager.config().servers.get(server).unwrap();
+            let names: Vec<&str> = on_disk
+                .tools_for(server, cfg)
+                .unwrap_or_else(|| panic!("{server} must be cached after connect"))
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect();
+            assert_eq!(names, vec!["create_card"], "{server}");
+        }
 
         // Plain connect_all is unchanged: everything eager.
         let eager = McpManager::with_config(manager.config().clone());

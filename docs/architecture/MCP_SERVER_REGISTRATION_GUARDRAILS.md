@@ -122,12 +122,16 @@ servers that must not be shared across sessions.
 is appropriate for isolated state, not for common stateless tools or bridge
 processes.
 
-On the daemon path the multiplication is by sessions that *use* the server,
-not by sessions that exist: once a server's tool schema is in the on-disk
+Wherever the registry advertises from the schema cache (the daemon and
+headless `jcode run`; the TUI-embedded path is the one eager exception) the
+multiplication is by sessions that *use* the server, not by sessions that
+exist: once a server's tool schema is in the on-disk
 cache (`mcp-schema-cache.json`, written after any successful connect), a new
 session advertises its tools from the cache and spawns the child only on the
 first dispatch to it (`McpManager::connect_all_deferring_cached_owned`). A
 server with no cached schema, or a reconfigured one (fingerprint mismatch),
-still connects at session start so the schema gets cached. The TUI-embedded
-path (one session per process) stays eager. Owned children die with their
-session; see `docs/SERVER_LIFECYCLE_INVARIANTS.md`.
+still connects at session start so the schema gets cached. Every owned
+connect, eager or on first call, writes the live schema back to the cache, so
+a deferred server's entry is refreshed by whichever session next uses it.
+An explicit `mcp reload` reconnects everything eagerly. Owned children die
+with their session; see `docs/SERVER_LIFECYCLE_INVARIANTS.md`.
