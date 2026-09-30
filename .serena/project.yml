@@ -157,7 +157,7 @@ initial_prompt: |-
   Run Rust commands through scripts/dev_cargo.sh and use scripts/test_fast.sh for the fast suite.
   Run just pre-pr before opening a pull request.
   Use one task-specific worktree per branch and preserve unrelated work.
-  Symbol lookup and references are trustworthy; diagnostics describe the checkout this Serena was started in, which is your worktree only when your session started there.
+  This Serena is owned by your session and started in its working directory, so symbols, references, and diagnostics describe that checkout.
 
 # time budget (seconds) per tool call for the retrieval of additional symbol information
 # such as docstrings or parameter information.
