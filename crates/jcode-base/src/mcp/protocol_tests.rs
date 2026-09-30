@@ -351,3 +351,23 @@ fn test_expand_env_placeholders_exact_match_only() {
     );
     jcode_core::env::remove_var("JCODE_MCP_TEST_TOKEN");
 }
+
+#[test]
+fn warn_ambiguous_server_names_flags_double_underscore_and_trailing_underscore_only() {
+    let config: McpConfig = serde_json::from_value(serde_json::json!({
+        "mcpServers": {
+            "plain": {"command": "x"},
+            "with-dash": {"command": "x"},
+            "a__b": {"command": "x"},
+            "trailing_": {"command": "x"},
+            "under_score_ok": {"command": "x"}
+        }
+    }))
+    .expect("config parses");
+    assert_eq!(
+        config.warn_ambiguous_server_names(),
+        vec!["a__b".to_string(), "trailing_".to_string()]
+    );
+    // Names are warned about, never removed.
+    assert_eq!(config.servers.len(), 5);
+}

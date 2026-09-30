@@ -35,8 +35,7 @@ pub fn is_cache_ttl_1h() -> bool {
     CACHE_TTL_1H.load(Ordering::Relaxed)
 }
 
-/// User-Agent for OAuth requests, matching the official Claude Code CLI.
-pub const CLAUDE_CLI_USER_AGENT: &str = "claude-cli/2.1.123 (external, sdk-cli)";
+pub use jcode_provider_core::claude_cli_identity::claude_cli_identity;
 
 pub const OAUTH_BETA_HEADERS: &str = ANTHROPIC_OAUTH_BETA_HEADERS;
 

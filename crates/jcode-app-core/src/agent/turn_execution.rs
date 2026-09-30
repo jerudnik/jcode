@@ -453,6 +453,13 @@ impl Agent {
         // `mcp_late_register_resolved` flag makes this a one-shot check so we do
         // not rescan the registry on every subsequent turn.
         if let Some(ref locked) = self.locked_tools {
+            // A locked deferred surface cannot change when per-server tools
+            // finish registering: the fixed pair already covers them. Return
+            // without consuming the latch or rescanning, so registration never
+            // resets the provider prompt cache for an identical surface.
+            if Self::locked_uses_fixed_mcp_surface(locked) {
+                return locked.clone();
+            }
             if self.mcp_late_register_resolved {
                 return locked.clone();
             }
@@ -491,14 +498,198 @@ impl Agent {
     }
 
     /// Build the agent's tool definitions from the registry, applying the
-    /// session's `allowed_tools`, `disabled_tools`, and self-dev filters.
-    async fn build_filtered_tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut tools = self.registry.definitions(self.allowed_tools.as_ref()).await;
-        if !self.disabled_tools.is_empty() {
-            tools.retain(|tool| !self.disabled_tools.contains(&tool.name));
-        }
+    /// session's `allowed_tools`, `disabled_tools`, self-dev filters, and the
+    /// active transport's tool-name limit.
+    async fn build_filtered_tool_definitions(&mut self) -> Vec<ToolDefinition> {
+        let mut tools = self.mcp_exposure_candidates().await;
+        self.mcp_tool_name_candidates = tools
+            .iter()
+            .filter(|tool| tool.name.starts_with("mcp__"))
+            .map(|tool| tool.name.clone())
+            .collect();
+        self.apply_tool_name_limit(&mut tools);
+        Self::apply_mcp_tool_exposure(
+            &mut tools,
+            self.mcp_tools_mode,
+            self.mcp_tools_token_threshold,
+            self.allowed_tools.as_ref(),
+        );
+        tools.retain(|tool| crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), &tool.name));
         Self::apply_selfdev_tool_surface(&mut tools, self.session.is_canary);
         tools
+    }
+
+    /// Explicit mcp_call permission can dispatch the catalog even when no
+    /// individual proxy is allow-listed. Include those definitions only while
+    /// resolving exposure; eager visibility still uses the exact allow list.
+    async fn mcp_exposure_candidates(&self) -> Vec<ToolDefinition> {
+        let explicit_call = self
+            .allowed_tools
+            .as_ref()
+            .is_some_and(|allowed| allowed.contains(crate::tool::MCP_CALL_TOOL_NAME));
+        let mut tools = self.registry.definitions(None).await;
+        tools.retain(|tool| {
+            !self.disabled_tools.contains(&tool.name)
+                && (crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), &tool.name)
+                    || (explicit_call && tool.name.starts_with("mcp__")))
+        });
+        tools
+    }
+
+    /// True when a locked snapshot advertises the deferred fixed surface and
+    /// no per-tool `mcp__*` proxies.
+    pub(super) fn locked_uses_fixed_mcp_surface(locked: &[ToolDefinition]) -> bool {
+        let mut has_fixed = false;
+        for tool in locked {
+            if tool.name.starts_with("mcp__") {
+                return false;
+            }
+            if crate::tool::is_fixed_mcp_tool(&tool.name) {
+                has_fixed = true;
+            }
+        }
+        has_fixed
+    }
+
+    /// Resolve the MCP exposure mode over an already policy-filtered set.
+    /// Runs before the snapshot locks, so the locked list is mode-resolved.
+    ///
+    /// `Eager` keeps every `mcp__*` proxy and drops the fixed pair, which is
+    /// today's exact surface. `Deferred` drops the proxies and keeps the pair
+    /// only when at least one proxy was visible, so a session with no MCP
+    /// catalog keeps today's exact surface too. `Auto` defers when the
+    /// filtered eager surface's prompt-token estimate exceeds `threshold`; a
+    /// threshold of 0 therefore defers any non-empty catalog.
+    pub(super) fn apply_mcp_tool_exposure(
+        tools: &mut Vec<ToolDefinition>,
+        mode: crate::config::McpToolsMode,
+        threshold: usize,
+        allowed: Option<&HashSet<String>>,
+    ) {
+        use crate::config::McpToolsMode;
+        let has_proxies = tools.iter().any(|tool| tool.name.starts_with("mcp__"));
+        let estimate: usize = tools
+            .iter()
+            .filter(|tool| !crate::tool::is_fixed_mcp_tool(&tool.name))
+            .map(ToolDefinition::prompt_token_estimate)
+            .sum();
+        let defer = match mode {
+            McpToolsMode::Eager => false,
+            McpToolsMode::Deferred => true,
+            McpToolsMode::Auto => has_proxies && estimate > threshold,
+        };
+        if defer && has_proxies {
+            logging::event_info(
+                "MCP_EXPOSURE",
+                vec![
+                    ("mode", mode.as_str().to_string()),
+                    ("surface", "deferred".to_string()),
+                    ("eager_token_estimate", estimate.to_string()),
+                    ("threshold", threshold.to_string()),
+                ],
+            );
+            tools.retain(|tool| !tool.name.starts_with("mcp__"));
+        } else {
+            tools.retain(|tool| {
+                !crate::tool::is_fixed_mcp_tool(&tool.name)
+                    || (has_proxies && allowed.is_some_and(|set| set.contains(&tool.name)))
+            });
+        }
+    }
+
+    /// Withhold tools whose advertised name the active transport would reject
+    /// or silently pass through. Anthropic and the Codex Responses backend
+    /// fail the whole request over one over-long name, while Z.AI and xAI
+    /// accept anything, so the check has to live here. Excluded names are
+    /// remembered for [`Self::validate_tool_allowed`] and logged once each.
+    fn apply_tool_name_limit(&mut self, tools: &mut Vec<ToolDefinition>) {
+        let limit = self.provider.capabilities().tool_name_limit;
+        let transport = self.provider.provider_identity();
+        let mut excluded = std::collections::HashSet::new();
+        tools.retain(|tool| {
+            if limit.accepts(&tool.name) {
+                return true;
+            }
+            excluded.insert(tool.name.clone());
+            false
+        });
+        for name in &excluded {
+            if self.name_excluded_tools.contains(name) {
+                continue;
+            }
+            logging::event_warn(
+                "MCP_NAME_UNSUPPORTED",
+                vec![
+                    ("name", name.clone()),
+                    ("length", name.chars().count().to_string()),
+                    ("transport", transport.clone()),
+                    ("max_len", limit.max_len.to_string()),
+                ],
+            );
+        }
+        crate::tool::set_session_name_exclusions(&self.session.id, excluded.clone());
+        crate::tool::set_session_mcp_name_limit(&self.session.id, limit);
+        self.name_excluded_tools = excluded;
+        self.locked_tool_name_limit = Some(limit);
+    }
+
+    /// After a route or model switch, drop the locked snapshot when the new
+    /// transport's tool-name limit would change which tools are advertised.
+    /// A switch between transports that both accept every registered name
+    /// keeps the snapshot and its prompt cache.
+    pub(crate) fn invalidate_tool_snapshot_if_name_limit_changed(&mut self) {
+        let Some(previous) = self.locked_tool_name_limit else {
+            return;
+        };
+        let current = self.provider.capabilities().tool_name_limit;
+        if current == previous {
+            return;
+        }
+        crate::tool::set_session_mcp_name_limit(&self.session.id, current);
+        if self.locked_tools.as_ref().is_some_and(|tools| {
+            Self::locked_uses_fixed_mcp_surface(tools)
+                && tools.iter().all(|tool| current.accepts(&tool.name))
+        }) && self
+            .name_excluded_tools
+            .iter()
+            .all(|name| name.starts_with("mcp__"))
+        {
+            self.name_excluded_tools = self
+                .mcp_tool_name_candidates
+                .iter()
+                .filter(|name| !current.accepts(name))
+                .cloned()
+                .collect();
+            crate::tool::set_session_name_exclusions(
+                &self.session.id,
+                self.name_excluded_tools.clone(),
+            );
+            self.locked_tool_name_limit = Some(current);
+            return;
+        }
+        let excluded_would_change = !self.name_excluded_tools.is_empty()
+            || self
+                .locked_tools
+                .as_ref()
+                .is_some_and(|tools| tools.iter().any(|tool| !current.accepts(&tool.name)));
+        if !excluded_would_change {
+            self.locked_tool_name_limit = Some(current);
+            return;
+        }
+        logging::info(&format!(
+            "Tool-name limit changed ({} -> {} chars) with affected tools; rebuilding the tool snapshot",
+            previous.max_len, current.max_len
+        ));
+        self.locked_tools = None;
+        self.cache_tracker.reset();
+    }
+
+    /// Tool names withheld from the active transport by
+    /// [`Self::apply_tool_name_limit`], sorted for stable display.
+    pub fn name_excluded_tool_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.name_excluded_tools.iter().cloned().collect();
+        names.sort();
+        names
     }
 
     /// Tailor the `selfdev` tool definition to the session mode.
@@ -526,10 +717,39 @@ impl Agent {
         let allowed = self.allowed_tools.as_ref();
         registry_names.iter().any(|name| {
             name.starts_with("mcp__")
-                && allowed.map(|set| set.contains(name)).unwrap_or(true)
+                && allowed.is_none_or(|set| {
+                    set.contains(name) || set.contains(crate::tool::MCP_CALL_TOOL_NAME)
+                })
                 && !self.disabled_tools.contains(name)
+                // A name withheld by the transport limit is absent from the
+                // snapshot on purpose; it must not consume the one-shot latch.
+                && !self.name_excluded_tools.contains(name)
                 && !locked.iter().any(|t| &t.name == name)
         })
+    }
+
+    /// Registered MCP tools permitted by this session's policy and transport as
+    /// `(registry key, server, tool)`, independent of prompt exposure mode.
+    pub async fn mcp_tool_identities(&self) -> Vec<(String, String, String)> {
+        let allowed = self.allowed_tools.as_ref();
+        let limit = self.provider.capabilities().tool_name_limit;
+        self.registry
+            .mcp_tool_identities()
+            .await
+            .into_iter()
+            .filter(|(key, _, _)| {
+                !self.disabled_tools.contains(key)
+                    && limit.accepts(key)
+                    && allowed.is_none_or(|set| {
+                        set.contains(key) || set.contains(crate::tool::MCP_CALL_TOOL_NAME)
+                    })
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mcp_late_register_latched(&self) -> bool {
+        self.mcp_late_register_resolved
     }
 
     pub async fn tool_names(&self) -> Vec<String> {
@@ -545,10 +765,16 @@ impl Agent {
         if self.session.is_canary {
             self.registry.register_selfdev_tools().await;
         }
-        let mut tools = self.registry.definitions(self.allowed_tools.as_ref()).await;
-        if !self.disabled_tools.is_empty() {
-            tools.retain(|tool| !self.disabled_tools.contains(&tool.name));
-        }
+        let mut tools = self.mcp_exposure_candidates().await;
+        let limit = self.provider.capabilities().tool_name_limit;
+        tools.retain(|tool| limit.accepts(&tool.name));
+        Self::apply_mcp_tool_exposure(
+            &mut tools,
+            self.mcp_tools_mode,
+            self.mcp_tools_token_threshold,
+            self.allowed_tools.as_ref(),
+        );
+        tools.retain(|tool| crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), &tool.name));
         Self::apply_selfdev_tool_surface(&mut tools, self.session.is_canary);
         tools
     }
@@ -636,13 +862,18 @@ impl Agent {
         // allow-listed worker session would reject aliased calls that the
         // registry itself would accept.
         let resolved = crate::tool::Registry::resolve_tool_name(name);
-        if let Some(allowed) = self.allowed_tools.as_ref()
-            && !allowed.contains(resolved)
-        {
+        if !crate::tool::tool_is_allowed(self.allowed_tools.as_ref(), resolved) {
             return Err(anyhow::anyhow!("Tool '{}' is not allowed", resolved));
         }
         if self.disabled_tools.contains(resolved) {
             return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved));
+        }
+        if self.name_excluded_tools.contains(resolved) {
+            return Err(anyhow::anyhow!(
+                "Tool '{}' is not advertised on this transport: its name exceeds the \
+                 provider's tool-name limit",
+                resolved
+            ));
         }
         Ok(())
     }

@@ -198,6 +198,13 @@ pub struct McpServerConfig {
     /// both are present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
+    /// Per-request reply budget in seconds. Absent or zero keeps the 30s default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    /// Silence before a liveness ping, clamped to the reply budget. Absent or
+    /// zero uses JCODE_MCP_HEALTH_DEADLINE_MS, or 15s when that is unset/invalid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_deadline_ms: Option<u64>,
 }
 
 impl McpServerConfig {
@@ -411,6 +418,8 @@ impl McpConfig {
                             url: None,
                             enabled: None,
                             disabled: None,
+                            timeout_secs: None,
+                            health_deadline_ms: None,
                         },
                     );
                 }
@@ -478,10 +487,36 @@ impl McpConfig {
         merged
     }
 
-    /// Load from default locations (merges jcode global + local, local overrides),
-    /// resolving project-local config against the process working directory.
+    /// Load the global locations only (`~/.jcode/mcp.json` and the Claude Code
+    /// user config). Project-local files are skipped: callers that know the
+    /// project directory use [`Self::load_for_dir`] with `Some(dir)`.
     pub fn load() -> Self {
         Self::load_for_dir(None)
+    }
+
+    /// Warn about server names that can make the composed `mcp__{server}__{tool}`
+    /// key ambiguous. Two distinct `(server, tool)` pairs compose to the same
+    /// key only when the longer server name is the shorter one plus a prefix of
+    /// `__{tool}`, so a name containing `__` or ending in `_` is the only way a
+    /// collision can start. The registry refuses the colliding key at
+    /// registration; this warning explains the risk before that happens. Names
+    /// are never rejected or rewritten here. Returns the offending names.
+    pub fn warn_ambiguous_server_names(&self) -> Vec<String> {
+        let mut offending: Vec<String> = self
+            .servers
+            .keys()
+            .filter(|name| name.contains("__") || name.ends_with('_'))
+            .cloned()
+            .collect();
+        offending.sort();
+        for name in &offending {
+            crate::logging::warn(&format!(
+                "MCP: server name '{name}' contains `__` or ends with `_`; its tools compose to \
+                 `mcp__{name}__{{tool}}`, which another server's tool could also compose to. \
+                 Colliding names are refused at registration. Rename the server to avoid this."
+            ));
+        }
+        offending
     }
 
     /// Drop any self-referential `jcode mcp-serve` server entries, logging each.
@@ -580,6 +615,7 @@ impl McpConfig {
             keep
         });
         merged.drop_self_referential_servers();
+        merged.warn_ambiguous_server_names();
 
         // Fork seam (env placeholder expansion): resolve exact `${VAR}` env
         // values against the process environment so secrets injected by tools

@@ -365,6 +365,7 @@ fn apply_terminal_event(
         Some(Ok(Event::FocusGained)) => {
             let redraw = app.set_client_focused(true);
             app.note_client_focus(true);
+            app.reapply_terminal_modes();
             Ok(redraw)
         }
         Some(Ok(Event::FocusLost)) => {

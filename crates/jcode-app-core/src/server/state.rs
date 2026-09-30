@@ -696,13 +696,28 @@ pub(super) fn session_event_fanout_sender(
     session_id: String,
     swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
 ) -> mpsc::UnboundedSender<ServerEvent> {
+    session_event_fanout_sender_with_relay(session_id, swarm_members).0
+}
+
+/// Like [`session_event_fanout_sender`], but also hands back the relay task.
+/// Dropping every sender ends the relay once it has drained; awaiting the
+/// handle then proves that every queued event, including a terminal `Done`,
+/// has reached the attachment FIFOs. Turns that hold a reservation use this
+/// so a successor cannot publish ahead of the predecessor's terminal event.
+pub(super) fn session_event_fanout_sender_with_relay(
+    session_id: String,
+    swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
+) -> (
+    mpsc::UnboundedSender<ServerEvent>,
+    tokio::task::JoinHandle<()>,
+) {
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerEvent>();
-    tokio::spawn(async move {
+    let relay = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             let _ = fanout_session_event(&swarm_members, &session_id, event).await;
         }
     });
-    tx
+    (tx, relay)
 }
 
 pub(super) fn session_event_fanout_sender_with_fallback(

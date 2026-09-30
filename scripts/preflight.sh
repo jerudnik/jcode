@@ -192,7 +192,7 @@ fi
 # ── 2. Rust gates (codegen-free), scoped to THIS change ──────────────────────
 # CI's blocking fmt/clippy gates run the whole-tree check but only FAIL
 # when a flagged file is fork-modified relative to the fork-point tag. Locally we
-# scope tighter: files changed by THIS branch/worktree vs origin/main. Rationale:
+# scope tighter: files changed by THIS branch/worktree vs the remote main. Rationale:
 #   * It catches anything the current change introduces (the thing a pre-push
 #     check exists for) without drowning in pre-existing fork debt.
 #   * It avoids false stops on platform-gated lints CI cannot see. Example: a
@@ -200,14 +200,44 @@ fi
 #     never compiles, so blocking on it locally would diverge from CI. Those
 #     live in files this change did not touch, so scoping to the branch diff
 #     drops them. (Pre-existing debt is the warning-budget ratchet's job.)
-# Set PREFLIGHT_BASE to override the comparison base (default origin/main).
+# Set PREFLIGHT_BASE to override the comparison base. By default the base is
+# discovered from Git rather than assumed to be `origin/main`: this repository
+# does not require a remote named `origin`, and a stale local `main` would
+# widen the scope to files this change never touched.
 fork_touched_file=""
+default_preflight_base() {
+  # 1. The remote that the local main branch tracks.
+  local remote
+  remote=$(git config --get branch.main.remote 2>/dev/null || true)
+  if [ -n "$remote" ] && git rev-parse --verify -q "refs/remotes/$remote/main" >/dev/null; then
+    printf '%s/main\n' "$remote"
+    return 0
+  fi
+  # 2. Any configured remote that has a main branch (origin first for
+  #    conventional clones, then the rest in `git remote` order).
+  while IFS= read -r remote; do
+    [ -n "$remote" ] || continue
+    if git rev-parse --verify -q "refs/remotes/$remote/main" >/dev/null; then
+      printf '%s/main\n' "$remote"
+      return 0
+    fi
+  done < <(printf 'origin\n'; git remote 2>/dev/null)
+  # 3. The local main, then nothing (flag only the working tree).
+  if git rev-parse --verify -q main >/dev/null; then
+    printf 'main\n'
+    return 0
+  fi
+  printf '\n'
+}
 compute_fork_touched() {
   fork_touched_file=$(mktemp)
-  local base="${PREFLIGHT_BASE:-origin/main}"
-  if ! git rev-parse --verify -q "$base" >/dev/null; then
-    # Fall back to the local main, then to an empty set (flag nothing extra).
-    if git rev-parse --verify -q main >/dev/null; then base="main"; else base=""; fi
+  local base="${PREFLIGHT_BASE:-}"
+  if [ -n "$base" ] && ! git rev-parse --verify -q "$base" >/dev/null; then
+    printf '  PREFLIGHT_BASE=%s does not resolve; discovering a base from Git instead\n' "$base"
+    base=""
+  fi
+  if [ -z "$base" ]; then
+    base=$(default_preflight_base)
   fi
   if [ -n "$base" ]; then
     # Committed changes on this branch vs base...

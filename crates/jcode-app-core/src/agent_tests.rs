@@ -20,10 +20,16 @@ use tokio_stream::wrappers::ReceiverStream;
 
 #[path = "agent_tests/active_pid.rs"]
 mod active_pid;
+#[path = "agent_tests/cache_accounting.rs"]
+mod cache_accounting;
 #[path = "agent_tests/hidden_reminder.rs"]
 mod hidden_reminder;
 #[path = "agent_tests/interrupt.rs"]
 mod interrupt;
+#[path = "agent_tests/mcp_deferral.rs"]
+mod mcp_deferral;
+#[path = "agent_tests/tool_name_limit.rs"]
+mod tool_name_limit;
 #[path = "agent_tests/turn_dedupe.rs"]
 mod turn_dedupe;
 
@@ -1316,6 +1322,94 @@ async fn run_turn_streaming_mpsc_emits_keepalive_while_provider_is_quiet() {
     task.await.unwrap().unwrap();
 }
 
+#[tokio::test]
+async fn run_turn_streaming_mpsc_emits_keepalive_while_tool_is_executing() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    // Turn 1: the model calls a tool that takes a while to run. A client
+    // watching the event stream sees nothing while the tool executes, so the
+    // server must prove liveness with keepalives or the client stall guard
+    // cancels a healthy turn (observed live: four 630s stall-guard cancels of
+    // `bg wait` turns on 2026-09-03). Turn 2: the model finishes.
+    let provider: Arc<dyn Provider> = Arc::new(RetryEvidenceProvider {
+        attempts: Arc::new(Mutex::new(VecDeque::from(vec![
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseStart {
+                    id: "tc-slow-1".to_string(),
+                    name: "bash".to_string(),
+                }),
+                ScriptedProviderEvent::Event(StreamEvent::ToolInputDelta(
+                    "{\"command\":\"sleep 0.4\"}".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseEnd),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("tool_use".to_string()),
+                }),
+            ]),
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::TextDelta("done".to_string())),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }),
+            ]),
+        ]))),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.memory_enabled = false;
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "run something slow".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(async move { agent.run_turn_streaming_mpsc(tx).await });
+
+    // Keepalives count only between ToolExec and ToolDone: that window is the
+    // silent tool execution the stall guard cannot otherwise distinguish from
+    // a dead connection.
+    let mut tool_exec_seen = false;
+    let mut keepalive_during_tool = false;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_secs(1), rx.recv()).await {
+            Ok(Some(ServerEvent::ToolExec { .. })) => {
+                tool_exec_seen = true;
+            }
+            Ok(Some(ServerEvent::Pong { id })) => {
+                assert_eq!(id, STREAM_KEEPALIVE_PONG_ID);
+                if tool_exec_seen {
+                    keepalive_during_tool = true;
+                }
+            }
+            Ok(Some(ServerEvent::ToolDone { .. })) => {
+                break;
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("channel closed before tool finished"),
+            Err(_) => {
+                assert!(
+                    !task.is_finished(),
+                    "streaming task finished before tool events arrived"
+                );
+            }
+        }
+    }
+
+    assert!(tool_exec_seen, "expected the slow tool to start executing");
+    assert!(
+        keepalive_during_tool,
+        "expected at least one keepalive Pong while the tool was executing"
+    );
+    task.await.unwrap().unwrap();
+}
+
 /// Provider that transparently switches its model mid-stream, mimicking the
 /// Anthropic retired-model fallback (`claude-fable-5` -> `claude-opus-4-8`).
 struct MidStreamModelSwitchProvider {
@@ -1563,6 +1657,53 @@ async fn messages_for_provider_applies_manual_compaction_in_native_auto_mode() {
         }
         other => panic!("expected text summary block, got {other:?}"),
     }
+}
+
+struct FullyCachedAnthropicProvider;
+
+#[async_trait]
+impl Provider for FullyCachedAnthropicProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let (_tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(1);
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+
+    fn name(&self) -> &str {
+        "anthropic"
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self)
+    }
+}
+
+/// Contract fixture C4: a fully cached Anthropic request reports input 0 with
+/// the whole prompt as a cache read. That prompt is still resent cold when the
+/// cache expires, so it must feed the observed compaction context.
+#[tokio::test]
+async fn fully_cached_anthropic_usage_updates_observed_compaction_context() {
+    let provider: Arc<dyn Provider> = Arc::new(FullyCachedAnthropicProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    agent.update_compaction_usage_from_stream(0, Some(300_000), Some(5_000));
+    let observed = agent
+        .registry
+        .compaction()
+        .read()
+        .await
+        .effective_token_count();
+    assert_eq!(observed, 305_000);
 }
 
 #[tokio::test]
@@ -2243,6 +2384,7 @@ async fn mcp_tools_registered_after_lock_are_visible_to_agent() {
     let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
     let registry = Registry::new(provider.clone()).await;
     let mut agent = Agent::new(provider, registry);
+    agent.mcp_tools_mode = crate::config::McpToolsMode::Eager;
 
     // First turn locks the snapshot (this is what happens before the async MCP
     // registration spawn completes).
@@ -2305,6 +2447,7 @@ async fn mcp_late_registration_rebuild_happens_at_most_once() {
     let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
     let registry = Registry::new(provider.clone()).await;
     let mut agent = Agent::new(provider, registry);
+    agent.mcp_tools_mode = crate::config::McpToolsMode::Eager;
 
     // First turn locks the snapshot with no MCP tools yet.
     let _ = agent.tool_definitions().await;

@@ -957,7 +957,12 @@ async fn fetch_claude_profile_email_at_url(
     let resp = client
         .get(profile_url)
         .header("Accept", "application/json")
-        .header("User-Agent", "claude-cli/1.0.0")
+        .header(
+            "User-Agent",
+            &crate::provider::anthropic::claude_cli_identity()
+                .await
+                .user_agent,
+        )
         .header("anthropic-beta", "oauth-2025-04-20,claude-code-20250219")
         .bearer_auth(access_token)
         .send()

@@ -102,6 +102,25 @@ async fn session_activity_snapshot_uses_fallback_when_no_live_connection_is_mark
 
 #[tokio::test]
 async fn handle_get_history_falls_back_to_persisted_snapshot_when_agent_is_busy() {
+    assert_history_snapshot(true, false).await;
+}
+
+#[tokio::test]
+async fn handle_get_history_uses_live_snapshot_when_agent_is_available() {
+    assert_history_snapshot(false, false).await;
+}
+
+#[tokio::test]
+async fn history_guard_survives_racing_turn_and_is_released_before_write() {
+    assert_history_snapshot(false, true).await;
+}
+
+/// `busy` holds the agent mutex for the whole request so the persisted
+/// fallback must serve. `racing_turn` drives the live path by hand: a turn
+/// queues on the mutex right after the nonblocking acquisition, and socket
+/// backpressure lets the test observe that the snapshot released the agent
+/// before writing and never reacquired it behind the turn.
+async fn assert_history_snapshot(busy: bool, racing_turn: bool) {
     let _guard = crate::storage::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
@@ -132,13 +151,21 @@ async fn handle_get_history_falls_back_to_persisted_snapshot_when_agent_is_busy(
     let registry = Registry::empty();
     let mut live_session = session.clone();
     live_session.title = Some("live agent".to_string());
+    live_session.messages[0].content = vec![crate::message::ContentBlock::Text {
+        text: "live unsaved history".to_string(),
+        cache_control: None,
+    }];
     let agent = Arc::new(Mutex::new(Agent::new_with_session(
         provider.clone(),
         registry,
         live_session,
         None,
     )));
-    let busy_guard = agent.lock().await;
+    // Agent construction persists its session. Force a full snapshot of the
+    // older transcript rather than a metadata-only journal update.
+    session.replace_messages(session.messages.clone());
+    session.save().expect("restore persisted history snapshot");
+    let busy_guard = if busy { Some(agent.lock().await) } else { None };
 
     let sessions = Arc::new(RwLock::new(HashMap::from([(
         session_id.to_string(),
@@ -151,22 +178,65 @@ async fn handle_get_history_falls_back_to_persisted_snapshot_when_agent_is_busy(
     let (_reader_a, writer_a) = stream_a.into_split();
     let writer = Arc::new(Mutex::new(writer_a));
 
-    handle_get_history(
-        42,
-        session_id,
-        true,
-        &agent,
-        &provider,
-        &sessions,
-        &client_connections,
-        &client_count,
-        &writer,
-        "server-name",
-        "🔥",
-        None,
-    )
-    .await
-    .expect("history should be written from persisted fallback");
+    if racing_turn {
+        // Reproduce the exact decision/preparation boundary without scheduler
+        // timing: a turn queues after the successful nonblocking acquisition.
+        let history_guard = agent.try_lock().expect("idle agent fast path");
+        let turn = agent.lock();
+        tokio::pin!(turn);
+        assert!(futures::poll!(&mut turn).is_pending());
+
+        // Socket backpressure lets us inspect the lock lifetime after snapshot
+        // preparation, while the history request is still in flight.
+        let writer_guard = writer.lock().await;
+        let history = super::send_history_with_guard(
+            42,
+            session_id,
+            history_guard,
+            &sessions,
+            &client_count,
+            &writer,
+            "server-name",
+            "🔥",
+            None,
+            None,
+            super::HistoryPayloadMode::Full,
+            true,
+        );
+        tokio::pin!(history);
+        assert!(futures::poll!(&mut history).is_pending());
+        let turn_guard = match futures::poll!(&mut turn) {
+            std::task::Poll::Ready(guard) => guard,
+            std::task::Poll::Pending => panic!("snapshot must release agent before socket write"),
+        };
+        drop(writer_guard);
+        tokio::time::timeout(std::time::Duration::from_secs(2), &mut history)
+            .await
+            .expect("history must not reacquire the racing turn's lock")
+            .expect("write live history");
+        drop(turn_guard);
+    } else {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            handle_get_history(
+                42,
+                session_id,
+                busy,
+                &agent,
+                &provider,
+                &sessions,
+                &client_connections,
+                &client_count,
+                &writer,
+                "server-name",
+                "🔥",
+                None,
+            ),
+        )
+        .await
+        .expect("history must complete without waiting for the held turn lock")
+        .expect("history should be written");
+    }
 
     drop(busy_guard);
     drop(writer);
@@ -193,15 +263,156 @@ async fn handle_get_history_falls_back_to_persisted_snapshot_when_agent_is_busy(
             assert_eq!(id, 42);
             assert_eq!(returned_session_id, session_id);
             assert_eq!(messages.len(), 1);
-            assert_eq!(messages[0].content, "persisted fallback history");
-            let activity = activity.expect("fallback activity snapshot");
-            assert!(activity.is_processing);
+            assert_eq!(
+                messages[0].content,
+                if busy {
+                    "persisted fallback history"
+                } else {
+                    "live unsaved history"
+                }
+            );
+            if busy {
+                let activity = activity.expect("fallback activity snapshot");
+                assert!(activity.is_processing);
+            }
         }
         other => panic!("expected history event, got {:?}", other),
     }
 
     if let Some(prev_home) = prev_home {
         crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[tokio::test]
+async fn handle_get_history_busy_fresh_session_returns_empty_without_waiting() {
+    let _env_guard = crate::storage::lock_test_env();
+    let temp_home = tempfile::TempDir::new().expect("create temp home");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp_home.path());
+
+    let session_id = "session_fresh_busy_history";
+    let session = crate::session::Session::create_with_id(session_id.into(), None, None);
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let agent = Arc::new(Mutex::new(Agent::new_with_session(
+        provider.clone(),
+        Registry::empty(),
+        session,
+        None,
+    )));
+    // Unlike upstream, this fork seeds every session with a context message
+    // and persists it on attach. Model a registered session whose transcript
+    // is missing on disk (pruned, or lost before its first save) by removing
+    // the snapshot and journal after the agent is live.
+    let snapshot_path = crate::session::session_path(session_id).expect("session path");
+    assert!(snapshot_path.exists(), "attach persists the fresh session");
+    std::fs::remove_file(&snapshot_path).expect("remove snapshot");
+    let journal_path = crate::session::session_journal_path(session_id).expect("journal path");
+    if journal_path.exists() {
+        std::fs::remove_file(&journal_path).expect("remove journal");
+    }
+    assert!(!snapshot_path.exists());
+    let sessions = Arc::new(RwLock::new(HashMap::from([(
+        session_id.to_string(),
+        Arc::clone(&agent),
+    )])));
+    let connections = Arc::new(RwLock::new(HashMap::<String, ClientConnectionInfo>::new()));
+    let count = Arc::new(RwLock::new(1usize));
+    let (stream, mut peer) = crate::transport::stream_pair().expect("stream pair");
+    let (_reader, write_half) = stream.into_split();
+    let writer = Arc::new(Mutex::new(write_half));
+    let busy_guard = agent.lock().await;
+
+    // Keep the mutex held throughout, representing either idle prefetch or a
+    // real turn. Concurrent requests must not queue behind either lock owner.
+    let request = |id, processing| {
+        handle_get_history(
+            id,
+            session_id,
+            processing,
+            &agent,
+            &provider,
+            &sessions,
+            &connections,
+            &count,
+            &writer,
+            "test-server",
+            "test",
+            None,
+        )
+    };
+    for processing in [false, true] {
+        let results = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            tokio::join!(
+                request(1, processing),
+                request(2, processing),
+                request(3, processing)
+            )
+        })
+        .await
+        .expect("fresh history must not wait for busy agent");
+        results.0.expect("first request");
+        results.1.expect("second request");
+        results.2.expect("third request");
+    }
+    assert!(
+        !snapshot_path.exists(),
+        "fallback must not persist synthetic state"
+    );
+
+    // A nonexistent session is not the same as a registered, unsaved one.
+    sessions.write().await.clear();
+    assert!(request(4, false).await.is_err());
+    sessions
+        .write()
+        .await
+        .insert(session_id.into(), Arc::clone(&agent));
+    // Corrupt snapshots must not silently become empty history either.
+    std::fs::create_dir_all(snapshot_path.parent().expect("session dir")).expect("create dir");
+    std::fs::write(&snapshot_path, b"not valid session json").expect("write corrupt snapshot");
+    assert!(request(5, false).await.is_err());
+
+    drop(busy_guard);
+    drop(writer);
+    let mut bytes = Vec::new();
+    peer.read_to_end(&mut bytes).await.expect("read events");
+    let events: Vec<crate::protocol::ServerEvent> = std::io::Cursor::new(bytes)
+        .lines()
+        .map(|line| serde_json::from_str(&line.expect("line")).expect("decode event"))
+        .collect();
+    assert_eq!(events.len(), 6);
+    for (index, event) in events.into_iter().enumerate() {
+        match event {
+            crate::protocol::ServerEvent::History {
+                session_id: returned_id,
+                messages,
+                images,
+                provider_name,
+                provider_model,
+                activity,
+                all_sessions,
+                client_count,
+                ..
+            } => {
+                assert_eq!(returned_id, session_id);
+                assert!(messages.is_empty());
+                assert!(images.is_empty());
+                assert_eq!(provider_name.as_deref(), Some("mock"));
+                assert_eq!(provider_model.as_deref(), Some("mock-model"));
+                assert_eq!(
+                    activity.is_some_and(|activity| activity.is_processing),
+                    index >= 3
+                );
+                assert_eq!(all_sessions, vec![session_id.to_string()]);
+                assert_eq!(client_count, Some(1));
+            }
+            other => panic!("expected history, got {other:?}"),
+        }
+    }
+    if let Some(home) = prev_home {
+        crate::env::set_var("JCODE_HOME", home);
     } else {
         crate::env::remove_var("JCODE_HOME");
     }

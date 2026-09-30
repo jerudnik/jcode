@@ -1,3 +1,4 @@
+use super::queue_recovery::recover_rejected_queued_continuation;
 use super::*;
 use crate::tool::selfdev::ReloadContext;
 use crate::tui::TuiState;
@@ -457,6 +458,26 @@ pub(in crate::tui::app) fn handle_server_event(
 
     let had_remote_resume_activity = app.remote_resume_activity.is_some();
 
+    // Turn content for the in-flight send proves the server accepted it. From
+    // here a disconnect must adopt the running turn on reattach, never resend.
+    if app.current_message_id.is_some()
+        && app.rate_limit_pending_message.is_some()
+        && matches!(
+            &event,
+            ServerEvent::TextDelta { .. }
+                | ServerEvent::TextReplace { .. }
+                | ServerEvent::ReasoningDelta { .. }
+                | ServerEvent::ReasoningDone { .. }
+                | ServerEvent::ToolStart { .. }
+                | ServerEvent::ToolInput { .. }
+                | ServerEvent::ToolExec { .. }
+                | ServerEvent::ToolDone { .. }
+                | ServerEvent::MessageEnd
+        )
+    {
+        app.pending_remote_delivery_proven = true;
+    }
+
     // Background work or another client can start a turn. Adopt unexpected live
     // events so status updates and terminal events settle it normally.
     let externally_started_turn_event = app.current_message_id.is_none()
@@ -687,6 +708,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.last_api_completed_model = Some(<App as TuiState>::provider_model(app));
                 // Effective prompt includes cache read/creation because all are resent cold.
                 let effective = crate::tui::info_widget::effective_prompt_tokens(
+                    &app.kv_cache_provider_name(),
                     input,
                     app.streaming.streaming_cache_read_tokens.unwrap_or(0),
                     app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
@@ -701,18 +723,23 @@ pub(in crate::tui::app) fn handle_server_event(
                     .token_accounting
                     .total_output_tokens
                     .saturating_add(output.saturating_sub(previous_output));
-                // Bill snapshot deltas so repeated reports charge each token once.
-                app.accrue_remote_call_cost(
-                    input.saturating_sub(previous_input),
-                    output.saturating_sub(previous_output),
-                    app.streaming
-                        .streaming_cache_read_tokens
-                        .unwrap_or(0)
-                        .saturating_sub(previous_cache_read.unwrap_or(0)),
-                    app.streaming
-                        .streaming_cache_creation_tokens
-                        .unwrap_or(0)
-                        .saturating_sub(previous_cache_creation.unwrap_or(0)),
+                // Bill the cost difference between the previous and current
+                // snapshots. Pricing the token deltas instead would bill a token
+                // as fresh input in one frame and never refund it when a later
+                // frame reports it as a cache read or write.
+                app.accrue_remote_snapshot_cost(
+                    (
+                        previous_input,
+                        previous_output,
+                        previous_cache_read.unwrap_or(0),
+                        previous_cache_creation.unwrap_or(0),
+                    ),
+                    (
+                        input,
+                        output,
+                        app.streaming.streaming_cache_read_tokens.unwrap_or(0),
+                        app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
+                    ),
                 );
 
                 let had_cache_telemetry =
@@ -720,6 +747,25 @@ pub(in crate::tui::app) fn handle_server_event(
                 let has_cache_telemetry = app.streaming.streaming_cache_read_tokens.is_some()
                     || app.streaming.streaming_cache_creation_tokens.is_some();
                 if has_cache_telemetry {
+                    app.token_accounting.cache_read_accounting_complete &=
+                        app.streaming.streaming_cache_read_tokens.is_some();
+                    let prompt = crate::tui::info_widget::effective_prompt_tokens(
+                        &app.kv_cache_provider_name(),
+                        input,
+                        app.streaming.streaming_cache_read_tokens.unwrap_or(0),
+                        app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
+                    );
+                    let previous_prompt = if had_cache_telemetry {
+                        app.token_accounting.last_cache_prompt_tokens.unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    app.token_accounting.total_cache_prompt_tokens = app
+                        .token_accounting
+                        .total_cache_prompt_tokens
+                        .saturating_sub(previous_prompt)
+                        .saturating_add(prompt);
+                    app.token_accounting.last_cache_prompt_tokens = Some(prompt);
                     let reported_delta = if had_cache_telemetry {
                         input.saturating_sub(previous_input)
                     } else {
@@ -747,12 +793,13 @@ pub(in crate::tui::app) fn handle_server_event(
                         );
                     app.token_accounting.last_cache_reported_input_tokens = Some(input);
                     app.token_accounting.last_cache_read_tokens =
-                        Some(app.streaming.streaming_cache_read_tokens.unwrap_or(0));
+                        app.streaming.streaming_cache_read_tokens;
                     app.token_accounting.last_cache_creation_tokens =
-                        Some(app.streaming.streaming_cache_creation_tokens.unwrap_or(0));
+                        app.streaming.streaming_cache_creation_tokens;
                 }
 
                 let effective_prompt_tokens = crate::tui::info_widget::effective_prompt_tokens(
+                    &app.kv_cache_provider_name(),
                     input,
                     app.streaming.streaming_cache_read_tokens.unwrap_or(0),
                     app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
@@ -808,7 +855,12 @@ pub(in crate::tui::app) fn handle_server_event(
             app.update_terminal_title();
             false
         }
-        ServerEvent::Pong { .. } => false,
+        ServerEvent::Pong { .. } => {
+            // Server keepalives (hidden reasoning, long tool execution) exist
+            // to feed the stall guard; counting them here is the whole point.
+            app.last_stream_activity = Some(Instant::now());
+            false
+        }
         ServerEvent::ConnectionPhase { phase } => {
             let cp = match phase.as_str() {
                 "authenticating" => crate::message::ConnectionPhase::Authenticating,
@@ -1065,7 +1117,7 @@ pub(in crate::tui::app) fn handle_server_event(
             // Reconnect can report idle before the server's turn-end dispatch. Requeue
             // the rejected follow-up and adopt the still-running turn to avoid data loss.
             if message == "Already processing a message"
-                && recover_undelivered_queued_continuation(app, "server busy rejection")
+                && recover_rejected_queued_continuation(app)
             {
                 app.is_processing = true;
                 app.status = ProcessingStatus::Thinking(Instant::now());
@@ -1419,10 +1471,13 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.streaming.streaming_cache_creation_tokens = None;
                 app.kv_cache.current_api_usage_recorded = false;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
+                app.token_accounting.total_cache_prompt_tokens = 0;
+                app.token_accounting.cache_read_accounting_complete = true;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
                 app.token_accounting.last_cache_reported_input_tokens = None;
+                app.token_accounting.last_cache_prompt_tokens = None;
                 app.token_accounting.last_cache_read_tokens = None;
                 app.token_accounting.last_cache_creation_tokens = None;
                 app.token_accounting.last_cache_optimal_input_tokens = None;
@@ -1514,25 +1569,26 @@ pub(in crate::tui::app) fn handle_server_event(
             app.remote_server_icon = server_icon.clone();
             app.remote_server_has_update = server_has_update;
             let history_total_tokens = total_tokens.or_else(|| {
-                token_usage_totals.map(|totals| (totals.input_tokens, totals.output_tokens))
+                token_usage_totals
+                    .as_ref()
+                    .map(|totals| (totals.input_tokens, totals.output_tokens))
             });
             if session_changed || history_total_tokens.is_some() {
                 app.remote_total_tokens = history_total_tokens;
             }
-            if session_changed || token_usage_totals.is_some() {
-                app.remote_token_usage_totals = token_usage_totals;
-            }
-            if let Some(totals) = token_usage_totals {
+            if let Some(totals) = token_usage_totals.as_ref() {
                 app.token_accounting.total_input_tokens = 0;
                 app.token_accounting.total_output_tokens = 0;
                 app.token_accounting.total_cache_reported_input_tokens = 0;
+                app.token_accounting.total_cache_prompt_tokens = 0;
+                app.token_accounting.cache_read_accounting_complete = true;
                 app.token_accounting.total_cache_read_tokens = 0;
                 app.token_accounting.total_cache_creation_tokens = 0;
                 app.token_accounting.total_cache_optimal_input_tokens = 0;
                 // Price restored token totals once so resumed cost is not `$0`.
-                app.seed_cost_from_history_totals(&totals);
+                app.seed_cost_from_history_totals(totals);
             }
-            if let Some(totals) = token_usage_totals {
+            if let Some(totals) = token_usage_totals.as_ref() {
                 crate::logging::info(&format!(
                     "Remote history token totals: session={} messages_with_usage={} input={} output={} cache_reported={} cache_read={} cache_write={}",
                     session_id,
@@ -1543,6 +1599,9 @@ pub(in crate::tui::app) fn handle_server_event(
                     totals.cache_read_input_tokens,
                     totals.cache_creation_input_tokens
                 ));
+            }
+            if session_changed || token_usage_totals.is_some() {
+                app.remote_token_usage_totals = token_usage_totals;
             }
             app.workspace_client
                 .sync_after_history(&session_id, &app.remote_sessions);

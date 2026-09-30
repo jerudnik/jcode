@@ -236,10 +236,11 @@ impl App {
     pub async fn init_mcp(&mut self) {
         // Always register the MCP management tool so agent can connect servers
         let mcp_tool = crate::tool::mcp::McpManagementTool::new(Arc::clone(&self.mcp_manager))
-            .with_registry(self.registry.clone());
+            .with_registry(&self.registry);
         self.registry
             .register("mcp".to_string(), Arc::new(mcp_tool))
             .await;
+        crate::tool::mcp::register_fixed_mcp_surface(&self.registry, &self.mcp_manager).await;
 
         let manager = self.mcp_manager.read().await;
         let server_count = manager.config().servers.len();

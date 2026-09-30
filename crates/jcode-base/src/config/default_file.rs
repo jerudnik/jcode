@@ -253,6 +253,14 @@ profile = "full"
 # disabled = ["browser", "gmail", "swarm"]
 # Disable all built-in tools unless enabled is set.
 disable_base_tools = false
+# How MCP server tools reach the model: "auto" (default), "eager", or "deferred".
+# eager advertises every mcp__{server}__{tool} definition in the prompt.
+# deferred advertises only mcp_search and mcp_call; the model looks schemas
+# up on demand, so large catalogs stop consuming prompt tokens every turn.
+# auto defers when the eager surface exceeds mcp_tools_token_threshold.
+# mcp_tools = "auto"
+# Estimated prompt tokens of the filtered eager tool surface above which auto defers.
+# mcp_tools_token_threshold = 8000
 
 [acp]
 # Agent Client Protocol adapter compatibility profile: standard, extended, or full.

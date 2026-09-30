@@ -86,6 +86,26 @@ impl App {
         }
     }
 
+    /// Record which optional terminal modes startup enabled, so focus events
+    /// can re-arm exactly those.
+    pub fn set_terminal_modes(&mut self, modes: crate::tui::TerminalModeState) {
+        self.terminal_modes = modes;
+    }
+
+    /// Re-arm bracketed paste, mouse capture and kitty flags after the
+    /// terminal regained focus. See `reapply_terminal_modes_to` for why focus
+    /// reporting is never re-emitted here.
+    pub(super) fn reapply_terminal_modes(&mut self) {
+        let modes = self.terminal_modes;
+        let result = crate::tui::reapply_terminal_modes_to(&mut std::io::stdout(), modes);
+        crate::logging::info(&format!(
+            "EVENT event=TUI_TERMINAL_MODES phase=reapplied trigger=focus_gained mouse_capture={} keyboard_enhanced={} ok={}",
+            modes.mouse_capture,
+            modes.keyboard_enhanced,
+            result.is_ok()
+        ));
+    }
+
     pub(super) fn note_client_focus(&mut self, force: bool) {
         let Some(session_id) = self.active_client_session_id() else {
             return;
@@ -204,9 +224,15 @@ impl App {
         // tick resend requires `rate_limit_reset`), so persist it back into
         // the queued/hidden lists instead; the restored queue re-sends it once
         // the turn is proven idle (issue #391).
+        //
+        // Every caller is a client-only handoff: the server keeps running the
+        // turn and the restarted client reattaches to it. Once the server has
+        // streamed content for this send, persisting it would run the same
+        // continuation a second time after the adopted turn completes.
         let inflight_continuation = self.rate_limit_pending_message.as_ref().filter(|pending| {
             pending.is_system
                 && self.rate_limit_reset.is_none()
+                && !self.pending_remote_delivery_is_proven()
                 && (!pending.content.trim().is_empty() || pending.system_reminder.is_some())
         });
         if self.input.is_empty()
@@ -256,21 +282,25 @@ impl App {
                         }
                     })
                 };
-            let rate_limit_pending_message =
-                if resume_prompt.is_some() || inflight_continuation.is_some() {
-                    None
-                } else {
-                    self.rate_limit_pending_message.as_ref().map(|pending| {
-                        serde_json::json!({
-                            "content": pending.content,
-                            "images": pending.images,
-                            "is_system": pending.is_system,
-                            "system_reminder": pending.system_reminder,
-                            "auto_retry": pending.auto_retry,
-                            "retry_attempts": pending.retry_attempts,
-                        })
+            // A streamed in-flight send is adopted on reattach; persisting it
+            // in any shape would resend it.
+            let rate_limit_pending_message = if resume_prompt.is_some()
+                || inflight_continuation.is_some()
+                || self.pending_remote_delivery_is_proven()
+            {
+                None
+            } else {
+                self.rate_limit_pending_message.as_ref().map(|pending| {
+                    serde_json::json!({
+                        "content": pending.content,
+                        "images": pending.images,
+                        "is_system": pending.is_system,
+                        "system_reminder": pending.system_reminder,
+                        "auto_retry": pending.auto_retry,
+                        "retry_attempts": pending.retry_attempts,
                     })
-                };
+                })
+            };
             let mut queued_messages = self.queued_messages.clone();
             let mut hidden_queued_system_messages = self.hidden_queued_system_messages.clone();
             if let Some(pending) = inflight_continuation {
@@ -1105,8 +1135,10 @@ fn push_cache_baseline(lines: &mut Vec<String>, label: &str, baseline: Option<&K
     }
 }
 
+pub(super) const INCOMPLETE_CACHE_READ_RATIO: &str = "unknown (read accounting incomplete)";
+
 fn format_cache_stats(app: &App) -> String {
-    let remote_usage = app.remote_token_usage_totals;
+    let remote_usage = app.remote_token_usage_totals.as_ref();
     let remote_cache_reported = remote_usage
         .map(|usage| usage.cache_reported_input_tokens)
         .unwrap_or(0);
@@ -1121,26 +1153,37 @@ fn format_cache_stats(app: &App) -> String {
     let read = remote_cache_read.saturating_add(app.token_accounting.total_cache_read_tokens);
     let write = remote_cache_write.saturating_add(app.token_accounting.total_cache_creation_tokens);
     let optimal = app.token_accounting.total_cache_optimal_input_tokens;
-    // `reported` is the aggregate of provider-reported `input_tokens`, which for
-    // split-accounting providers (Anthropic) excludes cached + cache-creation
-    // tokens. Percentages must use the effective prompt size so they stay in
-    // 0-100% instead of clamping at 100%.
-    let effective_reported =
-        crate::tui::info_widget::effective_prompt_tokens(reported, read, write);
-    let read_pct = cache_ratio_pct(read, effective_reported);
-    let write_pct = cache_ratio_pct(write, effective_reported);
-    let optimal_pct = (optimal > 0).then(|| cache_ratio_pct(read, optimal));
+    // Preserve per-request accounting across providers. Legacy history without an
+    // explicit denominator remains unknown rather than guessing from aggregate writes.
+    let effective_reported = remote_usage
+        .map_or(Some(0), |usage| usage.cache_prompt_tokens)
+        .map(|prompt| prompt.saturating_add(app.token_accounting.total_cache_prompt_tokens));
+    let format_pct = |tokens, prompt: Option<u64>| {
+        prompt
+            .filter(|prompt| *prompt > 0)
+            .map(|prompt| format!("{}%", cache_ratio_pct(tokens, prompt)))
+            .unwrap_or_else(|| "unknown (prompt accounting unavailable)".to_string())
+    };
+    let read_complete = app.token_accounting.cache_read_accounting_complete
+        && remote_usage.is_none_or(|usage| usage.cache_read_complete);
+    let read_pct = if read_complete {
+        format_pct(read, effective_reported)
+    } else {
+        INCOMPLETE_CACHE_READ_RATIO.to_string()
+    };
+    let write_pct = format_pct(write, effective_reported);
+    let optimal_pct = (read_complete && optimal > 0 && remote_cache_read == 0)
+        .then(|| cache_ratio_pct(read, optimal));
     let cache_totals_source = match (
         remote_usage.is_some(),
-        app.token_accounting.total_cache_reported_input_tokens > 0,
+        app.token_accounting.total_cache_prompt_tokens > 0,
     ) {
         (true, true) => "remote_history+client_observed_api_calls",
         (true, false) => "remote_history",
         (false, true) => "client_observed_api_calls",
         (false, false) => "none_yet",
     };
-    let live_cache_telemetry = app.streaming.streaming_input_tokens > 0
-        && !app.kv_cache.current_api_usage_recorded
+    let live_cache_telemetry = !app.kv_cache.current_api_usage_recorded
         && (app.streaming.streaming_cache_read_tokens.is_some()
             || app.streaming.streaming_cache_creation_tokens.is_some());
     let live_reported = if live_cache_telemetry {
@@ -1159,22 +1202,25 @@ fn format_cache_stats(app: &App) -> String {
     } else {
         0
     });
-    let read_pct_including_live = cache_ratio_pct(
-        read_including_live,
+    let live_prompt = if live_cache_telemetry {
         crate::tui::info_widget::effective_prompt_tokens(
-            reported_including_live,
-            read_including_live,
-            write_including_live,
-        ),
-    );
-    let write_pct_including_live = cache_ratio_pct(
-        write_including_live,
-        crate::tui::info_widget::effective_prompt_tokens(
-            reported_including_live,
-            read_including_live,
-            write_including_live,
-        ),
-    );
+            &app.kv_cache_provider_name(),
+            live_reported,
+            app.streaming.streaming_cache_read_tokens.unwrap_or(0),
+            app.streaming.streaming_cache_creation_tokens.unwrap_or(0),
+        )
+    } else {
+        0
+    };
+    let prompt_including_live = effective_reported.map(|prompt| prompt.saturating_add(live_prompt));
+    let read_pct_including_live = if read_complete
+        && (!live_cache_telemetry || app.streaming.streaming_cache_read_tokens.is_some())
+    {
+        format_pct(read_including_live, prompt_including_live)
+    } else {
+        INCOMPLETE_CACHE_READ_RATIO.to_string()
+    };
+    let write_pct_including_live = format_pct(write_including_live, prompt_including_live);
     let ttl = if crate::provider::anthropic::is_cache_ttl_1h() {
         "1 hour"
     } else {
@@ -1312,6 +1358,21 @@ fn format_cache_stats(app: &App) -> String {
     lines.push(format!("- is_replay: {}", app.is_replay));
     lines.push(format!("- current_provider: {}", current_provider));
     lines.push(format!("- current_model: {}", current_model));
+    let route_provider = app.kv_cache_provider_name();
+    let route_ttl = crate::tui::cache_ttl_for_provider_model(&route_provider, Some(&current_model));
+    let retention = match route_ttl {
+        Some(seconds) if crate::provider::cache_ttl_is_estimate(&route_provider) => format!(
+            "{} minutes, provider estimate/minimum, not a guaranteed expiry",
+            seconds / 60
+        ),
+        Some(seconds) => format!("{} minutes", seconds / 60),
+        None => "unknown, provider-managed retention".to_string(),
+    };
+    lines.push(format!("- active_route_cache_retention: {}", retention));
+    lines.push(
+        "- anthropic_cache_ttl_setting_scope: Anthropic only, does not configure OpenAI retention"
+            .to_string(),
+    );
     lines.push(format!(
         "- upstream_provider: {}",
         opt_string(app.upstream_provider.as_deref())
@@ -1408,15 +1469,23 @@ fn format_cache_stats(app: &App) -> String {
     ));
     lines.push(format!(
         "- effective_prompt_tokens (input+read+creation for split providers): {}",
-        bold_count(effective_reported)
+        effective_reported
+            .map(bold_count)
+            .unwrap_or_else(|| "unknown (legacy history lacks per-request accounting)".to_string())
     ));
     lines.push(format!(
-        "- cache_read_pct_of_effective_prompt: {}%",
+        "- cache_read_pct_of_effective_prompt: {}",
         read_pct
     ));
     lines.push(format!(
-        "- cache_write_pct_of_effective_prompt: {}%",
+        "- cache_write_pct_of_effective_prompt: {}",
         write_pct
+    ));
+    lines.push(format!(
+        "- effective_prompt_tokens_including_unrecorded_live: {}",
+        prompt_including_live
+            .map(bold_count)
+            .unwrap_or_else(|| "unknown".to_string())
     ));
     lines.push(format!(
         "- total_cache_reported_input_tokens_including_unrecorded_live: {}",
@@ -1431,11 +1500,11 @@ fn format_cache_stats(app: &App) -> String {
         bold_count(write_including_live)
     ));
     lines.push(format!(
-        "- cache_read_pct_of_effective_prompt_including_unrecorded_live: {}%",
+        "- cache_read_pct_of_effective_prompt_including_unrecorded_live: {}",
         read_pct_including_live
     ));
     lines.push(format!(
-        "- cache_write_pct_of_effective_prompt_including_unrecorded_live: {}%",
+        "- cache_write_pct_of_effective_prompt_including_unrecorded_live: {}",
         write_pct_including_live
     ));
     lines.push(format!(

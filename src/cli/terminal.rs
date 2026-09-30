@@ -138,6 +138,16 @@ impl TuiRuntimeGuard {
         Self { state, armed: true }
     }
 
+    /// Modes the App may re-arm on focus regain. Focus reporting is not
+    /// included on purpose: re-emitting it from a focus handler loops on
+    /// terminals that answer `?1004h` with a focus report.
+    pub fn terminal_modes(&self) -> tui::TerminalModeState {
+        tui::TerminalModeState {
+            mouse_capture: self.state.mouse_capture,
+            keyboard_enhanced: self.state.keyboard_enhanced,
+        }
+    }
+
     /// Normal teardown for the simple case: restore the terminal and disarm.
     pub fn finish(mut self, restore_terminal: bool) {
         cleanup_tui_runtime(&self.state, restore_terminal);

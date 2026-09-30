@@ -120,6 +120,34 @@ impl Config {
         {
             self.tools.disable_base_tools = parsed;
         }
+        if let Ok(v) = std::env::var("JCODE_MCP_TOOLS") {
+            match McpToolsMode::parse(&v) {
+                Some(mode) => self.tools.mcp_tools = mode,
+                None => {
+                    warn_once_configured_string_fallback(
+                        "JCODE_MCP_TOOLS",
+                        v.trim(),
+                        McpToolsMode::default().as_str(),
+                        "auto|eager|deferred",
+                    );
+                    self.tools.mcp_tools = McpToolsMode::default();
+                }
+            }
+        }
+        if let Ok(v) = std::env::var("JCODE_MCP_TOOLS_TOKEN_THRESHOLD") {
+            match v.trim().parse::<usize>() {
+                Ok(parsed) => self.tools.mcp_tools_token_threshold = parsed,
+                Err(_) => {
+                    warn_once_configured_string_fallback(
+                        "JCODE_MCP_TOOLS_TOKEN_THRESHOLD",
+                        v.trim(),
+                        &DEFAULT_MCP_TOOLS_TOKEN_THRESHOLD.to_string(),
+                        "a non-negative integer token estimate",
+                    );
+                    self.tools.mcp_tools_token_threshold = DEFAULT_MCP_TOOLS_TOKEN_THRESHOLD;
+                }
+            }
+        }
 
         // ACP adapter
         if let Ok(v) = std::env::var("JCODE_ACP_PROFILE") {

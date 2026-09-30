@@ -27,7 +27,7 @@ Substantial current surfaces include:
 | Sessions and server | `SERVER_ARCHITECTURE.md`, `SERVER_LIFECYCLE_INVARIANTS.md`, `RESUME_BEHAVIOR.md` |
 | Memory | `MEMORY_ARCHITECTURE.md`, `MEMORY_BUDGET.md` |
 | Swarm | `SWARM_ARCHITECTURE.md`, `SWARM_TASK_GRAPH.md` |
-| Tools and hooks | `AGENT_TOOL_INTEGRATION.md`, `HOOKS.md`, `SPAWN_HOOK.md` |
+| Tools and hooks | `AGENT_TOOL_INTEGRATION.md`, `HOOKS.md`, `SPAWN_HOOK.md`, [`MCP_TOOLS.md`](./MCP_TOOLS.md) |
 | Telemetry and security | `../TELEMETRY.md`, `SECURITY_DEPENDENCIES.md`, `security/` |
 | Platform | `WINDOWS.md`, `WRAPPERS.md`, `NIX.md` |
 

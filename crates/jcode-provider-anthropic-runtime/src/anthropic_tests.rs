@@ -1142,18 +1142,25 @@ fn test_cache_breakpoint_finds_text_in_mixed_content() {
     );
 }
 
-#[test]
-fn test_system_param_split_oauth() {
+#[tokio::test]
+async fn test_system_param_split_oauth() {
     let static_content = "This is static content";
     let dynamic_content = "This is dynamic content";
 
-    let result = build_system_param_split(static_content, dynamic_content, true);
+    let result = build_system_param_split(static_content, dynamic_content, true).await;
 
     if let Some(ApiSystem::Blocks(blocks)) = result {
         // Should have 4 blocks: identity, notice, static (cached), dynamic (not cached)
         assert_eq!(blocks.len(), 4);
 
-        // Block 0: identity (no cache)
+        // Block 0: billing attribution uses the shared detected identity.
+        assert_eq!(
+            blocks[0].text,
+            format!(
+                "x-anthropic-billing-header: {}",
+                claude_cli_identity().await.billing_header
+            )
+        );
         assert!(blocks[0].cache_control.is_none());
 
         // Block 1: notice (no cache)
@@ -1171,12 +1178,12 @@ fn test_system_param_split_oauth() {
     }
 }
 
-#[test]
-fn test_system_param_split_non_oauth() {
+#[tokio::test]
+async fn test_system_param_split_non_oauth() {
     let static_content = "This is static content";
     let dynamic_content = "This is dynamic content";
 
-    let result = build_system_param_split(static_content, dynamic_content, false);
+    let result = build_system_param_split(static_content, dynamic_content, false).await;
 
     if let Some(ApiSystem::Blocks(blocks)) = result {
         // Should have 2 blocks: static (cached), dynamic (not cached)

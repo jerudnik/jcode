@@ -114,6 +114,8 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_KV_CACHE_MISS_NOTICES",
     "JCODE_LATEX_RENDERING",
     "JCODE_MARKDOWN_SPACING",
+    "JCODE_MCP_TOOLS",
+    "JCODE_MCP_TOOLS_TOKEN_THRESHOLD",
     "JCODE_MEMORY_EMBEDDING_API_KEY_ENV",
     "JCODE_MEMORY_EMBEDDING_BACKEND",
     "JCODE_MEMORY_EMBEDDING_BASE_URL",
@@ -293,7 +295,7 @@ pub fn config() -> &'static Config {
             return cache.config;
         }
 
-        let fingerprint = ConfigCacheFingerprint::current();
+        let mut fingerprint = ConfigCacheFingerprint::current();
         cache.last_checked = now;
         if cache.force_reload || cache.fingerprint != fingerprint {
             reload_reason = Some(describe_config_reload(
@@ -301,13 +303,29 @@ pub fn config() -> &'static Config {
                 &cache.fingerprint,
                 &fingerprint,
             ));
-            cache.config = leak_config(Config::load());
+            // Load until the fingerprint is stable across a load. The stored
+            // fingerprint must describe the environment the stored config was
+            // read from; otherwise a config loaded while another thread was
+            // changing env vars (test `EnvVarGuard`s hand over this way) gets
+            // paired with the post-change fingerprint and is served as current
+            // until the env changes again. Loading applies env overrides that
+            // can themselves set env vars (e.g. copilot_premium propagates
+            // config -> JCODE_COPILOT_PREMIUM), so one extra pass is the
+            // normal cost of such a config and the bound keeps a busy
+            // environment from looping.
+            let mut config = leak_config(Config::load());
+            let mut after = ConfigCacheFingerprint::current();
+            for _ in 0..2 {
+                if after == fingerprint {
+                    break;
+                }
+                fingerprint = after;
+                config = leak_config(Config::load());
+                after = ConfigCacheFingerprint::current();
+            }
+            cache.config = config;
             CONFIG_CACHE_GENERATION.fetch_add(1, Ordering::Release);
-            // Loading applies env overrides that can themselves set env vars
-            // (e.g. copilot_premium propagates config -> JCODE_COPILOT_PREMIUM).
-            // Re-fingerprint after the load so those self-inflicted env changes
-            // don't trigger a guaranteed second reload on the next check.
-            cache.fingerprint = ConfigCacheFingerprint::current();
+            cache.fingerprint = after;
             cache.force_reload = false;
         }
         cache.config
@@ -678,8 +696,38 @@ impl AcpConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum McpToolsMode {
+    #[default]
+    Auto,
+    Eager,
+    Deferred,
+}
+
+impl McpToolsMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "eager" => Some(Self::Eager),
+            "deferred" => Some(Self::Deferred),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Eager => "eager",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
+pub const DEFAULT_MCP_TOOLS_TOKEN_THRESHOLD: usize = 8000;
+
 /// Controls which tools are sent to the model.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolConfig {
     /// Tool profile: "full" (default), "acp", "minimal"/"lite", or "none".
@@ -691,6 +739,23 @@ pub struct ToolConfig {
     pub disabled: Vec<String>,
     /// Disable all built-in tools unless `enabled` is provided.
     pub disable_base_tools: bool,
+    /// Whether MCP schemas are advertised eagerly or discovered on demand.
+    pub mcp_tools: McpToolsMode,
+    /// Eager prompt-token estimate above which Auto defers MCP schemas.
+    pub mcp_tools_token_threshold: usize,
+}
+
+impl Default for ToolConfig {
+    fn default() -> Self {
+        Self {
+            profile: String::new(),
+            enabled: Vec::new(),
+            disabled: Vec::new(),
+            disable_base_tools: false,
+            mcp_tools: McpToolsMode::default(),
+            mcp_tools_token_threshold: DEFAULT_MCP_TOOLS_TOKEN_THRESHOLD,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

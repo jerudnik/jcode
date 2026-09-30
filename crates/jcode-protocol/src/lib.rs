@@ -78,8 +78,30 @@ pub struct SessionActivitySnapshot {
     pub current_tool_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PricingBucketTotals {
+    pub provider: String,
+    pub model: String,
+    pub messages_with_token_usage: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_input_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TokenUsageTotals {
+    /// None if any usage record lacks its original provider or model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing_buckets: Option<Vec<PricingBucketTotals>>,
+    /// False when a contributing cache report omitted its read count.
+    /// Old servers omitted this field and retain their previous display behavior.
+    #[serde(default = "default_cache_read_complete")]
+    pub cache_read_complete: bool,
+    /// Sum of full prompt sizes for requests with cache telemetry. None means
+    /// legacy records lack per-request accounting, not that the total is zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_prompt_tokens: Option<u64>,
     pub messages_with_token_usage: usize,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -89,6 +111,26 @@ pub struct TokenUsageTotals {
     pub cache_reported_input_tokens: u64,
     pub cache_read_input_tokens: u64,
     pub cache_creation_input_tokens: u64,
+}
+
+fn default_cache_read_complete() -> bool {
+    true
+}
+
+impl Default for TokenUsageTotals {
+    fn default() -> Self {
+        Self {
+            pricing_buckets: None,
+            cache_read_complete: true,
+            cache_prompt_tokens: None,
+            messages_with_token_usage: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_reported_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -857,6 +899,7 @@ impl Request {
         matches!(
             self,
             Request::Ping { .. }
+                | Request::NotifySession { .. }
                 | Request::CommMessage { .. }
                 | Request::CommList { .. }
                 | Request::CommProposePlan { .. }

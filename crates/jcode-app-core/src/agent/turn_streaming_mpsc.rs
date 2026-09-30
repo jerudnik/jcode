@@ -820,9 +820,11 @@ impl Agent {
                         let _ = event_tx.send(ServerEvent::MessageEnd);
                     }
                     StreamEvent::SessionId(sid) => {
+                        // This is a provider resume handle, not the local session ID.
+                        // Forwarding it as ServerEvent::SessionId would rebind the
+                        // client's reconnect target away from its stored transcript.
                         self.provider_session_id = Some(sid.clone());
-                        self.session.provider_session_id = Some(sid.clone());
-                        let _ = event_tx.send(ServerEvent::SessionId { session_id: sid });
+                        self.session.provider_session_id = Some(sid);
                     }
                     StreamEvent::OpenAIReasoning {
                         id,
@@ -1045,10 +1047,13 @@ impl Agent {
 
                 let input = usage_input.unwrap_or(0);
                 let output = usage_output.unwrap_or(0);
-                let total = input
-                    .saturating_add(output)
-                    .saturating_add(usage_cache_read.unwrap_or(0))
-                    .saturating_add(usage_cache_creation.unwrap_or(0));
+                let total = self
+                    .effective_context_tokens_from_usage(
+                        input,
+                        usage_cache_read,
+                        usage_cache_creation,
+                    )
+                    .saturating_add(output);
                 crate::session_metrics::record_token_usage(&self.session.id, total, output);
             }
 
@@ -1157,6 +1162,14 @@ impl Agent {
             let assistant_message_id = if !content_blocks.is_empty() {
                 crate::telemetry::record_assistant_response();
                 let token_usage = Some(crate::session::StoredTokenUsage {
+                    provider: Some(self.provider.name().to_string()),
+                    model: Some(self.provider.model()),
+                    prompt_tokens: crate::compaction::accounted_prompt_tokens_from_usage(
+                        self.provider.name(),
+                        self.last_usage.input_tokens,
+                        self.last_usage.cache_read_input_tokens,
+                        self.last_usage.cache_creation_input_tokens,
+                    ),
                     input_tokens: self.last_usage.input_tokens,
                     output_tokens: self.last_usage.output_tokens,
                     cache_read_input_tokens: self.last_usage.cache_read_input_tokens,
@@ -1451,38 +1464,53 @@ impl Agent {
                 let allow_reload_handoff = tc.name == "bash";
                 let tool_result;
                 let mut tool_handle = tool_handle;
-                tokio::select! {
-                    biased;
-                    res = &mut tool_handle => {
-                        tool_result = Some(match res {
-                            Ok(r) => r,
-                            Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
-                        });
-                    }
-                    _ = async {
-                        tokio::select! {
-                            _ = bg_signal.notified() => {}
-                            _ = shutdown_signal.notified() => {}
-                        }
-                    } => {
-                        if self.is_graceful_shutdown() && allow_reload_handoff {
-                            tool_result = match tokio::time::timeout(
-                                Duration::from_millis(750),
-                                &mut tool_handle,
-                            )
-                            .await
-                            {
-                                Ok(res) => Some(match res {
-                                    Ok(r) => r,
-                                    Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
-                                }),
-                                Err(_) => None,
-                            };
-                        } else {
-                            tool_result = None;
-                        }
+                // A long-running tool (bg wait, a slow build, a network fetch)
+                // emits no server events, so an attached client cannot tell a
+                // working tool from a dead connection and its stall guard
+                // cancels a healthy turn at the idle budget. Prove liveness
+                // with periodic keepalives for as long as the tool runs.
+                let mut tool_keepalive = stream_keepalive_ticker();
+                let interrupt = async {
+                    tokio::select! {
+                        _ = bg_signal.notified() => {}
+                        _ = shutdown_signal.notified() => {}
                     }
                 };
+                tokio::pin!(interrupt);
+                loop {
+                    tokio::select! {
+                        biased;
+                        res = &mut tool_handle => {
+                            tool_result = Some(match res {
+                                Ok(r) => r,
+                                Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
+                            });
+                            break;
+                        }
+                        _ = &mut interrupt => {
+                            if self.is_graceful_shutdown() && allow_reload_handoff {
+                                tool_result = match tokio::time::timeout(
+                                    Duration::from_millis(750),
+                                    &mut tool_handle,
+                                )
+                                .await
+                                {
+                                    Ok(res) => Some(match res {
+                                        Ok(r) => r,
+                                        Err(e) => Err(anyhow::anyhow!("Tool task panicked: {}", e)),
+                                    }),
+                                    Err(_) => None,
+                                };
+                            } else {
+                                tool_result = None;
+                            }
+                            break;
+                        }
+                        _ = tool_keepalive.tick() => {
+                            send_stream_keepalive_mpsc(&event_tx);
+                        }
+                    }
+                }
 
                 self.unlock_tools_if_needed(&tc.name);
                 let tool_elapsed = tool_start.elapsed();

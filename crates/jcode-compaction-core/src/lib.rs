@@ -367,6 +367,53 @@ pub fn estimate_compaction_tokens(
     estimate_compaction_tokens_from_chars(summary_chars + active_message_chars, token_budget)
 }
 
+/// How a provider's cache counters relate to its reported input tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheAccountingMode {
+    Subset,
+    Split,
+    Unknown,
+}
+
+pub fn cache_accounting_mode(provider_name: &str) -> CacheAccountingMode {
+    let provider = provider_name.trim().to_ascii_lowercase();
+    if provider.contains("anthropic") || provider.contains("claude") || provider == "bedrock" {
+        // Bedrock uses Converse, whose inputTokens excludes cache reads/writes.
+        CacheAccountingMode::Split
+    } else if provider.contains("openai")
+        || provider.contains("codex")
+        || matches!(
+            provider.as_str(),
+            "openrouter" | "gemini" | "antigravity" | "copilot" | "github copilot"
+        )
+    {
+        CacheAccountingMode::Subset
+    } else {
+        CacheAccountingMode::Unknown
+    }
+}
+
+/// Prompt count suitable for persisted accounting, without budget-only guesses.
+pub fn accounted_prompt_tokens_from_usage(
+    provider_name: &str,
+    input_tokens: u64,
+    cache_read_input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+) -> Option<u64> {
+    if cache_accounting_mode(provider_name) == CacheAccountingMode::Unknown
+        && (cache_read_input_tokens.is_some_and(|tokens| tokens > 0)
+            || cache_creation_input_tokens.is_some_and(|tokens| tokens > 0))
+    {
+        return None;
+    }
+    Some(effective_context_tokens_from_usage(
+        provider_name,
+        input_tokens,
+        cache_read_input_tokens,
+        cache_creation_input_tokens,
+    ))
+}
+
 /// Best-effort context size (tokens) from a provider usage report.
 ///
 /// Providers disagree on what `input_tokens` means:
@@ -377,27 +424,22 @@ pub fn estimate_compaction_tokens(
 ///   already includes cached tokens; `cached_tokens` is a subset and must NOT
 ///   be added again.
 ///
-/// This is the single source of truth for that heuristic. Both the sidebar
-/// context figure and the compaction manager's observed-token feed must use it
-/// so the two never disagree (issue #441). When in doubt, avoid over-counting
-/// unless there is strong evidence of split accounting.
+/// The sidebar and compaction budget share this calculation. Unknown providers
+/// retain the legacy counter-shape heuristic for budgeting only, not persisted
+/// accounting. Over-counting triggers earlier compaction rather than overflow.
 pub fn effective_context_tokens_from_usage(
     provider_name: &str,
     input_tokens: u64,
     cache_read_input_tokens: Option<u64>,
     cache_creation_input_tokens: Option<u64>,
 ) -> u64 {
-    if input_tokens == 0 {
-        return 0;
-    }
     let cache_read = cache_read_input_tokens.unwrap_or(0);
     let cache_creation = cache_creation_input_tokens.unwrap_or(0);
-    let provider_name = provider_name.to_lowercase();
-
-    let split_cache_accounting = provider_name.contains("anthropic")
-        || provider_name.contains("claude")
-        || cache_creation > 0
-        || cache_read > input_tokens;
+    let split_cache_accounting = match cache_accounting_mode(provider_name) {
+        CacheAccountingMode::Split => true,
+        CacheAccountingMode::Subset => false,
+        CacheAccountingMode::Unknown => cache_creation > 0 || cache_read > input_tokens,
+    };
 
     if split_cache_accounting {
         input_tokens
@@ -761,6 +803,10 @@ mod tests {
             effective_context_tokens_from_usage("openai", 400_000, Some(390_000), None),
             400_000
         );
+        assert_eq!(
+            effective_context_tokens_from_usage("openai-api", 10_000, Some(6_000), Some(2_000)),
+            10_000
+        );
         // No cache info at all: pass through.
         assert_eq!(
             effective_context_tokens_from_usage("opencode-go", 396_000, None, None),
@@ -769,13 +815,51 @@ mod tests {
     }
 
     #[test]
-    fn effective_context_infers_split_accounting_from_counter_shape() {
+    fn cache_accounting_mode_classifies_documented_providers() {
+        for (provider, mode) in [
+            ("GitHub Copilot", CacheAccountingMode::Subset),
+            ("bedrock", CacheAccountingMode::Split),
+            ("custom-profile", CacheAccountingMode::Unknown),
+        ] {
+            assert_eq!(cache_accounting_mode(provider), mode, "{provider}");
+        }
+    }
+
+    #[test]
+    fn effective_context_openrouter_gemini_writes_stay_subset() {
+        for provider in ["openrouter", "gemini", "antigravity"] {
+            assert_eq!(
+                effective_context_tokens_from_usage(provider, 10_000, Some(6_000), Some(2_000)),
+                10_000,
+                "{provider} cache writes must not increase the inclusive prompt"
+            );
+        }
+    }
+
+    #[test]
+    fn accounted_prompt_does_not_persist_unknown_cache_heuristics() {
+        assert_eq!(
+            accounted_prompt_tokens_from_usage("custom", 10_000, Some(6_000), Some(2_000)),
+            None
+        );
+        assert_eq!(
+            accounted_prompt_tokens_from_usage("custom", 10_000, Some(0), Some(0)),
+            Some(10_000)
+        );
+        assert_eq!(
+            accounted_prompt_tokens_from_usage("custom", 10_000, None, None),
+            Some(10_000)
+        );
+    }
+
+    #[test]
+    fn effective_context_unknown_provider_keeps_legacy_heuristic() {
         // cache_read > input implies input can't already contain it.
         assert_eq!(
             effective_context_tokens_from_usage("unknown", 10_000, Some(500_000), None),
             510_000
         );
-        // Any cache_creation implies split accounting.
+        // The legacy budget fallback assumes split accounting for cache writes.
         assert_eq!(
             effective_context_tokens_from_usage("unknown", 10_000, Some(2_000), Some(1_000)),
             13_000
@@ -783,10 +867,10 @@ mod tests {
     }
 
     #[test]
-    fn effective_context_zero_input_reports_zero() {
+    fn effective_context_zero_uncached_input_preserves_cached_prompt() {
         assert_eq!(
             effective_context_tokens_from_usage("anthropic", 0, Some(300_000), Some(5_000)),
-            0
+            305_000
         );
     }
 

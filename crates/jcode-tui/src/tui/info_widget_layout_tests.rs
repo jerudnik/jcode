@@ -114,7 +114,9 @@ fn contended_data() -> InfoWidgetData {
             ..Default::default()
         }),
         cache_hit_info: Some(CacheHitInfo {
+            read_known: true,
             reported_input_tokens: 2_000,
+            prompt_tokens: Some(2_000),
             read_tokens: 1_500,
             ..Default::default()
         }),

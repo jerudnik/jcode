@@ -171,7 +171,7 @@ fn budget_pause_message(violation: &BudgetViolation) -> String {
         GraphBudget::WallClock => "wall clock",
     };
     format!(
-        "Task graph paused: hard {budget} budget exceeded while {} (limit {}, observed {}). The scheduler rejected the mutation. Inspect the graph and start a smaller replacement plan; ordinary unfreeze cannot bypass an exhausted budget.",
+        "Task graph paused: hard {budget} budget exceeded while {} (limit {}, observed {}). The scheduler rejected the mutation. Inspect the graph and start a smaller replacement plan with task_graph replace_existing=true; ordinary unfreeze cannot bypass an exhausted budget.",
         violation.operation, violation.limit, violation.observed
     )
 }
@@ -537,11 +537,15 @@ pub(super) async fn handle_comm_seed_graph(
         let plan = plans
             .entry(swarm_id.clone())
             .or_insert_with(VersionedPlan::new);
-        if plan.frozen {
+        // A freeze blocks growth of the existing graph. An explicit
+        // replacement with nothing in flight is how a coordinator recovers
+        // from a paused (budget-exhausted) graph, which unfreeze refuses by
+        // design, so it must not be blocked by the same flag.
+        if plan.frozen && !replace_existing {
             err(
                 client_event_tx,
                 id,
-                "Seed rejected: this task graph is frozen. Ask the coordinator to call `swarm` with `action:\"unfreeze\"`, then retry seeding. Existing assigned work may still be completed while growth is frozen."
+                "Seed rejected: this task graph is frozen. Ask the coordinator to call `swarm` with `action:\"unfreeze\"`, or retry task_graph with replace_existing=true to start a fresh graph. Existing assigned work may still be completed while growth is frozen."
                     .to_string(),
             );
             return;
@@ -973,7 +977,7 @@ pub(super) async fn handle_comm_graph_freeze(
                     client_event_tx,
                     id,
                     ledger.pause.as_ref().map(budget_pause_message).unwrap_or_else(|| {
-                        "Task graph remains paused because a hard budget was exceeded. Start a smaller replacement plan; ordinary unfreeze cannot bypass the exhausted budget."
+                        "Task graph remains paused because a hard budget was exceeded. Start a smaller replacement plan with task_graph replace_existing=true; ordinary unfreeze cannot bypass the exhausted budget."
                             .to_string()
                     }),
                 );
@@ -1031,6 +1035,8 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::time::Instant;
 
+    // The deprecated `status` mirror must still be populated by struct literals.
+    #[allow(deprecated)]
     fn member(session_id: &str, swarm_id: &str, role: &str) -> SwarmMember {
         let (event_tx, _) = mpsc::unbounded_channel();
         SwarmMember {

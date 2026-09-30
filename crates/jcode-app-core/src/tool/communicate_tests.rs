@@ -1266,12 +1266,14 @@ fn format_swarm_fleet_renders_live_rollup() {
         },
         needs_operator_input: true,
         tokens: Some(TokenUsageTotals {
+            cache_prompt_tokens: None,
             messages_with_token_usage: 2,
             input_tokens: 100,
             output_tokens: 40,
             cache_reported_input_tokens: 0,
             cache_read_input_tokens: 0,
             cache_creation_input_tokens: 0,
+            ..Default::default()
         }),
         last_activity_age_secs: Some(7),
         control_log_offset: Some(12),

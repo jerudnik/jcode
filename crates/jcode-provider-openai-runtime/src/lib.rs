@@ -159,6 +159,8 @@ impl OpenAITransportMode {
 #[derive(Debug)]
 enum OpenAIStreamFailure {
     FallbackToHttps(anyhow::Error),
+    /// The API error was forwarded to the consumer and must not be retried.
+    TerminalError,
     Other(anyhow::Error),
 }
 
@@ -265,12 +267,16 @@ fn openai_request_model(request: &Value) -> String {
 struct PersistentWsState {
     ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     last_response_id: String,
+    model: String,
     connected_at: Instant,
     last_activity_at: Instant,
     /// Number of messages sent in this conversation chain
     message_count: usize,
     /// Number of items we sent in the last full request (for detecting conversation changes)
     last_input_item_count: usize,
+    /// Exact canonical input behind the cursor. Growing histories can still
+    /// rewrite earlier items, especially when late tool results are normalized.
+    last_input: Vec<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +521,11 @@ async fn ensure_persistent_ws_is_healthy(state: &mut PersistentWsState) -> Resul
 pub struct OpenAIProvider {
     client: Client,
     credentials: Arc<RwLock<CodexCredentials>>,
+    /// Last tool-name limit derived from the credential mode (`max_len`), or 0
+    /// before the first read. Lets `capabilities()` stay stable while a
+    /// credential refresh briefly holds the write lock, so the advertised tool
+    /// set does not flip between turns.
+    last_tool_name_max_len: Arc<std::sync::atomic::AtomicUsize>,
     credential_mode: Arc<RwLock<OpenAICredentialMode>>,
     model: Arc<RwLock<String>>,
     prompt_cache_key: Option<String>,
@@ -532,16 +543,11 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
-    pub(crate) fn supports_extended_prompt_cache_retention(model_id: &str) -> bool {
-        jcode_base::provider::openai::supports_extended_prompt_cache_retention(model_id)
-    }
-
     fn effective_prompt_cache_retention<'a>(
         model_id: &str,
         configured: Option<&'a str>,
     ) -> Option<&'a str> {
-        configured
-            .or_else(|| Self::supports_extended_prompt_cache_retention(model_id).then_some("24h"))
+        jcode_base::provider::openai::effective_prompt_cache_retention(model_id, configured)
     }
 
     pub fn new(credentials: CodexCredentials) -> Self {
@@ -572,21 +578,17 @@ impl OpenAIProvider {
             .ok()
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
-        let prompt_cache_retention = std::env::var("JCODE_OPENAI_PROMPT_CACHE_RETENTION")
-            .ok()
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty());
-        let prompt_cache_retention = match prompt_cache_retention.as_deref() {
-            Some("in_memory") | Some("24h") => prompt_cache_retention,
-            Some(other) => {
-                jcode_base::logging::info(&format!(
-                    "Warning: Unsupported JCODE_OPENAI_PROMPT_CACHE_RETENTION '{}'; expected 'in_memory' or '24h'",
-                    other
-                ));
-                None
-            }
-            None => None,
-        };
+        let prompt_cache_retention =
+            jcode_base::provider::openai::prompt_cache_retention_from_env();
+        if prompt_cache_retention.is_none()
+            && let Ok(raw) = std::env::var("JCODE_OPENAI_PROMPT_CACHE_RETENTION")
+            && !raw.trim().is_empty()
+        {
+            jcode_base::logging::warn(&format!(
+                "Unsupported JCODE_OPENAI_PROMPT_CACHE_RETENTION '{}'; expected 'in_memory' or '24h'",
+                raw.trim()
+            ));
+        }
         let max_output_tokens = Self::load_max_output_tokens();
         let reasoning_effort = jcode_base::config::config()
             .provider
@@ -618,6 +620,7 @@ impl OpenAIProvider {
         Self {
             client: jcode_provider_core::shared_http_client(),
             credentials: Arc::new(RwLock::new(credentials)),
+            last_tool_name_max_len: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             credential_mode: Arc::new(RwLock::new(credential_mode)),
             model: Arc::new(RwLock::new(model)),
             prompt_cache_key,

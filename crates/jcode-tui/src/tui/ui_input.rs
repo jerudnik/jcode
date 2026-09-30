@@ -1557,6 +1557,9 @@ mod tests {
 /// Build the spans for the notification line. Returns empty vec when there is nothing to show.
 /// This is the single source of truth for notification content - both the layout height
 /// calculation (via `has_notification`) and the renderer call this.
+pub(super) const CACHE_RETENTION_UNCERTAIN: &str = "⏳ cache retention uncertain";
+pub(super) const CACHE_COLD: &str = "🧊 cache cold";
+
 pub(super) fn build_notification_spans(app: &dyn TuiState) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
@@ -1704,7 +1707,11 @@ pub(super) fn build_notification_spans(app: &dyn TuiState) -> Vec<Span<'static>>
                     .unwrap_or_default();
                 push_sep(&mut spans);
                 spans.push(Span::styled(
-                    format!("🧊 cache cold{}", tokens_str),
+                    if cache_info.is_estimate {
+                        format!("{CACHE_RETENTION_UNCERTAIN}{tokens_str}")
+                    } else {
+                        format!("{CACHE_COLD}{tokens_str}")
+                    },
                     Style::default().fg(rgb(140, 180, 255)),
                 ));
                 // Small gray "how long ago it went cold" hint, e.g. `1h 1m`.
@@ -1736,7 +1743,12 @@ pub(super) fn build_notification_spans(app: &dyn TuiState) -> Vec<Span<'static>>
                 };
                 push_sep(&mut spans);
                 spans.push(Span::styled(
-                    format!("⏳ cache {}{}", time_str, tokens_str),
+                    format!(
+                        "⏳ cache {}{}{}",
+                        if cache_info.is_estimate { "~" } else { "" },
+                        time_str,
+                        tokens_str
+                    ),
                     Style::default().fg(rgb(255, 193, 7)),
                 ));
             }
