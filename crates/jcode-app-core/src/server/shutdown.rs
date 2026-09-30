@@ -1206,6 +1206,79 @@ where
     }
 }
 
+async fn disconnect_and_reap_mcp_pool(pool: Arc<crate::mcp::SharedMcpPool>, context: &str) {
+    if tokio::time::timeout(MCP_POOL_DISCONNECT_BUDGET, pool.disconnect_all())
+        .await
+        .is_err()
+    {
+        crate::logging::warn(&format!(
+            "{context}: MCP pool disconnect exceeded 25ms; reaping tracked PIDs directly."
+        ));
+    }
+    let report = pool.reap_tracked_children(MCP_CHILD_REAP_GRACE).await;
+    let remaining = pool.tracked_children();
+    if !report.unreaped.is_empty() {
+        crate::logging::warn(&format!(
+            "{context}: MCP SIGKILL deadline expired for PID(s) {:?}",
+            report.unreaped
+        ));
+    }
+    if !remaining.is_empty() {
+        crate::logging::warn(&format!(
+            "{context}: MCP tracker retained children after reap: {:?}",
+            remaining
+        ));
+    } else if report.initial > 0 {
+        crate::logging::info(&format!(
+            "{context}: reaped {} tracked MCP child(ren) (TERM={}, KILL={}).",
+            report.initial,
+            report.term_signaled.len(),
+            report.kill_signaled.len()
+        ));
+    }
+}
+
+/// Close session-owned clients and reap every tracked MCP child before an
+/// exec-based reload discards this process image and its in-memory tracker.
+pub(crate) async fn cleanup_mcp_for_reload() {
+    let pool = {
+        let state = lock_poisoned_ok(&coordinator().state);
+        state
+            .config
+            .as_ref()
+            .and_then(|config| config.mcp_pool.as_ref())
+            .and_then(|cell| cell.get())
+            .cloned()
+    };
+    let Some(pool) = pool else {
+        return;
+    };
+
+    let total_budget = ExitReason::Reload.drain_budget();
+    let started = Instant::now();
+    let manager_budget = total_budget.saturating_sub(CLEANUP_STEP_BUDGET);
+    match tokio::time::timeout(manager_budget, pool.disconnect_session_managers()).await {
+        Ok(count) if count > 0 => crate::logging::info(&format!(
+            "Reload: disconnected MCP clients for {count} session manager(s)."
+        )),
+        Ok(_) => {}
+        Err(_) => crate::logging::warn(
+            "Reload: session MCP disconnect exceeded its budget; reaping tracked PIDs directly.",
+        ),
+    }
+
+    let remaining = total_budget.saturating_sub(started.elapsed());
+    if tokio::time::timeout(
+        remaining,
+        disconnect_and_reap_mcp_pool(Arc::clone(&pool), "Reload"),
+    )
+    .await
+    .is_err()
+    {
+        crate::logging::warn("Reload: MCP cleanup exceeded the reload drain budget.");
+    }
+}
+
 async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
     // F03 forced-exit fixture injection: a deliberate cleanup hang lets the
     // fixture prove the coordinator-armed watchdog fires (exit 70, durable
@@ -1249,35 +1322,7 @@ async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
     {
         let pool = Arc::clone(pool);
         bounded_step("disconnect-mcp-pool", async move {
-            if tokio::time::timeout(MCP_POOL_DISCONNECT_BUDGET, pool.disconnect_all())
-                .await
-                .is_err()
-            {
-                crate::logging::warn(
-                    "Shutdown: MCP pool disconnect exceeded 25ms; reaping tracked PIDs directly.",
-                );
-            }
-            let report = pool.reap_tracked_children(MCP_CHILD_REAP_GRACE).await;
-            let remaining = pool.tracked_children();
-            if !report.unreaped.is_empty() {
-                crate::logging::warn(&format!(
-                    "Shutdown: MCP SIGKILL deadline expired for PID(s) {:?}",
-                    report.unreaped
-                ));
-            }
-            if !remaining.is_empty() {
-                crate::logging::warn(&format!(
-                    "Shutdown: MCP tracker retained children after reap: {:?}",
-                    remaining
-                ));
-            } else if report.initial > 0 {
-                crate::logging::info(&format!(
-                    "Shutdown: reaped {} tracked MCP child(ren) (TERM={}, KILL={}).",
-                    report.initial,
-                    report.term_signaled.len(),
-                    report.kill_signaled.len()
-                ));
-            }
+            disconnect_and_reap_mcp_pool(pool, "Shutdown").await;
         })
         .await;
     }

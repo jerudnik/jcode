@@ -74,6 +74,8 @@ for round in $(seq 1 "$ROUNDS"); do
         "${CARGO[@]}" test -p jcode-app-core --lib server::reload_state
     run_step "reload recovery suite (R01)" \
         "${CARGO[@]}" test -p jcode-app-core --lib server::reload_recovery
+    run_step "reload MCP child reap (F14)" \
+        bash scripts/reload_mcp_reap_fixture.sh "$JCODE_BIN"
 
     # -- cancel ----------------------------------------------------------
     # Turn/stream cancellation invariants (R12 fixtures) + interrupt paths.
